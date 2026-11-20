@@ -62,6 +62,8 @@ export interface StoredScenario extends AwardScenario {
 
 export interface Comparison {
 	readonly request: BidRequest;
+	/** Production's reference for the request. */
+	readonly code: string;
 	readonly status: RequestRow['status'];
 	/** Every submitted and withdrawn bid, oldest first. */
 	readonly versions: readonly BidVersion[];
@@ -207,7 +209,7 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 				rateOf.get(b.id) ?? null
 			)
 		);
-		return { request, status: row.status, versions, bids, rates, scenarios, awarded: awards.length > 0 };
+		return { request, code: row.code, status: row.status, versions, bids, rates, scenarios, awarded: awards.length > 0 };
 	}
 
 	/** Set the rate of a bid to the base currency with its date, or clear it with null. */

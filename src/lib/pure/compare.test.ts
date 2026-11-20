@@ -225,6 +225,11 @@ describe('compareBids, rows', () => {
 		expect(grid.rows[3].lowest).toBeNull();
 	});
 
+	it('marks an omitted asset as it marks an omitted shot', () => {
+		const out = compareBids(request({ assets: [asset('hero', { omitted: true }), asset('prop')] }), []);
+		expect(out.rows.map((r) => r.omitted)).toEqual([true, false]);
+	});
+
 	it('carries the sequence, the episode and the description', () => {
 		const seq = compareBids(request({ shots: [shot('sh010', { sequence: 'SEQ1', episode: 'EP1', description: 'Truck' })] }), []);
 		expect(seq.rows[0]).toMatchObject({ sequence: 'SEQ1', episode: 'EP1', description: 'Truck' });

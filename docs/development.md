@@ -82,7 +82,9 @@ Who may touch what:
 Frozen in the database, by triggers: an issued request's items, code, round, currency and header
 (a change is a new round), and a submitted bid with its lines (a change is a new version; it may
 only be withdrawn). Writes that must land whole are SQL functions: `sg_save_request_items`,
-`sg_save_bid_draft`, `sg_save_scenario`.
+`sg_save_bid_draft`, `sg_save_scenario`, `sg_save_award_scenario`, `sg_set_bid_rate`,
+`sg_choose_scenario`. Production's rate per bid lives in `bid_rates`; a trigger refuses it on a
+draft or a base currency bid and locks it once the request has an award or is closed.
 
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
@@ -93,7 +95,12 @@ The browser reaches the data layer through `src/routes/api/production/<action>`:
 `save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`. Each is a POST whose body carries
 `claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
 `production.ts` before anything else. `src/lib/pure/wire.ts` checks the rest of the body and lets
-through only the model's header and item fields. The builder's drafts go through
+through only the model's header and item fields. The comparison has its own: `compare` (the
+request, every submitted and withdrawn bid, the latest submitted version per vendor shown unless
+`bids` names others, the rates, the scenarios), `rate`, `scenarios`, `scenario-save`,
+`scenario-rename`, `scenario-delete`, `scenario-choose`, over `src/lib/server/comparison.ts` with
+bodies checked by `src/lib/pure/compare-wire.ts`. Long reads page past PostgREST's 1000 row cap.
+The page is `/bids/[id]/compare`. The builder's drafts go through
 `src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
 `reissue`; the vendor pages live under `/v/`.
 
@@ -164,6 +171,9 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
   (`vendor.db.test.ts`);
 - every vendor endpoint answers one vendor nothing of the other, refuses a missing or bad link,
   and holds back a guesser (`vendor-endpoints.db.test.ts`);
+- production reads submitted bids only, the latest version by default; its rate applies until the
+  award and is locked by the database after; scenarios save, rename, delete and one is chosen; a
+  tenant reaches none of another's (`comparison.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.

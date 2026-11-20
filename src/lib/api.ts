@@ -51,7 +51,7 @@ export class ApiError extends Error {
 	}
 }
 
-async function call<T>(action: string, projectId: number, body: Record<string, unknown> = {}): Promise<T> {
+export async function call<T>(action: string, projectId: number, body: Record<string, unknown> = {}): Promise<T> {
 	const claim = await productionClaim(projectId);
 	let res: Response;
 	try {

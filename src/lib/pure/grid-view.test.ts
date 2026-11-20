@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compareBids } from './compare';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
-import { groupRows, matchesFilter, percentToBp, sortRows, viewGrid, type ViewOptions } from './grid-view';
+import { groupRows, matchesFilter, offsetsOf, percentToBp, scrollToShow, sortRows, viewGrid, visibleRange, type ViewOptions } from './grid-view';
 import { money, rate } from './money';
 
 const usd = (minor: number) => money(minor, 'USD');
@@ -124,6 +124,12 @@ describe('matchesFilter', () => {
 		expect(matchesFilter(noRate.rows[0], { only: 'unconverted' })).toBe(true);
 	});
 
+	it('keeps only the rows named by key', () => {
+		expect(matchesFilter(row('A010'), { keys: new Set(['shot:a010']) })).toBe(true);
+		expect(matchesFilter(row('B010'), { keys: new Set(['shot:a010']) })).toBe(false);
+		expect(matchesFilter(row('B010'), { keys: null })).toBe(true);
+	});
+
 	it('keeps rows where one vendor is lowest, and hides omitted ones', () => {
 		expect(matchesFilter(row('A010'), { lowestColumn: 0 })).toBe(true);
 		expect(matchesFilter(row('B010'), { lowestColumn: 0 })).toBe(false);
@@ -184,5 +190,31 @@ describe('viewGrid', () => {
 		expect(view.display.map((d) => (d.kind === 'group' ? d.group.label : d.row.label))).toEqual(['SEQA', 'A030', 'No sequence', 'X010', 'Assets', 'hero']);
 		const header = view.display[0];
 		expect(header.kind === 'group' && header.group.subtotals[1].priced).toBe(3);
+	});
+});
+
+describe('windowing', () => {
+	const view = viewGrid(grid, { by: 'sequence', filter: {}, sort: 'order', dir: 'asc', collapsed: new Set() });
+	// Headers 40, rows 48: # 0, row 40, row 88, row 136, # 184, row 224, # 272, row 312, # 360, row 400, end 448.
+	const offsets = offsetsOf(view.display, { group: 40, row: 48 });
+
+	it('gives each row its start and the total last', () => {
+		expect(offsets).toEqual([0, 40, 88, 136, 184, 224, 272, 312, 360, 400, 448]);
+	});
+
+	it('finds the rows meeting the viewport, with overscan', () => {
+		expect(visibleRange(offsets, 0, 100, 0)).toEqual({ from: 0, to: 2 });
+		expect(visibleRange(offsets, 90, 100, 0)).toEqual({ from: 2, to: 4 });
+		expect(visibleRange(offsets, 90, 100, 2)).toEqual({ from: 0, to: 6 });
+		expect(visibleRange(offsets, 1000, 100, 0)).toEqual({ from: 9, to: 9 });
+		expect(visibleRange([0], 0, 100)).toEqual({ from: 0, to: -1 });
+	});
+
+	it('scrolls just enough to show a row below a sticky header', () => {
+		expect(scrollToShow(offsets, 1, 0, 200, 50)).toBeNull();
+		expect(scrollToShow(offsets, 0, 100, 200)).toBe(0);
+		// Row 5 ends at 272; 200 high less a 50 header shows to 150.
+		expect(scrollToShow(offsets, 5, 0, 200, 50)).toBe(122);
+		expect(scrollToShow(offsets, 99, 0, 200)).toBeNull();
 	});
 });

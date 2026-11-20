@@ -96,6 +96,8 @@ export interface RowFilter {
 	/** Only rows where this column holds the lowest price. */
 	readonly lowestColumn?: number | null;
 	readonly hideOmitted?: boolean;
+	/** Only these rows, by target key: the rows a scenario leaves unawarded. */
+	readonly keys?: ReadonlySet<string> | null;
 }
 
 /** A typed percent as basis points, rounded half away from zero; null when it is not a percent. */
@@ -112,6 +114,7 @@ const has = (row: Row, kind: Cell['kind']) => row.cells.some((c) => c.kind === k
 
 export function matchesFilter(row: Row, filter: RowFilter): boolean {
 	if (filter.hideOmitted && row.omitted) return false;
+	if (filter.keys && !filter.keys.has(targetKey(row.target))) return false;
 	if (filter.text) {
 		const hay = `${row.label} ${row.description ?? ''}`.toLowerCase();
 		if (!filter.text.toLowerCase().split(/\s+/).filter(Boolean).every((word) => hay.includes(word))) return false;
@@ -203,4 +206,40 @@ export function viewGrid(grid: Grid, options: ViewOptions): GridView {
 		if (!collapsed) for (const row of rows) display.push({ kind: 'row', key: targetKey(row.target), row, group: group.key });
 	}
 	return { groups, display, shown, total: grid.rows.length };
+}
+
+// Windowing: rows of fixed heights, so the window is arithmetic.
+
+/** Where each display row starts, plus the total height last: `n + 1` numbers. */
+export function offsetsOf(display: readonly DisplayRow[], heights: { readonly group: number; readonly row: number }): number[] {
+	const offsets = [0];
+	for (const item of display) offsets.push(offsets[offsets.length - 1] + (item.kind === 'group' ? heights.group : heights.row));
+	return offsets;
+}
+
+/** The display rows from `from` to `to` inclusive that meet the viewport, with `overscan` more each side. */
+export function visibleRange(offsets: readonly number[], top: number, height: number, overscan = 6): { from: number; to: number } {
+	const count = offsets.length - 1;
+	if (count <= 0) return { from: 0, to: -1 };
+	// The last row starting at or above `top`.
+	let lo = 0;
+	let hi = count - 1;
+	while (lo < hi) {
+		const mid = (lo + hi + 1) >> 1;
+		if (offsets[mid] <= top) lo = mid;
+		else hi = mid - 1;
+	}
+	let end = lo;
+	while (end < count - 1 && offsets[end + 1] < top + height) end++;
+	return { from: Math.max(0, lo - overscan), to: Math.min(count - 1, end + overscan) };
+}
+
+/** The scroll position that shows row `index` whole below a sticky header, or null when it already shows. */
+export function scrollToShow(offsets: readonly number[], index: number, top: number, height: number, header = 0): number | null {
+	const start = offsets[index];
+	const end = offsets[index + 1];
+	if (start === undefined || end === undefined) return null;
+	if (start < top) return start;
+	if (end > top + height - header) return end - (height - header);
+	return null;
 }
