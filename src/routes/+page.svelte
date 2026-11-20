@@ -33,6 +33,9 @@
 			{/each}
 		</ol>
 
-		<Button href="/connect" size="lg">Start</Button>
+		<div class="flex flex-wrap items-center justify-center gap-3">
+			<Button href="/connect" size="lg">Start</Button>
+			<Button href="/how" size="lg" variant="outline">How it works</Button>
+		</div>
 	</div>
 </div>
