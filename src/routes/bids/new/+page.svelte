@@ -1,16 +1,19 @@
 <!--
-	A bid request draft, on one working page: the project once, the header, then the Shots and Assets
-	as the main work, beside a summary of what the vendor gets and what is left before the issue.
-	The field mapping is a setting that opens on demand. Review is the last look before Issue. The
-	URL holds the stored id and the view. The draft is stored as it changes; an issued request opens
-	read only, on its review, with New round. Nothing here writes to Flow PT but a field the person
-	asks to create.
+	A bid request draft, on one working page. The project is picked once. The header folds to one line
+	in the page header once it is filled, and opens as a form while a field needs a fix or on Edit
+	details. The Shots and Assets table is the work: it takes the full width and the rest of the
+	height, with what the vendor gets and what is left before the issue on its bar. The field mapping
+	opens on demand. Review is the last look before Issue. The URL holds the stored id and the view.
+	The draft is stored as it changes; an issued request opens read only, on its review, with New
+	round. Nothing here writes to Flow PT but a field the person asks to create.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import Notice from '$lib/app/notice.svelte';
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
@@ -20,13 +23,15 @@
 	import ProjectGate from '$lib/app/builder/project-gate.svelte';
 	import ReviewView from '$lib/app/builder/review-view.svelte';
 	import SaveLine from '$lib/app/builder/save-line.svelte';
-	import SummaryRail from '$lib/app/builder/summary-rail.svelte';
 	import { focusControl } from '$lib/app/builder/focus';
 	import { Builder } from '$lib/app/builder.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { builderHref, parseView } from '$lib/pure/builder-view';
 	import type { ItemKind } from '$lib/pure/field-map';
+	import { mappingWords } from '$lib/pure/field-map';
+	import { headerSummary } from '$lib/pure/header-summary';
 	import { foldOf, type Target } from '$lib/pure/readiness';
+	import { cn } from '$lib/utils.js';
 
 	function open(id: string | null): Builder {
 		const next = new Builder(id);
@@ -50,8 +55,15 @@
 	let fieldsOpen = $state(false);
 	let projectOpen = $state(false);
 	let confirming = $state(false);
+	/** The header form: open on Edit details, folded on Done; until then, open while a field needs a fix. */
+	let details = $state<boolean | null>(null);
 
 	const go = (next: 'edit' | 'review') => goto(builderHref(builder.state.id, next), { noScroll: false });
+
+	const dayFormat = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+	const summary = $derived(headerSummary(builder.state.form, builder.readiness.problems, (iso) => dayFormat.format(new Date(`${iso}T00:00:00Z`))));
+	const showDetails = $derived(details ?? summary.toFix > 0);
+	const unmapped = $derived(builder.mappingStatus ? mappingWords(builder.mappingStatus).unmapped.length : 0);
 
 	/** Take the person to the control a problem points at, from the summary or the review. */
 	async function focusOn(target: Target): Promise<void> {
@@ -59,6 +71,7 @@
 		revealed = new Set([...revealed, target]);
 		const fold = foldOf(target);
 		if (fold) folds = { ...folds, [fold]: true };
+		if (target !== 'items' && target !== 'project') details = true;
 		if (target === 'items') {
 			const k: ItemKind = builder.state.shots.length === 0 && builder.state.assets.length > 0 ? 'asset' : 'shot';
 			kind = k;
@@ -100,29 +113,45 @@
 		<PageState state="empty" title="Not connected" line={builder.problem}>
 			{#snippet action()}<Button href="/connect">Connect</Button>{/snippet}
 		</PageState>
+	{:else if !builder.state.project}
+		<ProjectGate {builder} />
 	{:else}
-		<PageHeader {title}>
+		<PageHeader {title} back={{ href: '/bids', label: 'Bid requests' }}>
 			{#snippet context()}
-				{#if builder.state.project}
-					<span class="text-foreground">{builder.state.project.name}</span>
-					{#if !builder.readOnly && view === 'edit'}
-						<button type="button" class="hover:text-foreground underline decoration-current/30 underline-offset-2" onclick={() => (projectOpen = true)} data-slot="change-project">Change</button>
-					{/if}
-					{#if builder.state.form.code.trim()}<span aria-hidden="true">·</span><span class="text-foreground font-mono text-xs">{builder.state.form.code.trim()}</span>{/if}
-					<span aria-hidden="true">·</span><span>Round {builder.state.form.round || 1}</span>
-					<span aria-hidden="true">·</span><SaveLine {builder} />
-				{:else}
-					<span>Pick the project first. The draft saves from then on.</span>
+				<span class="text-foreground">{builder.state.project?.name}</span>
+				{#if !builder.readOnly && view === 'edit'}
+					<button type="button" class="hover:text-foreground -ml-1.5 underline decoration-current/30 underline-offset-2" onclick={() => (projectOpen = true)} data-slot="change-project">Change</button>
+				{/if}
+				{#each summary.parts as part (part.key)}
+					<span class={cn(part.mono && 'text-foreground font-mono text-xs', part.key === 'dueDate' && 'tabular-nums')}>{part.text}</span>
+				{/each}
+				<SaveLine {builder} />
+				{#if !builder.readOnly && view === 'edit' && !showDetails}
+					<button
+						type="button"
+						class={cn(
+							'focus-visible:ring-ring inline-flex items-center gap-1 rounded-sm underline decoration-current/30 underline-offset-2 outline-none focus-visible:ring-2',
+							summary.toFix > 0 ? 'text-destructive' : 'hover:text-foreground'
+						)}
+						onclick={() => (details = true)}
+						data-slot="edit-details"
+					>
+						<Pencil class="size-3" aria-hidden="true" />{summary.toFix > 0 ? `${summary.toFix} to fix in the details` : 'Edit details'}
+					</button>
 				{/if}
 			{/snippet}
 			{#snippet actions()}
 				{#if builder.readOnly}
 					<Button variant="outline" href={`/bids/${builder.state.id}`}>Open the request</Button>
 					<Button onclick={() => void newRound()} disabled={rounding}>{rounding ? 'Starting…' : 'New round'}</Button>
-				{:else if builder.state.project && view === 'review'}
+				{:else if view === 'review'}
 					<Button variant="outline" onclick={() => void go('edit')} data-slot="back-to-edit"><ArrowLeft data-icon="inline-start" />Back to the request</Button>
 					<Button onclick={() => (confirming = true)} disabled={!builder.readiness.canIssue || builder.saving.kind === 'waiting'} data-slot="issue">Issue the request</Button>
-				{:else if builder.state.project}
+				{:else}
+					<Button variant="ghost" onclick={() => (fieldsOpen = true)} disabled={!builder.mappingStatus} data-slot="open-fields">
+						<Settings2 data-icon="inline-start" />Fields
+						{#if unmapped > 0}<span class="border-warning/60 text-foreground rounded-full border px-1.5 text-xs leading-4 tabular-nums" title={`${unmapped} with no Flow PT field`}>{unmapped}</span>{/if}
+					</Button>
 					<Button onclick={review} data-slot="review">Review and issue</Button>
 				{/if}
 			{/snippet}
@@ -132,33 +161,26 @@
 			{#if roundError}<Notice tone="destructive" title="Could not start the round.">{' '}{roundError}</Notice>{/if}
 		</PageHeader>
 
-		{#if !builder.state.project}
-			<ProjectGate {builder} />
-		{:else if view === 'review'}
+		{#if view === 'review'}
 			<ReviewView {builder} bind:confirming onFocus={(t) => void focusOn(t)} onIssued={(id) => void goto(`/bids/${id}`)} />
 		{:else}
-			<div class="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-				<div class="min-w-0 flex-1 lg:overflow-y-auto" data-slot="builder-main">
-					<div class="flex w-full max-w-6xl flex-col gap-8 px-6 pt-5 pb-10">
-						<HeaderPanel {builder} bind:folds {revealed} />
-						{#if builder.data.state === 'error'}
-							<Notice tone="destructive" title="Could not read the project.">{' '}{builder.data.message}</Notice>
-						{/if}
-						<ItemsPanel {builder} bind:kind bind:views onFields={() => (fieldsOpen = true)} />
-					</div>
+			{#if showDetails}
+				<div class="border-border bg-card/60 max-h-[55dvh] shrink-0 overflow-y-auto border-b px-6 py-4" onfocusin={() => (details ??= true)} data-slot="builder-details">
+					<HeaderPanel {builder} bind:folds {revealed} onDone={() => (details = false)} />
 				</div>
-				<div class="border-border order-first shrink-0 border-b lg:order-none lg:w-80 lg:overflow-y-auto lg:border-b-0 lg:border-l xl:w-[22rem]">
-					<SummaryRail {builder} onFocus={(t) => void focusOn(t)} onFields={() => (fieldsOpen = true)} />
-				</div>
-			</div>
+			{/if}
+			{#if builder.data.state === 'error'}
+				<div class="px-6 pt-3"><Notice tone="destructive" title="Could not read the project.">{' '}{builder.data.message}</Notice></div>
+			{/if}
+			<ItemsPanel {builder} bind:kind bind:views onFields={() => (fieldsOpen = true)} onFocus={(t) => void focusOn(t)} />
 			<FieldsDialog {builder} bind:open={fieldsOpen} />
 		{/if}
-		{#if builder.state.project && !builder.readOnly}
+		{#if !builder.readOnly}
 			<ProjectGate {builder} dialog bind:open={projectOpen} />
 		{/if}
 	{/if}
 {:catch error}
 	<PageState state="error" title="Could not open the draft" line={error.message}>
-		{#snippet action()}<Button href="/bids">Requests</Button>{/snippet}
+		{#snippet action()}<Button href="/bids">Bid requests</Button>{/snippet}
 	</PageState>
 {/await}

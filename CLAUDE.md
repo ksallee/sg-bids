@@ -40,8 +40,9 @@ metaphors, no "not X, Y", no filler.
 ## Layout
 
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
-- `src/lib/app/`: the app's own components (shell, banner, page header), and the request
-  builder's one page under `builder/` (header panel, items, summary rail, fields setting, review)
+- `src/lib/app/`: the app's own components (shell, page header and body on one measure rule in
+  `measure.ts`, page state, the shared form label with its required mark), and the request
+  builder's one page under `builder/` (header panel, items, summary bar, fields setting, review)
   with its page state in `builder.svelte.ts`, the comparison's grid, scenario rail and page state
   under `compare/`. What is required and what blocks the issue is `pure/readiness.ts`.
 - `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.

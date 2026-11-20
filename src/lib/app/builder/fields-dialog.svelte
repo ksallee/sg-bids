@@ -2,28 +2,34 @@
 	The project's field mapping, a setting out of the request's path: which Flow PT field fills each
 	thing a vendor reads. Shots then Assets, one row per concept: its name and what it is for, the
 	field, and for a concept with no field, what that means (it can still be set per item in the
-	request) and, where the app can, "Create this field in Flow PT". Closing keeps the mapping for
+	request). When concepts have no field, "Create missing fields" opens one form for all of them
+	(`create-missing`); one concept can still be created on its own. Closing keeps the mapping for
 	this project in this browser. Defaults and options from `$lib/pure/field-map`.
 -->
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
 	import Notice from '$lib/app/notice.svelte';
 	import CreateField from './create-field.svelte';
+	import CreateMissing from './create-missing.svelte';
 	import ListPicker from '$lib/components/list-picker.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { missingConcepts } from '$lib/pure/field-create-many';
 	import { mappingWords, slotOptions, slotsFor, type ItemKind, type Slot } from '$lib/pure/field-map';
+	import { cn } from '$lib/utils.js';
 	import type { Builder } from '$lib/app/builder.svelte';
 
 	let { builder, open = $bindable(false) }: { builder: Builder; open?: boolean } = $props();
 
 	let creating = $state<{ kind: ItemKind; slot: Slot } | null>(null);
+	let creatingMany = $state(false);
 	let created = $state<string | null>(null);
 	let copying = $state(false);
 	let copyError = $state<string | null>(null);
 
 	const picked = $derived(builder.state.shots.length + builder.state.assets.length);
 	const status = $derived(builder.mappingStatus);
+	const missing = $derived(builder.mapping ? missingConcepts(builder.mapping).filter((m) => m.creatable) : []);
 
 	async function copyAgain(): Promise<void> {
 		copying = true;
@@ -41,6 +47,7 @@
 		if (next) return;
 		builder.keepMapping();
 		creating = null;
+		creatingMany = false;
 		created = null;
 	}
 </script>
@@ -87,8 +94,8 @@
 								</p>
 								{#if spec.create}
 									<div>
-										<Button size="sm" variant="outline" onclick={() => ((creating = { kind, slot: spec.slot }), (created = null))} data-slot="create-field-open">
-											<Plus data-icon="inline-start" />Create this field in Flow PT
+										<Button size="sm" variant="ghost" class="-ml-2" onclick={() => ((creating = { kind, slot: spec.slot }), (created = null))} data-slot="create-field-open">
+											<Plus data-icon="inline-start" />Create only this one
 										</Button>
 									</div>
 								{/if}
@@ -102,8 +109,17 @@
 {/snippet}
 
 <Dialog.Root bind:open onOpenChange={changed}>
-	<Dialog.Content class="flex max-h-[min(90dvh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl" data-slot="fields-dialog">
-		{#if creating}
+	<Dialog.Content class={cn("flex max-h-[min(90dvh,52rem)] flex-col gap-0 overflow-hidden p-0", creatingMany ? "sm:max-w-3xl" : "sm:max-w-2xl")} data-slot="fields-dialog">
+		{#if creatingMany}
+			<CreateMissing
+				{builder}
+				onBack={() => (creatingMany = false)}
+				onDone={(line) => {
+					created = line;
+					creatingMany = false;
+				}}
+			/>
+		{:else if creating}
 			<CreateField
 				{builder}
 				kind={creating.kind}
@@ -124,6 +140,14 @@
 			</Dialog.Header>
 			<div class="flex min-h-0 flex-col gap-6 overflow-y-auto px-5 py-4">
 				{#if created}<Notice tone="info" data-slot="created">{created}</Notice>{/if}
+				{#if missing.length > 0}
+					<Notice tone="info" data-slot="missing-fields">
+						{missing.length === 1 ? 'One thing a vendor reads has' : `${missing.length} things a vendor reads have`} no field on this site: {missing.map((m) => `${m.label.toLowerCase()} on ${m.entityType}`).join(', ')}.
+						{#snippet action()}
+							<Button size="sm" onclick={() => ((creatingMany = true), (created = null))} data-slot="create-missing-open"><Plus data-icon="inline-start" />Create missing fields</Button>
+						{/snippet}
+					</Notice>
+				{/if}
 				{#if builder.stale}
 					<Notice tone="warning" title="The picked items keep their old values.">
 						{' '}{picked} {picked === 1 ? 'item was' : 'items were'} copied with the previous fields. Copying again drops your edits to them.

@@ -258,7 +258,7 @@
 
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto" data-slot="vendor-scroll">
-			<div class="mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-6 pb-28 sm:px-6 lg:pb-10">
+			<div class="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-6 pb-28 sm:px-6 lg:pb-10">
 				<Section id="request" title="The request" note="As production sent it.">
 					<RequestSummary {request} {day} />
 				</Section>

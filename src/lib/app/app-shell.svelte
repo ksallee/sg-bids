@@ -1,15 +1,18 @@
 <!--
-	The frame of every screen: a h-12 header as sg-task-templates' (wordmark, the site and who reads
-	it, the scheme switch), the demo banner, then the page. The header holds who and where; the page
-	holds what this screen is about. On the vendor's side (`vendor`) there is no site and no person:
-	the vendor has no Flow PT sign-in, so the header holds the wordmark and the scheme switch only.
+	The frame of every screen: one h-12 header (wordmark, Bid requests, the demo badge, the site and
+	who reads it, the scheme switch), then the page, which takes the rest and scrolls on its own. The
+	header holds who and where; the page holds what this screen is about. On the vendor's side
+	(`vendor`) there is no site and no person: the vendor has no Flow PT sign-in, so the header holds
+	the wordmark, the demo badge and the scheme switch only.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
 	import { browser } from '$app/environment';
+	import { page } from '$app/state';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { cn } from '$lib/utils.js';
 	import { isDark, setMode } from '$lib/theme';
 	import { prepareLive, type LiveState } from '$lib/live';
 	import { shortHost } from '$lib/pure/site';
@@ -18,6 +21,7 @@
 
 	let { children, vendor = false }: { children: Snippet; vendor?: boolean } = $props();
 
+	const inRequests = $derived(page.url.pathname === '/bids' || page.url.pathname.startsWith('/bids/'));
 	let live = $state<LiveState | null>(null);
 	// The public pages render at build too (`(public)/+layout.ts`): nothing there reads the browser.
 	// svelte-ignore state_referenced_locally
@@ -46,14 +50,26 @@
 </script>
 
 <div class="bg-background text-foreground flex h-dvh flex-col">
-	<header class="border-border bg-background flex h-12 shrink-0 items-center gap-3 border-b px-3 sm:gap-5 sm:px-4" data-slot="app-header">
+	<header class="border-border bg-background flex h-12 shrink-0 items-center gap-3 border-b px-3 sm:gap-4 sm:px-6" data-slot="app-header">
 		{#if vendor}
 			<span class="shrink-0 text-sm"><Wordmark /></span>
 		{:else}
 			<a href="/" class="focus-visible:ring-ring shrink-0 rounded-md text-sm outline-none focus-visible:ring-2" aria-label="SG Bids, home">
 				<Wordmark />
 			</a>
+			<nav class="hidden items-center gap-1 text-sm sm:flex" aria-label="App">
+				<a
+					href="/bids"
+					class={cn(
+						'focus-visible:ring-ring rounded-md px-2 py-1 outline-none focus-visible:ring-2',
+						inRequests ? 'text-foreground bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'
+					)}
+					aria-current={inRequests ? 'page' : undefined}
+					data-slot="nav-requests">Bid requests</a
+				>
+			</nav>
 		{/if}
+		<DemoBanner />
 
 		<div class="flex-1"></div>
 
@@ -61,7 +77,7 @@
 			{#if !vendor}
 				<a
 					href="/how"
-					class="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-md px-1.5 py-1 outline-none focus-visible:ring-2"
+					class="text-muted-foreground hover:text-foreground focus-visible:ring-ring hidden rounded-md px-1.5 py-1 outline-none focus-visible:ring-2 md:inline"
 					data-slot="how-link">How it works</a
 				>
 			{/if}
@@ -90,7 +106,6 @@
 			</Button>
 		</div>
 	</header>
-	<DemoBanner />
 	<main class="flex min-h-0 flex-1 flex-col">
 		{@render children()}
 	</main>

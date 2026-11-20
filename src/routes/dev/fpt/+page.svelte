@@ -4,6 +4,7 @@
 	`$lib/io/fpt-setup`.
 -->
 <script lang="ts">
+	import PageBody from '$lib/app/page-body.svelte';
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import Notice from '$lib/app/notice.svelte';
@@ -13,6 +14,7 @@
 	import { liveAuth, liveContext, prepareLive, whoAmI } from '$lib/live';
 	import { fptApi } from '$lib/io/fpt-api';
 	import { ensureFields, readSetup, type EnsureResult, type SetupRead } from '$lib/io/fpt-setup';
+	import { connectHref } from '$lib/pure/routes';
 
 	const live = prepareLive();
 	let project = $state<{ id: number; name: string } | null>(null);
@@ -64,9 +66,11 @@
 	<PageState state="loading" title="Connecting to Flow PT…" />
 {:then state}
 	{#if state.problem}
-		<PageState state="empty" title="Not connected" line={state.problem} />
+		<PageState state="empty" title="Not connected" line={state.problem}>
+			{#snippet action()}<Button href={connectHref('/dev/fpt')}>Connect</Button>{/snippet}
+		</PageState>
 	{:else}
-		<PageHeader title="Flow PT setup" context="Dev only. The Bid and Bid Line fields, and what the Vendor role can see.">
+		<PageHeader measure="wide" title="Flow PT setup" context="Dev only. The Bid and Bid Line fields, and what the Vendor role can see.">
 			<div class="max-w-sm">
 				<ProjectPicker
 					context={liveContext()}
@@ -76,7 +80,7 @@
 			</div>
 		</PageHeader>
 
-		<div class="flex flex-col gap-6 px-6 py-4 text-sm">
+		<PageBody measure="wide" class="text-sm">
 			{#if read}
 				{#await read}
 					<PageState state="loading" title="Reading the site…" />
@@ -126,7 +130,7 @@
 								{busy ? 'Creating…' : 'Create missing fields'}
 							</Button>
 						</div>
-						<table class="w-full max-w-3xl">
+						<table class="w-full border-separate border-spacing-0 [&_td]:border-b [&_td]:py-1.5 [&_td]:pr-3 [&_th]:border-b [&_th]:py-2 [&_th]:pr-3 [&_th]:text-xs [&_th]:font-medium">
 							<thead class="text-muted-foreground text-left">
 								<tr><th>Entity</th><th>Field</th><th>Type</th><th>State</th></tr>
 							</thead>
@@ -134,7 +138,7 @@
 								{#each report.fields as f (`${f.entity}.${f.spec.name}`)}
 									<tr>
 										<td>{f.entity === 'bid' ? 'Bid' : 'Bid Line'}</td>
-										<td class="font-mono">{f.spec.name}</td>
+										<td class="font-mono text-xs">{f.spec.name}</td>
 										<td>{f.spec.dataType}</td>
 										<td>{f.state.replace('_', ' ')}{f.actual ? ` (${f.actual.dataType})` : ''}</td>
 									</tr>
@@ -161,7 +165,7 @@
 					</ul>
 				</section>
 			{/if}
-		</div>
+		</PageBody>
 	{/if}
 {:catch error}
 	<PageState state="error" title="Could not connect to Flow PT" line={error.message} />

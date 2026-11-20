@@ -121,7 +121,15 @@ The browser reaches the data layer through `src/routes/api/production/<action>`:
 `save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`. Each is a POST whose body carries
 `claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
 `production.ts` before anything else. `src/lib/pure/wire.ts` checks the rest of the body and lets
-through only the model's header and item fields. The comparison has its own: `compare` (the
+through only the model's header and item fields.
+
+The requests list reads across projects through `requests`. Its `claim` names the site and the
+credential, no project. `verifyProductionSite` checks the person and the role as a project's check
+does, then lists the projects the person's own bearer may read on that site (`GET
+/entity/projects`, paged to the first empty page; a person reads only their projects, corpus 006,
+027). The tenant filter is that site host and those project ids (`siteScope` in
+`src/lib/pure/access.ts`); a project or a project list in the body is never read.
+`src/lib/server/site-route.test.ts` and `tests/db/across.db.test.ts` hold it. The comparison has its own: `compare` (the
 request, every submitted and withdrawn bid, the latest submitted version per vendor shown unless
 `bids` names others, the rates, the scenarios), `rate`, `scenarios`, `scenario-save`,
 `scenario-rename`, `scenario-delete`, `scenario-choose`, over `src/lib/server/comparison.ts` with

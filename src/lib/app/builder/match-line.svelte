@@ -16,7 +16,7 @@
 </script>
 
 {#if waiting > 0 && (builder.status === 'draft' || builder.status === 'issued')}
-	<div class="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-slot="match-line">
+	<div class="text-muted-foreground border-border flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-6 py-2 text-sm" data-slot="match-line">
 		<span>{waiting === 1 ? '1 row from the breakdown has' : `${waiting} rows from the breakdown have`} no Flow PT row yet.</span>
 		<Button size="sm" variant="outline" onclick={() => (open = true)} data-slot="match-open"><Link2 data-icon="inline-start" />Match to Flow PT</Button>
 	</div>

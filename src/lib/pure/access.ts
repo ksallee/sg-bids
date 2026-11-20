@@ -27,6 +27,17 @@ export interface VendorPrincipal {
 
 export type Principal = ProductionPrincipal | VendorPrincipal;
 
+/**
+ * Production across a site: the projects the person's own bearer listed on that site, verified by
+ * the server (`production.ts`). It only reads, and only for the requests list. It is no
+ * `Principal`: `scope` refuses it, `siteScope` gives its filter.
+ */
+export interface SitePrincipal {
+	readonly kind: 'production-site';
+	readonly siteHost: string;
+	readonly projectIds: readonly number[];
+}
+
 export const TABLES = [
 	'bid_requests',
 	'request_items',
@@ -47,7 +58,7 @@ export interface Scope {
 	/** Every query carries `column = value` for each entry. */
 	readonly eq: Readonly<Record<string, string | number>>;
 	/** And `column in (values)` for each entry. */
-	readonly in?: Readonly<Record<string, readonly string[]>>;
+	readonly in?: Readonly<Record<string, readonly (string | number)[]>>;
 }
 
 type Grants = Readonly<Partial<Record<Table, readonly Action[]>>>;
@@ -114,6 +125,24 @@ export function scope(principal: Principal, table: Table, action: Action): Scope
 		default:
 			return { eq: { invitation_id: principal.invitationId } };
 	}
+}
+
+/** The tables the requests list reads across projects: the requests and their counts. */
+const SITE_READS: readonly Table[] = ['bid_requests', 'invitations', 'bids'];
+
+/**
+ * The filter a read across the site carries: its site host, and the project ids it was verified
+ * for. An empty list matches no row. Throws for any table the list does not need.
+ */
+export function siteScope(principal: SitePrincipal, table: Table): Scope {
+	if (principal.kind !== 'production-site' || !principal.siteHost) throw new Error('A site principal needs a site host.');
+	if (!principal.projectIds.every((id) => Number.isSafeInteger(id) && id > 0)) throw new Error('A site principal needs project ids.');
+	if (!SITE_READS.includes(table)) throw new Error(`Production across a site may not read ${table}.`);
+	const projects = [...principal.projectIds];
+	const eq = { site_host: principal.siteHost };
+	// A vendor's draft is its own until it submits.
+	if (table === 'bids') return { eq, in: { project_id: projects, status: ['submitted', 'withdrawn'] } };
+	return { eq, in: { project_id: projects } };
 }
 
 /** The row to insert with the scope's columns forced onto it. */

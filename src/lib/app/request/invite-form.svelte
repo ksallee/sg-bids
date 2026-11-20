@@ -10,13 +10,20 @@
 	import type { EntityRef } from 'sg-widgets-core';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import EntityPicker from '$lib/components/entity-picker.svelte';
+	import FieldLabel from '$lib/app/field-label.svelte';
+	import RequiredLegend from '$lib/app/required-legend.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { api } from '$lib/api';
 	import { liveContext } from '$lib/live';
 	import { VENDOR_REQUIRED, validateVendor } from '$lib/pure/invitations';
 
-	let { projectId, requestId, onInvited }: { projectId: number; requestId: string; onInvited: (name: string, token: string) => void } = $props();
+	let {
+		projectId,
+		requestId,
+		onInvited,
+		primary = true
+	}: { projectId: number; requestId: string; onInvited: (name: string, token: string) => void; /** Invite is the page's primary action. */ primary?: boolean } = $props();
 
 	let name = $state('');
 	let email = $state('');
@@ -61,9 +68,13 @@
 {/snippet}
 
 <form class="bg-card text-card-foreground flex flex-col gap-3 rounded-lg border p-4" onsubmit={(e) => (e.preventDefault(), void invite())} aria-label="Invite a vendor" data-slot="invite-form" novalidate>
+	<div class="flex items-center justify-between gap-3">
+		<p class="text-sm font-semibold">Invite a vendor</p>
+		<RequiredLegend />
+	</div>
 	<div class="grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
 		<div class="flex flex-col gap-1.5">
-			<div class="flex items-baseline gap-2"><label class="text-sm font-medium" for="v-name">Vendor</label><span class="text-muted-foreground text-xs">Required</span></div>
+			<FieldLabel for="v-name" required>Vendor</FieldLabel>
 			<Input
 				id="v-name"
 				bind:value={name}
@@ -75,7 +86,7 @@
 			{@render problem('name')}
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<div class="flex items-baseline gap-2"><label class="text-sm font-medium" for="v-email">Contact email</label><span class="text-muted-foreground text-xs">Required</span></div>
+			<FieldLabel for="v-email" required>Contact email</FieldLabel>
 			<Input
 				id="v-email"
 				type="email"
@@ -88,7 +99,8 @@
 			{@render problem('email')}
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<div class="flex items-baseline gap-2"><span class="text-sm font-medium">Flow PT Group</span><span class="text-muted-foreground text-xs">Optional</span></div>
+			<FieldLabel focus="v-group">Flow PT Group</FieldLabel>
+			<div id="v-group" class="contents">
 			<EntityPicker
 				context={liveContext()}
 				entityTypes={['Group']}
@@ -99,10 +111,11 @@
 					if (value?.name && name.trim() === '') name = value.name;
 				}}
 			/>
+			</div>
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<span class="text-sm font-medium md:invisible" aria-hidden="true">Invite</span>
-			<Button type="submit" disabled={sending}>{sending ? 'Inviting…' : 'Invite'}</Button>
+			<span class="text-sm leading-5 md:invisible" aria-hidden="true">Invite</span>
+			<Button type="submit" variant={primary ? 'default' : 'outline'} disabled={sending}>{sending ? 'Inviting…' : 'Invite'}</Button>
 		</div>
 	</div>
 	{#if failure}<p class="text-destructive text-sm" role="alert">Not invited. {failure}</p>{/if}

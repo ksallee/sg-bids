@@ -28,7 +28,7 @@
 	);
 </script>
 
-	<article class="bg-card text-card-foreground mx-auto flex w-full max-w-5xl flex-col rounded-lg border shadow-xs" aria-label="The request as vendors see it" data-slot="vendor-sheet">
+	<article class="bg-card text-card-foreground flex w-full flex-col rounded-lg border shadow-xs" aria-label="The request as vendors see it" data-slot="vendor-sheet">
 		<header class="border-border flex flex-col gap-5 border-b p-6 sm:p-8">
 			<div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
 				<p class="text-muted-foreground text-sm">{h.project || 'No project'}</p>
