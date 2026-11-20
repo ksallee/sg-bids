@@ -22,9 +22,12 @@ describe('freezeShot', () => {
 			sequence: 'sh010',
 			frames: 96,
 			omitted: false,
-			assetIds: ['asset-501', 'asset-502'],
-			thumbnail: SHOT_1001.attributes.image
+			assetIds: ['asset-501', 'asset-502']
 		});
+	});
+
+	it('keeps no thumbnail: the presigned URL expires (081)', () => {
+		expect('thumbnail' in freezeShot(SHOT_1001, STOCK)).toBe(false);
 	});
 
 	it('leaves out what the row has empty', () => {

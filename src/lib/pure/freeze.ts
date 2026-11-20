@@ -3,8 +3,9 @@
  * Production edits the copy; the vendor gets the copy. Pure, no I/O.
  *
  * Scalars are read from `attributes`, links from `relationships` (003_query), a link's label from
- * its `name`, the target's `cached_display_name` (060). `image` is a presigned URL (081): it
- * expires, so whatever stores a request for a vendor must copy the picture, not the link.
+ * its `name`, the target's `cached_display_name` (060). No thumbnail is kept: `image` is a
+ * presigned URL (081) and expires, so a stored request would point at nothing. Copying the
+ * picture into storage is later work.
  */
 
 import type { EntityRow } from 'sg-widgets-core';
@@ -61,11 +62,6 @@ function code(row: EntityRow): string {
 	return typeof value === 'string' && value.trim() !== '' ? value : `${row.type} ${row.id}`;
 }
 
-function image(row: EntityRow): string | undefined {
-	const value = row.attributes?.image;
-	return typeof value === 'string' && value !== '' ? value : undefined;
-}
-
 /** Drop the keys left undefined, so a copy holds only what it has. */
 function compact<T extends object>(value: T): T {
 	return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
@@ -90,8 +86,7 @@ export function freezeShot(row: EntityRow, mapping: Mapping, sequences: Sequence
 		omitted: false,
 		assetIds: links(row, mapping.assets)
 			.filter((ref) => ref.type === 'Asset')
-			.map((ref) => assetItemId(ref.id)),
-		thumbnail: image(row)
+			.map((ref) => assetItemId(ref.id))
 	});
 }
 

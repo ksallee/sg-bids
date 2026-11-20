@@ -8,7 +8,6 @@
 	import Segmented from '$lib/app/segmented.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import ListPicker from '$lib/components/list-picker.svelte';
-	import Thumbnail from '$lib/components/thumbnail.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Switch } from '$lib/components/ui/switch/index.js';
@@ -37,7 +36,6 @@
 					name: s.code,
 					meta: [s.episode, s.sequence].filter(Boolean).join(' / '),
 					frames: s.frames,
-					thumbnail: s.thumbnail ?? null,
 					description: s.description ?? '',
 					difficulty: s.difficulty ?? null,
 					notes: s.notes ?? '',
@@ -48,7 +46,6 @@
 					name: a.name,
 					meta: a.type ?? '',
 					frames: undefined,
-					thumbnail: null,
 					description: a.description ?? '',
 					difficulty: a.difficulty ?? null,
 					notes: a.notes ?? '',
@@ -101,7 +98,6 @@
 						<tr class={cn('align-top', row.omitted && 'bg-muted/50')} data-omitted={row.omitted}>
 							<td class="border-border border-b py-2 pr-3 pl-6">
 								<div class={cn('flex items-start gap-3', row.omitted && 'opacity-60')}>
-									{#if kind === 'shot'}<Thumbnail src={row.thumbnail} alt="" size="sm" entityType="Shot" />{/if}
 									<div class="flex min-w-0 flex-col">
 										<span class={cn('font-mono text-xs font-medium', row.omitted && 'line-through')}>{row.name}</span>
 										{#if row.meta}<span class="text-muted-foreground truncate text-xs">{row.meta}</span>{/if}
