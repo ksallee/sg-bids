@@ -75,8 +75,13 @@
 	}
 
 	async function load(): Promise<void> {
-		if (page.url.searchParams.get('link') === 'invalid') {
+		const link = page.url.searchParams.get('link');
+		if (link === 'invalid') {
 			problem = { title: 'This link does not work', line: 'Check the link in your invitation, or ask production for a new one.', link: true };
+			return;
+		}
+		if (link === 'wait') {
+			problem = { title: 'Too many tries', line: 'Wait a few minutes, then open the link again.', link: true };
 			return;
 		}
 		try {
@@ -86,7 +91,8 @@
 		} catch (error) {
 			const status = error instanceof VendorError ? error.status : 0;
 			const line = error instanceof Error ? error.message : String(error);
-			if (status === 401 || status === 403) problem = { title: status === 401 ? 'This link does not work' : 'This link is closed', line, link: true };
+			if (status === 410) problem = { title: 'This link was replaced', line, link: true };
+			else if (status === 401 || status === 403) problem = { title: status === 401 ? 'This link does not work' : 'This link is closed', line, link: true };
 			else problem = { title: 'The bid could not load', line, link: false };
 		}
 	}

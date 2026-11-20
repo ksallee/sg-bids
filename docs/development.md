@@ -99,10 +99,15 @@ through only the model's header and item fields. The builder's drafts go through
 
 ## The vendor link
 
-A vendor opens `/v/<token>`. That route puts the token in a cookie, `sg_bids_vendor`: HttpOnly,
-Secure (SvelteKit drops Secure on http://localhost only), SameSite=Lax, path `/v`. Then it
-redirects to `/v`, so the token does not stay in the address bar, the history or a referrer. A
-link that is not a token's shape clears the cookie and lands on `/v?link=invalid`.
+A vendor opens `/v/<token>`, the link `vendorLink` writes. That route finds the token's
+invitation and puts `<invitation id>.<token>` in a cookie, `sg_bids_vendor`: HttpOnly, Secure
+(SvelteKit drops Secure on http://localhost only), SameSite=Lax, path `/v`. Then it redirects to
+`/v`, so the token does not stay in the address bar, the history or a referrer. A link no
+invitation holds clears the cookie and lands on `/v?link=invalid`.
+
+When production gives a vendor a new link, the old token stops working and the vendor keeps its
+bids. A vendor still holding the old cookie gets 410 and a page saying the link was replaced; the
+new link opens its draft or submitted bid as it was.
 
 The page at `/v` calls these, each authorised by the cookie alone (`src/lib/server/vendor-api.ts`):
 

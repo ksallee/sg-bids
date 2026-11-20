@@ -312,6 +312,24 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return { principal: { kind: 'vendor', invitationId: row.id, requestId: row.request_id }, row };
 	}
 
+	/**
+	 * The invitation a link token names, whatever its state, or null for a token no invitation
+	 * holds. The link route keeps the id beside the token, to tell a replaced link apart later.
+	 */
+	async function peekInvitation(token: unknown): Promise<string | null> {
+		const parsed = parseToken(token);
+		if (!parsed) return null;
+		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('token_hash', hashToken(parsed)).maybeSingle());
+		return row?.id ?? null;
+	}
+
+	/** Whether an invitation still exists, by id: its link was replaced when its token no longer opens it. */
+	async function invitationExists(invitationId: string): Promise<boolean> {
+		if (!/^[0-9a-f-]{36}$/i.test(invitationId)) return false;
+		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('id', invitationId).maybeSingle());
+		return row !== null;
+	}
+
 	async function vendorRequest(principal: VendorPrincipal): Promise<RequestRow> {
 		const row = await run<RequestRow | null>(from(principal, 'bid_requests', 'read').maybeSingle());
 		if (!row) throw new StoreError(403, 'The request is not open yet.');
@@ -419,6 +437,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		listBids,
 		saveScenario,
 		openInvitation,
+		peekInvitation,
+		invitationExists,
 		vendorBidRecords,
 		saveDraftBid,
 		submitBid,

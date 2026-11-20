@@ -6,8 +6,9 @@
 import { isRedirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '$lib/pure/token';
+import { createRequests } from '$lib/server/requests';
 import type { Store } from '$lib/server/store';
-import { draft, issuedWithTwoVendors, store, superuser } from './helpers';
+import { draft, issuedWithTwoVendors, rest, store, superuser } from './helpers';
 
 const holder = vi.hoisted(() => ({ store: null as unknown }));
 vi.mock('$lib/server/env', () => ({ serverStore: () => holder.store }));
@@ -111,7 +112,7 @@ describe('the vendor endpoints', () => {
 		const opened = await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
 		expect(opened.status).toBe(303);
 		expect(opened.headers.get('location')).toBe('/v');
-		expect(A.jar.get('sg_bids_vendor')).toEqual({ value: a.token, options: expect.objectContaining({ path: '/v', httpOnly: true, sameSite: 'lax' }) });
+		expect(A.jar.get('sg_bids_vendor')).toEqual({ value: `${a.invitation.id}.${a.token}`, options: expect.objectContaining({ path: '/v', httpOnly: true, sameSite: 'lax' }) });
 
 		const request = await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
 		expect(request.status).toBe(200);
@@ -187,16 +188,71 @@ describe('the vendor endpoints', () => {
 		expect(opened.headers.get('location')).toBe('/v?link=invalid');
 		expect(bad.jar.has('sg_bids_vendor')).toBe(false);
 
+		// A token of the right shape that no invitation holds: no cookie, and it counts as a miss.
 		const guesser = browser('203.0.113.11');
 		const wrong = 'A'.repeat(42) + 'E';
-		await guesser.call(open.GET as Handler, 'GET', `/v/${wrong}`, undefined, { token: wrong });
-		for (let i = 0; i < 20; i++) expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		for (let i = 0; i < 10; i++) {
+			const miss = await guesser.call(open.GET as Handler, 'GET', `/v/${wrong}`, undefined, { token: wrong });
+			expect(miss.headers.get('location')).toBe('/v?link=invalid');
+		}
+		expect(guesser.jar.has('sg_bids_vendor')).toBe(false);
+		// A forged cookie misses too.
+		guesser.jar.set('sg_bids_vendor', { value: wrong, options: {} });
+		for (let i = 0; i < 10; i++) expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
 		const blocked = await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
 		expect(blocked.status).toBe(429);
 		expect(blocked.json).toEqual({ error: 'Too many tries. Wait a few minutes.' });
+		const held = await guesser.call(open.GET as Handler, 'GET', `/v/${wrong}`, undefined, { token: wrong });
+		expect(held.headers.get('location')).toBe('/v?link=wait');
 
 		// Another address is not held back.
 		expect((await bad.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+	});
+
+	it('tell a vendor whose link production replaced, and open its bids with the new link', async () => {
+		const { production, a, b } = await issuedWithTwoVendors();
+		const A = browser('203.0.113.13');
+		await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(100_000) });
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: first.json.bid.id });
+		const second = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(95_000) });
+		expect(second.json.bid.version).toBe(2);
+
+		// Production's "New link", the builder's reissue.
+		const next = await createRequests(rest('service_role')).reissueInvitation(production, a.invitation.id);
+
+		// The old cookie: every endpoint says the link was replaced, and nothing is written.
+		const replaced = 'This link was replaced. Open the newest link production sent you. Your bid is kept.';
+		const calls: [Handler, string, string, unknown][] = [
+			[requestRoute.GET as Handler, 'GET', '/v/api/request', undefined],
+			[bidRoute.GET as Handler, 'GET', '/v/api/bid', undefined],
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(1) }],
+			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: second.json.bid.id }]
+		];
+		for (const [handler, method, path, body] of calls) {
+			const answer = await A.call(handler, method, path, body);
+			expect(answer.status, path).toBe(410);
+			expect(answer.json).toEqual({ error: replaced });
+		}
+		// The old link itself no longer opens anything.
+		const old = await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
+		expect(old.headers.get('location')).toBe('/v?link=invalid');
+
+		// The new link, in the same browser: the draft and the submitted version are there.
+		const opened = await A.call(open.GET as Handler, 'GET', `/v/${next.token}`, undefined, { token: next.token });
+		expect(opened.headers.get('location')).toBe('/v');
+		const bid = await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
+		expect(bid.json.bid).toMatchObject({ id: second.json.bid.id, version: 2, status: 'draft' });
+		expect(bid.json.versions.map((v: { status: string }) => v.status)).toEqual(['submitted', 'draft']);
+		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === 'sh010').total.minor).toBe(95_000);
+
+		// A forged cookie naming another vendor's invitation with a dead token learns nothing of it.
+		const forger = browser('203.0.113.14');
+		forger.jar.set('sg_bids_vendor', { value: `${b.invitation.id}.${a.token}`, options: {} });
+		const probe = await forger.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
+		expect(probe.status).toBe(410);
+		expect(probe.text).not.toContain(b.invitation.name);
+		expect(probe.text).not.toContain(b.invitation.id);
 	});
 
 	it('refuse a write that is not JSON', async () => {
