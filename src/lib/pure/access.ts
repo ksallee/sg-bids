@@ -54,7 +54,7 @@ type Grants = Readonly<Partial<Record<Table, readonly Action[]>>>;
 
 const PRODUCTION: Grants = {
 	bid_requests: ['read', 'insert', 'update'],
-	request_items: ['read', 'insert', 'delete'],
+	request_items: ['read', 'insert', 'update', 'delete'],
 	invitations: ['read', 'insert', 'update'],
 	bids: ['read'],
 	bid_lines: ['read'],

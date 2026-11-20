@@ -7,7 +7,8 @@
  * - A request's `projectRef` is never stored: the tenant's project is the project.
  * - A request's vendors are its invitations. The request row holds none, so a vendor reading the
  *   request learns nothing of the others.
- * - A shot or asset is a request item: kind, key (the model's id), code (shot code or asset name).
+ * - A shot or asset is a request item: kind, key (the model's id), code (shot code or asset name),
+ *   and where it came from (`source`): Flow PT, or a breakdown with no Flow PT row until matched.
  * - A bid's vendor is its invitation. A line points at its item by kind and key.
  * - A rate is kept as the exact string typed, never a float.
  */
@@ -18,6 +19,7 @@ import type {
 	BidRequest,
 	EntityRef,
 	InvitedVendor,
+	ItemSource,
 	RequestAsset,
 	RequestHeader,
 	RequestShot,
@@ -64,11 +66,15 @@ export interface ItemColumns {
 	fpt_id: number | null;
 	fields: Json;
 	omitted: boolean;
+	/** `fpt` for a row picked from Flow PT, `breakdown` for one pasted, imported or typed. */
+	source: 'fpt' | 'breakdown';
 }
 
 export interface RequestItemRow extends Tenant, ItemColumns {
 	id: string;
 	request_id: string;
+	/** When a breakdown row got its Flow PT row after the issue. */
+	fpt_linked_at?: string | null;
 }
 
 export interface VendorColumns {
@@ -167,18 +173,32 @@ function entity(type: string | null, id: number | null): { fpt?: EntityRef } {
 	return type !== null && id !== null ? { fpt: { type, id } } : {};
 }
 
+function origin(source: ItemColumns['source'] | undefined): { source?: ItemSource } {
+	return source === 'breakdown' ? { source: 'breakdown' } : {};
+}
+
 export function itemsToRows(shots: readonly RequestShot[], assets: readonly RequestAsset[]): ItemColumns[] {
 	const rows: ItemColumns[] = [];
 	const seen = new Set<string>();
-	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, fields: Json) => {
+	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, source: ItemSource | undefined, fields: Json) => {
 		const name = `${kind}:${key}`;
 		if (!key) throw new Error(`A ${kind} needs an id.`);
 		if (seen.has(name)) throw new Error(`Two ${kind}s have the id '${key}'.`);
 		seen.add(name);
-		rows.push({ kind, key, code, position: rows.length, fpt_type: fpt?.type ?? null, fpt_id: fpt?.id ?? null, fields: defined(fields), omitted });
+		rows.push({
+			kind,
+			key,
+			code,
+			position: rows.length,
+			fpt_type: fpt?.type ?? null,
+			fpt_id: fpt?.id ?? null,
+			fields: defined(fields),
+			omitted,
+			source: source === 'breakdown' ? 'breakdown' : 'fpt'
+		});
 	};
-	for (const { id, code, fpt, omitted, ...fields } of shots) push('shot', id, code, fpt, omitted, fields);
-	for (const { id, name, fpt, ...fields } of assets) push('asset', id, name, fpt, false, fields);
+	for (const { id, code, fpt, omitted, source, ...fields } of shots) push('shot', id, code, fpt, omitted, source, fields);
+	for (const { id, name, fpt, source, ...fields } of assets) push('asset', id, name, fpt, false, source, fields);
 	return rows;
 }
 
@@ -186,10 +206,10 @@ export function itemsFromRows(rows: readonly ItemColumns[]): { shots: RequestSho
 	const sorted = [...rows].sort((a, b) => a.position - b.position);
 	const shots = sorted
 		.filter((row) => row.kind === 'shot')
-		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id) }));
+		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source) }));
 	const assets = sorted
 		.filter((row) => row.kind === 'asset')
-		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id) }));
+		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source) }));
 	return { shots, assets };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyForm, formFromBid, formToDraft, formTotals, lineDetailTotal, type BidForm } from './bid-form';
+import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, type BidForm } from './bid-form';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
 import { money } from './money';
 
@@ -210,9 +210,36 @@ describe('formToDraft', () => {
 			lineOf(f, 'shot:sh020').price = 'y';
 			lineOf(f, 'shot:sh030').price = '1';
 		});
-		expect(formToDraft(bad, '.').blockers).toEqual(['2 fields need a fix.']);
+		expect(formToDraft(bad, '.', itemNames(req)).blockers).toEqual(['Price for SH010: Not a number.', 'Price for SH020: Not a number.']);
 		const one = filled((f) => (lineOf(f, 'shot:sh010').price = '1'));
 		expect(formToDraft(one, '.').blockers).toEqual([]);
+	});
+
+	it('names each problem by its field, in the order of the form, with the control that fixes it', () => {
+		const bad = filled((f) => {
+			f.date = '2026-02-30';
+			lineOf(f, 'shot:sh020').price = '12,345.678';
+			lineOf(f, 'asset:hero').price = '10';
+			lineOf(f, 'asset:hero').departments = [{ department: '', days: 'two', cost: '5' }];
+			f.costs[1].amount = 'lots';
+			f.discount = { kind: 'percent', value: '120' };
+			f.rebate = [{ jurisdiction: '', workPercent: '50', rate: 'x', base: 'all', contractPercent: '' }];
+			f.milestones = [{ label: '', percent: '50', due: '' }];
+		});
+		const { problems } = formToDraft(bad, '.', itemNames(req));
+		expect(problems.map((p) => [p.label, p.message, p.control, p.line ?? null])).toEqual([
+			['Bid date', 'Use a real day.', 'vf-date', null],
+			['Price for SH020', 'USD takes 2 decimals.', 'vf-line:shot:sh020:price', 'shot:sh020'],
+			['Hero, department 1, days', 'Not a number of days.', 'vf-line:asset:hero:dept:0:days', 'asset:hero'],
+			['Hero, department 1', 'Name the department.', 'vf-line:asset:hero:dept:0:department', 'asset:hero'],
+			['Supervision', 'Not a number.', 'vf-cost:1:amount', null],
+			['Discount', 'A discount is 100% at most.', 'vf-discount', null],
+			['Rebate split 1, where', 'Pick where the work is done.', 'vf-split:0:jurisdiction', null],
+			['Rebate split 1, rate', 'Not a percent.', 'vf-split:0:rate', null],
+			['Milestone 1, name', 'Name the milestone.', 'vf-milestone:0:label', null]
+		]);
+		const empty = formToDraft(emptyForm(req, TODAY), '.', itemNames(req));
+		expect(empty.problems).toEqual([{ key: 'priced', label: 'Shots and assets', message: 'Price at least one shot or asset.', control: 'vf-line:shot:sh010:price', line: 'shot:sh010' }]);
 	});
 
 	it('blocks a submit whose total is not above zero, or whose discount is more than the subtotal', () => {

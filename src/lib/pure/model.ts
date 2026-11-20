@@ -18,6 +18,12 @@ export type Day = string;
 /** A percent as typed, a plain non-negative decimal: `65` is 65%. */
 export type Percent = string;
 
+/**
+ * Where a shot or asset came from. Absent: picked from Flow PT. `breakdown`: pasted, imported or
+ * typed, with no Flow PT row until it is matched or created at the award.
+ */
+export type ItemSource = 'breakdown';
+
 /** A Flow Production Tracking entity: `{ type: 'Shot', id: 1234 }`. */
 export interface EntityRef {
 	readonly type: string;
@@ -79,6 +85,8 @@ export interface RequestShot {
 	readonly id: Id;
 	readonly code: string;
 	readonly fpt?: EntityRef;
+	/** Absent for a row picked from Flow PT. Never shown to a vendor. */
+	readonly source?: ItemSource;
 	readonly description?: string;
 	readonly episode?: string;
 	readonly sequence?: string;
@@ -103,6 +111,8 @@ export interface RequestAsset {
 	readonly id: Id;
 	readonly name: string;
 	readonly fpt?: EntityRef;
+	/** Absent for a row picked from Flow PT. Never shown to a vendor. */
+	readonly source?: ItemSource;
 	readonly description?: string;
 	readonly type?: string;
 	readonly difficulty?: string;

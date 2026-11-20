@@ -96,11 +96,14 @@ export function pickFilters(filter: PickFilter, context: FilterContext): FilterR
 interface Picked {
 	readonly id: string;
 	readonly fpt?: { readonly type: string; readonly id: number };
+	readonly source?: 'breakdown';
 }
 
 /**
- * The picked items for a new selection: an item still picked keeps its edited copy, a new pick is
- * frozen from its row, an unpicked item leaves. `missing` names the picks with no row at hand.
+ * The picked items for a new selection: an item still picked keeps its edited copy and its place, a
+ * new pick is frozen from its row and goes after, an unpicked item leaves. A breakdown row stays
+ * whatever the table selects: it leaves only when taken out. `missing` names the picks with no row
+ * at hand.
  */
 export function mergePicked<T extends Picked>(
 	current: readonly T[],
@@ -108,20 +111,35 @@ export function mergePicked<T extends Picked>(
 	rows: readonly EntityRow[],
 	freeze: (row: EntityRow, position: number) => T
 ): { items: T[]; missing: number[] } {
-	const byFpt = new Map(current.filter((item) => item.fpt).map((item) => [item.fpt!.id, item]));
+	const wanted = new Set(selected);
+	const items: T[] = current.filter((item) => item.source === 'breakdown' || (item.fpt && wanted.has(item.fpt.id)));
+	const have = new Set(items.flatMap((item) => (item.fpt ? [item.fpt.id] : [])));
 	const rowById = new Map(rows.map((row) => [row.id, row]));
-	const items: T[] = [];
 	const missing: number[] = [];
 	for (const id of selected) {
-		const kept = byFpt.get(id);
-		if (kept) items.push(kept);
-		else {
-			const row = rowById.get(id);
-			if (row) items.push(freeze(row, items.length + 1));
-			else missing.push(id);
-		}
+		if (have.has(id)) continue;
+		const row = rowById.get(id);
+		if (row) items.push(freeze(row, items.length + 1));
+		else missing.push(id);
 	}
 	return { items, missing };
+}
+
+/**
+ * Every item picked from Flow PT copied again from its row, in place; one whose row is gone leaves.
+ * A breakdown row stays as typed: its values never came from Flow PT.
+ */
+export function refrozen<T extends Picked>(current: readonly T[], rows: readonly EntityRow[], freeze: (row: EntityRow, position: number) => T): T[] {
+	const rowById = new Map(rows.map((row) => [row.id, row]));
+	const out: T[] = [];
+	for (const item of current) {
+		if (item.source === 'breakdown') out.push(item);
+		else {
+			const row = item.fpt ? rowById.get(item.fpt.id) : undefined;
+			if (row) out.push(freeze(row, out.length + 1));
+		}
+	}
+	return out;
 }
 
 /** The picks with every row of a select all added; what was picked stays as it is. */

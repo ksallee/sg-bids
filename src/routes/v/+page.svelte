@@ -22,7 +22,10 @@
 	import TotalsRail, { type SaveState, type Stage } from '$lib/app/vendor/totals-rail.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { decimalSeparator } from '$lib/pure/amount';
-	import { emptyForm, formFromBid, formToDraft, formTotals, type BidForm } from '$lib/pure/bid-form';
+	import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, vendorControlId, type BidForm, type FormProblem } from '$lib/pure/bid-form';
+	import ProblemList from '$lib/app/vendor/problem-list.svelte';
+	import { focusById } from '$lib/app/focus-by-id';
+	import { tick } from 'svelte';
 	import { targetKey } from '$lib/pure/model';
 	import { format, minorDigits } from '$lib/pure/money';
 	import type { VendorBidView, VendorRequestView } from '$lib/pure/vendor-view';
@@ -47,7 +50,17 @@
 	let form = $state<BidForm | null>(null);
 	let problem = $state<{ title: string; line: string; link: boolean } | null>(null);
 
-	const result = $derived(form ? formToDraft(form, mark) : null);
+	const names = $derived(request ? itemNames(request) : new Map<string, string>());
+	const result = $derived(form ? formToDraft(form, mark, names) : null);
+	let grid = $state<{ reveal: (key: string, detail: boolean) => void } | null>(null);
+
+	/** Take the vendor to the control a problem names: its row shown, its detail open, focused. */
+	async function goTo(problem: FormProblem): Promise<void> {
+		confirming = null;
+		if (problem.line) grid?.reveal(problem.line, /:(dept|compute)/.test(problem.key));
+		await tick();
+		await focusById(problem.control);
+	}
 	const totals = $derived(result ? formTotals(result.draft) : null);
 	const snapshot = $derived(result ? JSON.stringify(result.draft) : '');
 	const prices = $derived(new Map(result ? result.draft.lines.filter((l) => !l.excluded).map((l) => [targetKey(l.target), l.total]) : []));
@@ -222,6 +235,7 @@
 					<span class="text-foreground font-medium">{form?.currency}</span>
 				{:else}
 					<select
+						id={vendorControlId('currency')}
 						class="border-input dark:bg-input/30 text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 rounded-lg border bg-transparent px-2 text-sm outline-none focus-visible:ring-3"
 						value={form?.currency}
 						onchange={(e) => changeCurrency(e.currentTarget.value)}
@@ -254,7 +268,7 @@
 					title="Shots and assets"
 					note={readOnly ? undefined : 'A price for each, all in. Leave one blank to not bid it, or exclude what you will not do.'}
 				>
-					<ItemGrid bind:form {request} errors={result.errors} {prices} {mark} {locale} {readOnly} />
+					<ItemGrid bind:this={grid} bind:form {request} errors={result.errors} {prices} {mark} {locale} {readOnly} />
 				</Section>
 
 				<Section id="costs" title="Other costs, discount and tax" note="Costs that sit outside the shots and assets.">
@@ -282,6 +296,7 @@
 					onsubmit={openSubmit}
 					onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 					onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+					onproblem={(p) => void goTo(p)}
 				/>
 			</div>
 		</div>
@@ -299,6 +314,7 @@
 				onsubmit={openSubmit}
 				onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 				onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+				onproblem={(p) => void goTo(p)}
 			/>
 		</aside>
 	</div>
@@ -318,8 +334,10 @@
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
-		onconfirm={() => loaded?.bidId && move(() => vendorApi.submit(loaded))}
+		onconfirm={() => loaded?.bidId && result.problems.length === 0 && move(() => vendorApi.submit(loaded))}
+		disabled={result.problems.length > 0}
 	>
+		<ProblemList problems={result.problems} onPick={(p) => void goTo(p)} />
 		<dl class="flex flex-col">
 			<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Priced</dt><dd class="tabular-nums">{result.counts.priced}</dd></div>
 			{#if result.counts.excluded > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Excluded</dt><dd class="tabular-nums">{result.counts.excluded}</dd></div>{/if}

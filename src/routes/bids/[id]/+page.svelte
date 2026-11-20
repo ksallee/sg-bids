@@ -15,6 +15,7 @@
 	import LinkOnce from '$lib/app/request/link-once.svelte';
 	import InviteForm from '$lib/app/request/invite-form.svelte';
 	import AwardPanel from '$lib/app/award/award-panel.svelte';
+	import UndoNote from '$lib/app/award/undo-note.svelte';
 	import VendorSheet from '$lib/app/builder/vendor-sheet.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { api, type LoadedRequest } from '$lib/api';
@@ -127,6 +128,7 @@
 					<LinkOnce name={shown.name} link={shown.link} onDone={() => (shown = null)} />
 				{/if}
 
+				<UndoNote requestId={r.id} />
 				{#if loaded.award}
 					<AwardPanel projectId={projectId!} request={r} publication={loaded.award} {siteUrl} onChange={() => void api.get(projectId!, id).then((next) => (loaded = next))} />
 				{/if}

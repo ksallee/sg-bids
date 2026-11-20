@@ -5,7 +5,7 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { BidForm } from '$lib/pure/bid-form';
+	import { vendorControlId, type BidForm } from '$lib/pure/bid-form';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 
@@ -23,12 +23,12 @@
 		</label>
 		<label class="flex flex-col gap-1">
 			<span class="text-xs font-medium">Bid date</span>
-			{#if readOnly}<span class="text-sm">{form.date ? day(form.date) : 'None'}</span>{:else}<Input type="date" bind:value={form.date} aria-invalid={!!errors.date} />{/if}
+			{#if readOnly}<span class="text-sm">{form.date ? day(form.date) : 'None'}</span>{:else}<Input id={vendorControlId('date')} type="date" bind:value={form.date} aria-invalid={!!errors.date} />{/if}
 			{#if errors.date}<p class="text-destructive text-xs">{errors.date}</p>{/if}
 		</label>
 		<label class="flex flex-col gap-1">
 			<span class="text-xs font-medium">Price holds until</span>
-			{#if readOnly}<span class="text-sm">{form.validUntil ? day(form.validUntil) : 'Not given'}</span>{:else}<Input type="date" bind:value={form.validUntil} aria-invalid={!!errors.validUntil} />{/if}
+			{#if readOnly}<span class="text-sm">{form.validUntil ? day(form.validUntil) : 'Not given'}</span>{:else}<Input id={vendorControlId('validUntil')} type="date" bind:value={form.validUntil} aria-invalid={!!errors.validUntil} />{/if}
 			{#if errors.validUntil}<p class="text-destructive text-xs">{errors.validUntil}</p>{/if}
 		</label>
 	</div>
@@ -52,12 +52,12 @@
 						<span></span>
 					{:else}
 						<div class="flex flex-col">
-							<Input bind:value={row.label} placeholder="On award" aria-label="Milestone" aria-invalid={!!errors[`milestone:${i}:label`]} />
+							<Input id={vendorControlId(`milestone:${i}:label`)} bind:value={row.label} placeholder="On award" aria-label="Milestone" aria-invalid={!!errors[`milestone:${i}:label`]} />
 							{#if errors[`milestone:${i}:label`]}<p class="text-destructive text-xs">{errors[`milestone:${i}:label`]}</p>{/if}
 						</div>
 						<div class="flex flex-col">
 							<div class="relative">
-								<Input bind:value={row.percent} inputmode="decimal" aria-label="Share" aria-invalid={!!errors[`milestone:${i}:percent`]} class="pr-6 text-right tabular-nums" />
+								<Input id={vendorControlId(`milestone:${i}:percent`)} bind:value={row.percent} inputmode="decimal" aria-label="Share" aria-invalid={!!errors[`milestone:${i}:percent`]} class="pr-6 text-right tabular-nums" />
 								<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">%</span>
 							</div>
 							{#if errors[`milestone:${i}:percent`]}<p class="text-destructive text-xs">{errors[`milestone:${i}:percent`]}</p>{/if}

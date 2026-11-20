@@ -14,12 +14,15 @@ import { isLocalId, localId, savable } from '$lib/pure/persist';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { fptApi } from '$lib/io/fpt-api';
 import { createField, readCreateRight } from '$lib/io/fpt-field-create';
-import { loadSequences, loadShape, rowsByIds, type ProjectShape } from '$lib/io/reads';
+import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
 import { emptyHeaderForm, suggestCode, type HeaderForm, type ProjectPick } from '$lib/pure/header';
-import { addPicked, mergePicked } from '$lib/pure/pick';
+import { addPicked, mergePicked, refrozen } from '$lib/pure/pick';
+import { applyBreakdown, type BreakdownPlan } from '$lib/pure/breakdown';
+import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
+import type { ItemLink } from '$lib/pure/wire';
 import { readiness, type OtherRequest, type Readiness } from '$lib/pure/readiness';
 import { buildRequest, editItem, editItems, removeItems, restoreState, tiersFor, type BuilderState } from '$lib/pure/request';
 import type { RequestAsset, RequestShot } from '$lib/pure/model';
@@ -357,22 +360,62 @@ export class Builder {
 		else this.setItems('asset', removeItems(this.state.assets, ids));
 	}
 
-	/** Copy the picked items again from Flow PT with the mapping shown. Edits to them are lost. */
+	/** Copy the picked items again from Flow PT with the mapping shown. Edits to them are lost. Breakdown rows stay as typed. */
 	async refreeze(): Promise<void> {
 		const client = liveContext().client;
-		const shotIds = this.state.shots.flatMap((s) => (s.fpt ? [s.fpt.id] : []));
-		const assetIds = this.state.assets.flatMap((a) => (a.fpt ? [a.fpt.id] : []));
+		const fromFpt = <T extends { fpt?: { id: number }; source?: string }>(items: readonly T[]) => items.flatMap((i) => (i.fpt && i.source !== 'breakdown' ? [i.fpt.id] : []));
 		const [shotRows, assetRows] = await Promise.all([
-			rowsByIds(client, 'Shot', shotIds, this.fieldsFor('shot')),
-			rowsByIds(client, 'Asset', assetIds, this.fieldsFor('asset'))
+			rowsByIds(client, 'Shot', fromFpt(this.state.shots), this.fieldsFor('shot')),
+			rowsByIds(client, 'Asset', fromFpt(this.state.assets), this.fieldsFor('asset'))
 		]);
 		this.state = {
 			...this.state,
-			shots: mergePicked([], shotIds, shotRows, this.freezer('shot')).items,
-			assets: mergePicked([], assetIds, assetRows, this.freezer('asset')).items
+			shots: refrozen(this.state.shots, shotRows, this.freezer('shot')),
+			assets: refrozen(this.state.assets, assetRows, this.freezer('asset'))
 		};
 		this.stale = false;
 		this.save();
+	}
+
+	/** Rows from a breakdown, as `breakdown.ts` planned them: replaced in place, new ones after. */
+	addBreakdown(kind: ItemKind, plan: BreakdownPlan<RequestShot> | BreakdownPlan<RequestAsset>): void {
+		if (this.readOnly) return;
+		const next = applyBreakdown({ shots: this.state.shots, assets: this.state.assets }, plan, kind);
+		this.state = { ...this.state, shots: next.shots, assets: next.assets };
+		this.save();
+	}
+
+	/** A new id for a breakdown row. Never `shot-<n>`: that is a Flow PT row's. */
+	breakdownId(kind: ItemKind): string {
+		const seed = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+		return `${kind}-bd-${seed}`;
+	}
+
+	/** Each breakdown row of a kind with no Flow PT row, against the project's rows with the same code. */
+	async findMatches(kind: ItemKind): Promise<Match[]> {
+		const project = this.state.project;
+		if (!project) return [];
+		const items = kind === 'shot' ? this.state.shots : this.state.assets;
+		const codes = codesToFind(items);
+		if (codes.length === 0) return [];
+		const rows = await rowsByCodes(liveContext().client, kind === 'shot' ? 'Shot' : 'Asset', project.id, codes);
+		const candidates = rows.flatMap((r) => (typeof r.attributes?.code === 'string' ? [{ id: r.id, code: r.attributes.code }] : []));
+		return matchRows(kind, items, candidates);
+	}
+
+	/**
+	 * Give breakdown rows their Flow PT row. A draft saves them as any edit. An issued request takes
+	 * them through the one change its freeze allows; vendors see nothing new.
+	 */
+	async link(kind: ItemKind, links: ItemLink[]): Promise<void> {
+		if (links.length === 0 || !this.state.project) return;
+		if (!this.readOnly) {
+			if (kind === 'shot') this.setItems('shot', withLinks(this.state.shots, links));
+			else this.setItems('asset', withLinks(this.state.assets, links));
+			return;
+		}
+		const { request } = await api.linkItems(this.state.project.id, this.state.id, links);
+		this.state = { ...this.state, shots: request.shots, assets: request.assets };
 	}
 
 	tiers(kind: ItemKind): readonly string[] {

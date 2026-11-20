@@ -17,7 +17,7 @@
 	import type { ItemKind } from '$lib/pure/field-map';
 	import type { Builder } from '$lib/app/builder.svelte';
 
-	let { builder, kind, onAdd, onFields }: { builder: Builder; kind: ItemKind; onAdd: () => void; onFields: () => void } = $props();
+	let { builder, kind, onAdd, onBreakdown, onFields }: { builder: Builder; kind: ItemKind; onAdd: () => void; onBreakdown: () => void; onFields: () => void } = $props();
 
 	const noun = $derived(kind === 'shot' ? 'shot' : 'asset');
 	const tiers = $derived(builder.tiers(kind));
@@ -35,6 +35,7 @@
 			? builder.state.shots.map((s) => ({
 					id: s.id,
 					name: s.code,
+					from: s.source === 'breakdown' ? (s.fpt ? 'From the breakdown, linked to Flow PT' : 'From the breakdown') : null,
 					meta: [s.episode, s.sequence].filter(Boolean).join(' / '),
 					frames: s.frames,
 					description: s.description ?? '',
@@ -45,6 +46,7 @@
 			: builder.state.assets.map((a) => ({
 					id: a.id,
 					name: a.name,
+					from: a.source === 'breakdown' ? (a.fpt ? 'From the breakdown, linked to Flow PT' : 'From the breakdown') : null,
 					meta: a.type ?? '',
 					frames: undefined,
 					description: a.description ?? '',
@@ -74,8 +76,11 @@
 {#if rows.length === 0}
 	<div class="flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-12 text-center" data-slot="picked-empty">
 		<p class="text-sm font-medium">No {noun}s in the request yet</p>
-		<p class="text-muted-foreground max-w-sm text-sm">Add them from Flow PT. Each one is copied in, so you can edit it here without changing the site.</p>
-		<Button size="sm" onclick={onAdd}>Add {noun}s from Flow PT</Button>
+		<p class="text-muted-foreground max-w-sm text-sm">Add them from Flow PT, or from a breakdown when they are not in Flow PT yet. Each one is copied in, so you can edit it here without changing the site.</p>
+		<div class="flex flex-wrap justify-center gap-2">
+			<Button size="sm" onclick={onAdd}>Add {noun}s from Flow PT</Button>
+			<Button size="sm" variant="outline" onclick={onBreakdown}>Add from a breakdown</Button>
+		</div>
 	</div>
 {:else}
 	<div class="flex flex-wrap items-center gap-2" data-slot="picked-toolbar">
@@ -121,6 +126,7 @@
 							<div class={cn('flex min-w-0 flex-col pt-1.5', row.omitted && 'opacity-60')}>
 								<span class={cn('truncate font-mono text-xs font-medium', row.omitted && 'line-through')} title={row.name}>{row.name}</span>
 								{#if row.meta}<span class="text-muted-foreground truncate text-xs">{row.meta}</span>{/if}
+								{#if row.from}<span class="text-muted-foreground truncate text-[11px] italic" data-slot="row-source">{row.from}</span>{/if}
 							</div>
 						</td>
 						{#if kind === 'shot'}

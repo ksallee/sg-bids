@@ -8,6 +8,7 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import Notice from '$lib/app/notice.svelte';
 	import VendorSheet from './vendor-sheet.svelte';
+	import MatchLine from './match-line.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import type { Target } from '$lib/pure/readiness';
@@ -74,6 +75,7 @@
 				</p>
 			{/if}
 		{/if}
+		{#if builder.readOnly}<MatchLine {builder} />{/if}
 		<VendorSheet {request} />
 	</div>
 </div>

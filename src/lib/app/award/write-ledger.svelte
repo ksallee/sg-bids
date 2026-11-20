@@ -71,7 +71,38 @@
 						{#each r.groups as g (`${g.ref.type}:${g.ref.id}`)}<li>{g.item}: remove {g.groups.length === 1 ? 'one Group' : `${g.groups.length} Groups`} the app added</li>{/each}
 						{#each r.lines as l (l.key)}<li>Delete the Bid Line for {l.item} from {l.vendor}</li>{/each}
 						{#each r.bids as b (b.key)}<li>Delete {b.vendor}'s Bid</li>{/each}
+						{#each r.items as i (i.key)}<li>Delete {i.type} {i.id}, created by an earlier publish</li>{/each}
 					</ul>
+				{:else if step.label === 'Sequences'}
+					<ul class="flex flex-col gap-1 text-sm" data-slot="preview-sequences">
+						{#each plan.preview.sequences as s (s.key)}<li>New Sequence <span class="font-mono text-xs">{s.code}</span></li>{/each}
+					</ul>
+				{:else if step.label === 'Shots and Assets'}
+					<div class="overflow-x-auto">
+						<table class="w-full min-w-[640px] text-sm" data-slot="preview-created">
+							<thead>
+								<tr class="text-muted-foreground border-b text-left text-xs">
+									<th class="py-1.5 pr-3 font-medium">New row</th>
+									<th class="px-3 py-1.5 font-medium">Type</th>
+									<th class="px-3 py-1.5 font-medium">Sequence</th>
+									<th class="py-1.5 pl-3 font-medium">Fields written</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each plan.preview.created as c (c.key)}
+									<tr class="border-b last:border-0 align-top">
+										<td class="py-1.5 pr-3 font-mono text-xs font-medium">{c.item}</td>
+										<td class="px-3 py-1.5">{c.type}</td>
+										<td class="text-muted-foreground px-3 py-1.5">{c.sequence ? `${c.sequence}${c.sequenceNew ? ', new' : ''}` : 'none'}</td>
+										<td class="text-muted-foreground py-1.5 pl-3 text-xs">
+											{c.fields.length ? c.fields.map((f) => `${f.field}: ${f.value.length > 40 ? `${f.value.slice(0, 40)}…` : f.value}`).join('; ') : 'the code only'}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					<p class="text-muted-foreground text-xs">Each is created in this project with its code. The Bid Lines and vendor Groups below link to them. Undo award deletes them unless they gain Tasks, Versions or other links.</p>
 				{:else if step.label === 'Bids'}
 					<div class="overflow-x-auto">
 						<table class="w-full min-w-[640px] text-sm" data-slot="preview-bids">
@@ -135,7 +166,7 @@
 					<div class="flex flex-col gap-1" data-slot="preview-groups">
 						<h4 class="text-xs font-medium">Groups added to vendor groups</h4>
 						<ul class="grid gap-x-6 gap-y-0.5 text-sm sm:grid-cols-2">
-							{#each plan.preview.groups as g (`${g.ref.type}:${g.ref.id}`)}
+							{#each plan.preview.groups as g (g.target)}
 								<li class="flex gap-2">
 									<span class="w-28 shrink-0 truncate font-medium">{g.item}</span>
 									<span class="text-muted-foreground min-w-0">
@@ -154,6 +185,15 @@
 		</li>
 	{/each}
 </ol>
+
+{#if plan.preview.unlinked.length}
+	<div class="mt-6 flex flex-col gap-1" data-slot="plan-unlinked">
+		<h3 class="text-sm font-semibold">Published with no Flow PT row</h3>
+		<p class="text-muted-foreground text-sm">
+			Their Bid Lines are written with no Shot or Asset, and no vendor Group is added: {plan.preview.unlinked.map((u) => u.item).join(', ')}.
+		</p>
+	</div>
+{/if}
 
 {#if plan.warnings.length}
 	<div class="mt-6 flex flex-col gap-1" data-slot="plan-warnings">

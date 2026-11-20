@@ -5,6 +5,7 @@ import {
 	DIFFICULTY_TIERS,
 	EPISODE_FROM_SEQUENCE,
 	cleanMapping,
+	createFieldsOf,
 	sequenceEpisodeField,
 	detectMapping,
 	mappingStatus,
@@ -22,6 +23,22 @@ const assetB = normalizeFields(ASSET_FIELDS_B);
 
 const NO_EPISODE: SiteShape = { episodes: false, sequenceEpisodeField: null };
 const EPISODES_ON_SEQUENCE: SiteShape = { episodes: true, sequenceEpisodeField: 'episode' };
+
+describe('createFieldsOf', () => {
+	it('names the mapped fields a created Shot or Asset is written to, with their type and values', () => {
+		const shot = detectMapping('shot', shotA, NO_EPISODE);
+		const asset = detectMapping('asset', assetA, NO_EPISODE);
+		expect(createFieldsOf({ shot, asset }, { shot: shotA, asset: assetA })).toEqual({
+			shot: { description: { name: 'description', dataType: 'text' }, frames: { name: 'sg_cut_duration', dataType: 'number' }, sequence: 'sg_sequence' },
+			asset: { description: { name: 'description', dataType: 'text' }, type: { name: 'sg_asset_type', dataType: 'list', validValues: ['Character', 'Environment', 'Prop', 'Vehicle'] } }
+		});
+	});
+
+	it('leaves out a slot mapped to a field the schema no longer has, and the episode', () => {
+		const out = createFieldsOf({ shot: { description: 'gone', episode: 'sg_episode', sequence: null }, asset: {} }, { shot: shotA, asset: assetA });
+		expect(out).toEqual({ shot: {}, asset: {} });
+	});
+});
 
 describe('slotsFor', () => {
 	it('names what a shot and an asset carry, in order', () => {
