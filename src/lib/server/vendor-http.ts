@@ -1,9 +1,12 @@
 /**
  * The vendor routes' HTTP side: the link cookie, the answer headers, the failure count.
  *
- * The token comes in the URL once (`/v/<token>`). That route puts it in a cookie, HttpOnly, Secure
+ * The token comes in the URL once (`/v/<token>`). That route moves it to a short cookie and
+ * redirects to `/v/open` with no lookup. `/v/open` makes it the vendor cookie, HttpOnly, Secure
  * (SvelteKit leaves Secure off on http://localhost only), SameSite=Lax, scoped to `/v`, and
- * redirects to `/v`, so the token is not left in the address bar, the history or a referrer.
+ * redirects to `/v`, so the token is not left in the address bar, the history or a referrer. When
+ * the browser holds another vendor's live link, `/v/open` asks first, naming both, and only a
+ * same-origin post switches: a link one vendor sends another never takes a browser over quietly.
  * Every vendor answer says `Referrer-Policy: no-referrer` and `Cache-Control: no-store`
  * (`hooks.server.ts`).
  *
@@ -41,6 +44,31 @@ export function setVendorCookie(cookies: Cookies, invitationId: string, token: s
 
 export function clearVendorCookie(cookies: Cookies): void {
 	cookies.delete(VENDOR_COOKIE, { path: VENDOR_PATH });
+}
+
+/**
+ * The link just opened, waiting on `/v/open`: the link route moves the token here and redirects
+ * at once. `/v/open` makes it the vendor cookie, or asks first when the browser holds another
+ * vendor's live link. Ten minutes, then it is gone.
+ */
+export const OPENING_COOKIE = 'sg_bids_vendor_open';
+const OPENING_SECONDS = 600;
+
+export function setOpeningCookie(cookies: Cookies, token: string): void {
+	cookies.set(OPENING_COOKIE, token, { path: VENDOR_PATH, httpOnly: true, sameSite: 'lax', maxAge: OPENING_SECONDS });
+}
+
+export function clearOpeningCookie(cookies: Cookies): void {
+	cookies.delete(OPENING_COOKIE, { path: VENDOR_PATH });
+}
+
+/**
+ * A post from this site's own page: the Origin is ours, and Sec-Fetch-Site, when the browser
+ * sends it, says same-origin. SvelteKit checks the origin of form posts too; this holds without it.
+ */
+export function sameOrigin(event: Pick<RequestEvent, 'request' | 'url'>): boolean {
+	const site = event.request.headers.get('sec-fetch-site');
+	return event.request.headers.get('origin') === event.url.origin && (site === null || site === 'same-origin');
 }
 
 /** The cookie's invitation id and token. A cookie with no id is a token alone. */
@@ -87,7 +115,7 @@ export function vendorEndpoint(action: Action): RequestHandler {
 						return json({ error: REPLACED }, { status: 410, headers: VENDOR_HEADERS });
 					}
 				}
-				return json({ error: error.message }, { status: error.status, headers: VENDOR_HEADERS });
+				return json(error.reason ? { error: error.message, reason: error.reason } : { error: error.message }, { status: error.status, headers: VENDOR_HEADERS });
 			}
 			console.error(error);
 			return json({ error: 'Something failed on our side. Try again.' }, { status: 500, headers: VENDOR_HEADERS });

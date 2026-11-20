@@ -314,13 +314,18 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	/**
 	 * The invitation a link token names, whatever its state, or null for a token no invitation
-	 * holds. The link route keeps the id beside the token, to tell a replaced link apart later.
+	 * holds: its id, the vendor's name, and whether it opens a bid now. The link page reads it to
+	 * ask before one vendor's link replaces another's in the same browser.
 	 */
-	async function peekInvitation(token: unknown): Promise<string | null> {
+	async function linkInvitation(token: unknown): Promise<{ id: string; vendorName: string; live: boolean } | null> {
 		const parsed = parseToken(token);
 		if (!parsed) return null;
-		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('token_hash', hashToken(parsed)).maybeSingle());
-		return row?.id ?? null;
+		const hash = hashToken(parsed);
+		const row = await run<Pick<InvitationRow, 'id' | 'vendor_name' | 'token_hash' | 'revoked_at' | 'expires_at'> | null>(
+			db.from('invitations').select('id, vendor_name, token_hash, revoked_at, expires_at').eq('token_hash', hash).maybeSingle()
+		);
+		if (!row || !sameHash(row.token_hash, hash)) return null;
+		return { id: row.id, vendorName: row.vendor_name, live: row.revoked_at === null && new Date(row.expires_at).getTime() > now().getTime() };
 	}
 
 	/** Whether an invitation still exists, by id: its link was replaced when its token no longer opens it. */
@@ -365,9 +370,14 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	/** The vendor's own bids, oldest version first, with their version and stamps. */
 	async function vendorBidRecords(token: unknown): Promise<VendorBidRecord[]> {
+		return (await vendorState(token)).records;
+	}
+
+	/** The token's invitation id beside its bids: what a write is checked against (`vendor-api.ts`). */
+	async function vendorState(token: unknown): Promise<{ invitationId: string; records: VendorBidRecord[] }> {
 		const { principal } = await resolveToken(token);
 		const request = await vendorRequest(principal);
-		return vendorRecords(principal, request);
+		return { invitationId: principal.invitationId, records: await vendorRecords(principal, request) };
 	}
 
 	async function vendorBid(principal: VendorPrincipal, request: RequestRow, bidId: string): Promise<VendorBid> {
@@ -437,9 +447,10 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		listBids,
 		saveScenario,
 		openInvitation,
-		peekInvitation,
+		linkInvitation,
 		invitationExists,
 		vendorBidRecords,
+		vendorState,
 		saveDraftBid,
 		submitBid,
 		withdrawBid

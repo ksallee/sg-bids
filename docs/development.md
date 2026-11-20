@@ -107,26 +107,35 @@ The page is `/bids/[id]/compare`. The builder's drafts go through
 
 ## The vendor link
 
-A vendor opens `/v/<token>`, the link `vendorLink` writes. That route finds the token's
-invitation and puts `<invitation id>.<token>` in a cookie, `sg_bids_vendor`: HttpOnly, Secure
-(SvelteKit drops Secure on http://localhost only), SameSite=Lax, path `/v`. Then it redirects to
-`/v`, so the token does not stay in the address bar, the history or a referrer. A link no
-invitation holds clears the cookie and lands on `/v?link=invalid`.
+A vendor opens `/v/<token>`, the link `vendorLink` writes. That route does no lookup: it moves
+the token to a ten minute cookie, `sg_bids_vendor_open`, and redirects to `/v/open`. `/v/open`
+finds the token's invitation and puts `<invitation id>.<token>` in the vendor cookie,
+`sg_bids_vendor`: HttpOnly, Secure (SvelteKit drops Secure on http://localhost only), SameSite=Lax,
+path `/v`. Then it redirects to `/v`, so the token does not stay in the address bar, the history or
+a referrer. A link no invitation holds clears the cookie and lands on `/v?link=invalid`.
+
+When the browser already holds another vendor's live link, `/v/open` does not replace it. It asks:
+"This link is for B. You have A's bid open.", and only a post from this site's own page switches
+(the Origin is checked, as SvelteKit does). So a link one vendor sends another cannot take over the
+bid on screen. The form names the vendor at the top at all times, so a switch is plain to see.
 
 When production gives a vendor a new link, the old token stops working and the vendor keeps its
 bids. A vendor still holding the old cookie gets 410 and a page saying the link was replaced; the
 new link opens its draft or submitted bid as it was.
 
-The page at `/v` calls these, each authorised by the cookie alone (`src/lib/server/vendor-api.ts`):
+The page at `/v` calls these, each authorised by the cookie (`src/lib/server/vendor-api.ts`). Every
+write also names the invitation and the bid the page loaded, `{invitationId, bidId}`. When the
+cookie now holds another invitation, or the bid moved on in another tab, the write is refused with
+409 and `reason` `session` or `bid`, and nothing is written:
 
 | call | what |
 |---|---|
-| `GET /v/api/request` | the request as frozen, with no vendors list and no Flow PT ids |
+| `GET /v/api/request` | the request as frozen, the vendor's own name and invitation id, no vendors list, no Flow PT ids |
 | `GET /v/api/bid` | the vendor's latest bid, draft or submitted, and its versions |
-| `PUT /v/api/bid` | `{draft}`: save the draft, or open the next version after a submit |
-| `POST /v/api/bid/submit` | `{bidId}`: submit the draft |
-| `POST /v/api/bid/withdraw` | `{bidId}`: withdraw the submitted bid |
-| `POST /v/api/bid/revise` | open the next version as a copy of the latest |
+| `PUT /v/api/bid` | `{invitationId, bidId, draft}`: save the draft; `bidId` null before the first save |
+| `POST /v/api/bid/submit` | `{invitationId, bidId}`: submit the draft |
+| `POST /v/api/bid/withdraw` | `{invitationId, bidId}`: withdraw the submitted bid |
+| `POST /v/api/bid/revise` | `{invitationId, bidId}`: open the next version as a copy of the latest |
 
 Every answer under `/v` says `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and
 `X-Robots-Tag: noindex, nofollow` (`src/hooks.server.ts`). No answer carries another vendor:
@@ -180,6 +189,8 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
 - production reads submitted bids only, the latest version by default; its rate applies until the
   award and is locked by the database after; scenarios save, rename, delete and one is chosen; a
   tenant reaches none of another's (`comparison.db.test.ts`);
+- a vendor link opened where another vendor's bid is open asks first, switches only on a
+  same-origin post, and a tab left on the other bid writes nothing (`vendor-session.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.

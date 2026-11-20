@@ -1,4 +1,4 @@
-// Withdraws the vendor's submitted bid (`{bidId}`).
+// Withdraws the vendor's submitted bid (`{invitationId, bidId}`).
 import { withdraw } from '$lib/server/vendor-api';
 import { vendorEndpoint } from '$lib/server/vendor-http';
 

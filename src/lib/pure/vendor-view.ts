@@ -2,14 +2,20 @@
  * What a vendor's link answers, and nothing more. The vendor bids on the request as production
  * froze it and sees its own bids. It never sees another vendor: no name, no id, no count. So the
  * request goes out with no vendors list, and neither request nor bid carries an id that is not
- * the vendor's own business: no request id, no invitation id, no Flow PT entity.
+ * the vendor's own business: no request id, no Flow PT entity. Its own invitation id and name go
+ * out: the form shows the name, so a browser switched to another vendor's link shows it, and every
+ * write sends the id back to be checked against the cookie.
  *
  * The form's grouping and search over the request live here too.
  */
 
-import type { BidRequest, BidStatus, RequestAsset, RequestHeader, RequestShot, VendorBid } from './model';
+import type { BidRequest, BidStatus, InvitedVendor, RequestAsset, RequestHeader, RequestShot, VendorBid } from './model';
 
 export interface VendorRequestView {
+	/** The vendor's own invitation. The page sends it back with every write (`vendor-api.ts`). */
+	readonly invitationId: string;
+	/** The vendor's name as production invited it. The form shows it at all times. */
+	readonly vendorName: string;
 	readonly code: string;
 	readonly status: 'issued' | 'closed';
 	readonly issuedAt: string | null;
@@ -48,6 +54,7 @@ export interface VendorBidView {
 }
 
 export function vendorRequestView(input: {
+	invitation: Pick<InvitedVendor, 'id' | 'name'>;
 	request: BidRequest;
 	code: string;
 	status: 'issued' | 'closed';
@@ -56,6 +63,8 @@ export function vendorRequestView(input: {
 }): VendorRequestView {
 	const { projectRef, ...header } = input.request.header;
 	return {
+		invitationId: input.invitation.id,
+		vendorName: input.invitation.name,
 		code: input.code,
 		status: input.status,
 		issuedAt: input.issuedAt,

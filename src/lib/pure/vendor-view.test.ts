@@ -12,9 +12,18 @@ describe('vendorRequestView', () => {
 		vendors: [{ id: 'inv-a', name: 'Vendor A', email: 'a@example.com', ndaExecuted: true, fpt: { type: 'Group', id: 7 } }]
 	});
 
-	it('keeps what the vendor bids on, and drops every vendor, id and Flow PT ref', () => {
-		const view = vendorRequestView({ request: req, code: 'BR-1', status: 'issued', issuedAt: '2026-11-20T10:00:00Z', expiresAt: '2027-01-19T10:00:00Z' });
+	it('keeps what the vendor bids on and its own name and invitation, and drops the vendors list, other ids and Flow PT refs', () => {
+		const view = vendorRequestView({
+			invitation: { id: 'inv-own', name: 'Own Vendor' },
+			request: req,
+			code: 'BR-1',
+			status: 'issued',
+			issuedAt: '2026-11-20T10:00:00Z',
+			expiresAt: '2027-01-19T10:00:00Z'
+		});
 		expect(view).toEqual({
+			invitationId: 'inv-own',
+			vendorName: 'Own Vendor',
 			code: 'BR-1',
 			status: 'issued',
 			issuedAt: '2026-11-20T10:00:00Z',
@@ -24,7 +33,7 @@ describe('vendorRequestView', () => {
 			assets: [{ id: 'hero', name: 'hero' }]
 		});
 		const text = JSON.stringify(view);
-		for (const secret of ['inv-a', 'Vendor A', 'a@example.com', 'req-uuid', '1234', '"vendors"']) expect(text).not.toContain(secret);
+		for (const secret of ['inv-a', 'Vendor A', 'a@example.com', 'own@example.com', 'req-uuid', '1234', '"vendors"']) expect(text).not.toContain(secret);
 	});
 });
 

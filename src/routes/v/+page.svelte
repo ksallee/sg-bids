@@ -26,7 +26,7 @@
 	import { targetKey } from '$lib/pure/model';
 	import { format, minorDigits } from '$lib/pure/money';
 	import type { VendorBidView, VendorRequestView } from '$lib/pure/vendor-view';
-	import { vendorApi, VendorError } from '$lib/vendor-client';
+	import { vendorApi, VendorError, type Loaded } from '$lib/vendor-client';
 
 	const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'NZD', 'JPY', 'KRW', 'INR', 'CNY', 'SGD', 'CHF', 'SEK', 'DKK', 'NOK', 'ZAR'];
 	const SAVE_AFTER_MS = 1200;
@@ -56,6 +56,7 @@
 	);
 	const readOnly = $derived(stage !== 'draft');
 	const earlier = $derived(view?.bid?.status === 'draft' ? view.versions.filter((v) => v.status === 'submitted').at(-1) : undefined);
+	const loaded = $derived<Loaded | null>(request ? { invitationId: request.invitationId, bidId: view?.bid?.id ?? null } : null);
 	const currencies = $derived(request ? [...new Set([request.header.baseCurrency, ...CURRENCIES, form?.currency ?? 'USD'])] : CURRENCIES);
 
 	// Autosave: the draft as last saved, and whether a save is under way.
@@ -98,15 +99,23 @@
 	}
 	void load();
 
+	/** The browser now holds another vendor's link: this page stops, and says so. */
+	function otherSession(error: unknown): boolean {
+		if (!(error instanceof VendorError) || error.reason !== 'session') return false;
+		problem = { title: 'Another bid is open in this browser', line: error.message, link: false };
+		return true;
+	}
+
 	async function save(text: string, keepalive = false): Promise<boolean> {
-		if (saving && !keepalive) return false;
+		if ((saving && !keepalive) || !loaded) return false;
 		saving = true;
 		try {
-			view = await vendorApi.save(JSON.parse(text), keepalive);
+			view = await vendorApi.save(loaded, JSON.parse(text), keepalive);
 			saved = text;
 			saveError = null;
 			return true;
 		} catch (error) {
+			if (otherSession(error)) return false;
 			saveError = error instanceof Error ? error.message : String(error);
 			return false;
 		} finally {
@@ -162,6 +171,7 @@
 			confirming = null;
 			document.querySelector('[data-slot=vendor-scroll]')?.scrollTo({ top: 0 });
 		} catch (error) {
+			if (otherSession(error)) return;
 			moveError = error instanceof Error ? error.message : String(error);
 		} finally {
 			busy = false;
@@ -199,6 +209,7 @@
 	<PageHeader title={`Bid for ${header.project}`}>
 		{#snippet context()}
 			<span>
+				<span class="text-foreground font-semibold" data-slot="vendor-name">{request?.vendorName}</span>.
 				Request {request?.code}, round {header.round}.
 				{#if header.dueDate}Due <span class="text-foreground font-medium">{day(header.dueDate)}</span>.{/if}
 				{#if view?.bid}Version {view.bid.version}.{/if}
@@ -269,7 +280,7 @@
 					{stamp}
 					{busy}
 					onsubmit={openSubmit}
-					onrevise={() => move(vendorApi.revise)}
+					onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 					onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
 				/>
 			</div>
@@ -286,7 +297,7 @@
 				{stamp}
 				{busy}
 				onsubmit={openSubmit}
-				onrevise={() => move(vendorApi.revise)}
+				onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 				onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
 			/>
 		</aside>
@@ -307,7 +318,7 @@
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
-		onconfirm={() => view?.bid && move(() => vendorApi.submit(view!.bid!.id))}
+		onconfirm={() => loaded?.bidId && move(() => vendorApi.submit(loaded))}
 	>
 		<dl class="flex flex-col">
 			<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Priced</dt><dd class="tabular-nums">{result.counts.priced}</dd></div>
@@ -330,7 +341,7 @@
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
-		onconfirm={() => view?.bid && move(() => vendorApi.withdraw(view!.bid!.id))}
+		onconfirm={() => loaded?.bidId && move(() => vendorApi.withdraw(loaded))}
 	>
 		<p>Production will see this bid as withdrawn. You can start a new version after.</p>
 	</ConfirmDialog>
