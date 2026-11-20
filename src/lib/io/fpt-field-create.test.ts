@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RestClient } from 'sg-widgets-core';
-import { createField, readCreateRight } from './fpt-field-create';
+import { createField, createMany, readCreateRight } from './fpt-field-create';
 import type { FptApi, RawAnswer } from './fpt-api';
 import type { PlannedCreate } from '../pure/field-create';
 
@@ -70,5 +70,32 @@ describe('readCreateRight', () => {
 			}
 		});
 		expect((await readCreateRight(api, bearer({ type: 'HumanUser', id: 42 }))).state).toBe('no');
+	});
+});
+
+describe('createMany', () => {
+	const ASSET_PLAN: PlannedCreate = { ...PLAN, kind: 'asset', entityType: 'Asset' };
+	const TYPE_PLAN: PlannedCreate = { ...PLAN, slot: 'type', name: 'sg_shot_type', display: 'Shot Type' };
+
+	it('creates the planned fields one after the other, each read again first, and answers each in order', async () => {
+		const api = fake({
+			'POST /schema/Shot/fields': { status: 201, body: { links: { self: '/api/v1/schema/Shot/fields/sg_difficulty' } } },
+			'POST /schema/Asset/fields': { status: 201, body: { links: { self: '/api/v1/schema/Asset/fields/sg_difficulty' } } }
+		});
+		const seen: string[] = [];
+		const answers = await createMany(api, [PLAN, ASSET_PLAN], (i, answer) => seen.push(`${i}:${answer.state}`));
+		expect(answers.map((a) => a.state)).toEqual(['created', 'created']);
+		expect(seen).toEqual(['0:created', '1:created']);
+		expect(api.calls).toEqual(['GET /schema/Shot/fields/sg_difficulty', 'POST /schema/Shot/fields', 'GET /schema/Asset/fields/sg_difficulty', 'POST /schema/Asset/fields']);
+	});
+
+	it('goes on past a taken name, and stops at a refusal: the rest are not tried (132)', async () => {
+		const api = fake({
+			'GET /schema/Shot/fields/sg_difficulty': { status: 200, body: { data: {} } },
+			'POST /schema/Shot/fields': { status: 500, body: { errors: [{ code: 105, title: "User doesn't have permission to create a Field" }] } }
+		});
+		const answers = await createMany(api, [PLAN, TYPE_PLAN, ASSET_PLAN]);
+		expect(answers.map((a) => a.state)).toEqual(['exists', 'refused']);
+		expect(api.calls.some((c) => c.includes('/Asset/'))).toBe(false);
 	});
 });

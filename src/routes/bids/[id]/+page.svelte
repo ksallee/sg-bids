@@ -1,13 +1,15 @@
 <!--
-	A request's page: who is invited and where each stands, inviting a vendor (the link shows once),
-	revoking and making a new link, the way to the comparison, then the request as vendors get it.
-	Vendor names and Groups live on the invitations, never in the request.
+	A request's page, on a centred reading measure: who is invited and where each stands, inviting a
+	vendor (the link shows once), revoking and making a new link, then the request as vendors get it.
+	The way to the comparison is the page's primary action once a bid is in; before that, inviting
+	is. Vendor names and Groups live on the invitations, never in the request.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import Notice from '$lib/app/notice.svelte';
+	import PageBody from '$lib/app/page-body.svelte';
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import Section from '$lib/app/section.svelte';
@@ -29,7 +31,6 @@
 	let projectId = $state<number | null>(null);
 	let siteUrl = $state('');
 	let loaded = $state<LoadedRequest | null>(null);
-	let problem = $state<string | null>(null);
 	let shown = $state<{ name: string; link: string } | null>(null);
 	let busy = $state<string | null>(null);
 	let actionError = $state<string | null>(null);
@@ -39,7 +40,7 @@
 		if (live.problem) throw new Error(live.problem);
 		siteUrl = live.siteUrl;
 		const project = workingProject(live.siteUrl, page.url);
-		if (!project) throw new Error('Pick the project on the requests list first.');
+		if (!project) throw new Error('Open the request from the requests list.');
 		projectId = project.id;
 		loaded = await api.get(project.id, id);
 	}
@@ -81,6 +82,7 @@
 
 	const time = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 	const day = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 	const TONE: Record<string, string> = {
 		not_opened: 'bg-muted-foreground',
 		opened: 'bg-info',
@@ -89,9 +91,11 @@
 		revoked: 'bg-destructive',
 		expired: 'bg-destructive'
 	};
+	const TH = 'text-muted-foreground border-border h-9 border-b px-3 text-left text-xs font-medium whitespace-nowrap';
+	const TD = 'border-border border-b px-3 py-2.5';
 </script>
 
-<svelte:head><title>Request · SG Bids</title></svelte:head>
+<svelte:head><title>{loaded?.request.header.title ?? 'Request'} · SG Bids</title></svelte:head>
 
 {#await ready}
 	<PageState state="loading" title="Opening the request…" />
@@ -100,20 +104,23 @@
 		{@const r = loaded.request}
 		{@const counts = summarize(r)}
 		{@const submitted = loaded.invitations.filter((inv) => inv.state.kind === 'submitted').length}
-		<PageHeader title={r.header.title ?? 'Untitled request'}>
+		{@const comparing = loaded.status !== 'draft' && submitted > 0}
+		<PageHeader measure="wide" title={r.header.title ?? 'Untitled request'} back={{ href: '/bids', label: 'Bid requests' }}>
 			{#snippet context()}
 				<StatusChip status={loaded!.status} />
 				<span class="text-foreground">{r.header.project}</span>
-				<span aria-hidden="true">·</span><span class="font-mono text-xs">{r.header.code}</span>
-				<span aria-hidden="true">·</span><span>Round {r.header.round}</span>
-				<span aria-hidden="true">·</span><span>{counts.shots} shots, {counts.assets} assets</span>
+				<span class="text-foreground font-mono text-xs">{r.header.code}</span>
+				<span>Round {r.header.round}</span>
+				<span class="tabular-nums">{plural(counts.shots, 'shot')}, {plural(counts.assets, 'asset')}</span>
 			{/snippet}
 			{#snippet actions()}
-				<Button variant="outline" href="/bids">Requests</Button>
 				{#if loaded!.status === 'draft'}
 					<Button href={`/bids/new?id=${r.id}`}>Edit the draft</Button>
 				{:else}
-					<Button onclick={() => void newRound()} disabled={busy === 'round'}>{busy === 'round' ? 'Starting…' : 'New round'}</Button>
+					<Button variant="outline" onclick={() => void newRound()} disabled={busy === 'round'}>{busy === 'round' ? 'Starting…' : 'New round'}</Button>
+					<Button href={`/bids/${r.id}/compare`} variant={comparing ? 'default' : 'outline'} data-slot="open-comparison">
+						<Columns3 data-icon="inline-start" />Compare {submitted === 0 ? 'the bids' : plural(submitted, 'bid')}
+					</Button>
 				{/if}
 			{/snippet}
 			{#if loaded.status === 'draft'}
@@ -122,60 +129,60 @@
 			{#if actionError}<Notice tone="destructive">{actionError}</Notice>{/if}
 		</PageHeader>
 
-		<div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-			<div class="flex w-full max-w-6xl flex-col gap-8 px-6 py-6">
-				{#if shown}
-					<LinkOnce name={shown.name} link={shown.link} onDone={() => (shown = null)} />
-				{/if}
+		<PageBody measure="wide" class="gap-10">
+			{#if shown}
+				<LinkOnce name={shown.name} link={shown.link} onDone={() => (shown = null)} />
+			{/if}
 
-				<UndoNote requestId={r.id} />
-				{#if loaded.award}
-					<AwardPanel projectId={projectId!} request={r} publication={loaded.award} {siteUrl} onChange={() => void api.get(projectId!, id).then((next) => (loaded = next))} />
-				{/if}
+			<UndoNote requestId={r.id} />
+			{#if loaded.award}
+				<AwardPanel projectId={projectId!} request={r} publication={loaded.award} {siteUrl} onChange={() => void api.get(projectId!, id).then((next) => (loaded = next))} />
+			{/if}
 
-				<Section title="Vendors" meta={`${loaded.invitations.length} invited`}>
-					{#if loaded.status === 'draft' || loaded.status === 'issued'}
-						<InviteForm projectId={projectId!} requestId={r.id} onInvited={invited} />
-					{/if}
-					{#if loaded.invitations.length === 0}
-						<p class="text-muted-foreground text-sm">Nobody is invited yet.</p>
-					{:else}
-						<table class="w-full text-sm" data-slot="invitations">
+			<Section title="Vendors" meta={`${loaded.invitations.length} invited, ${submitted} ${submitted === 1 ? 'bid' : 'bids'} in`}>
+				{#if loaded.status === 'draft' || loaded.status === 'issued'}
+					<InviteForm projectId={projectId!} requestId={r.id} onInvited={invited} primary={!comparing} />
+				{/if}
+				{#if loaded.invitations.length === 0}
+					<p class="text-muted-foreground text-sm">Nobody is invited yet.</p>
+				{:else}
+					<div class="overflow-x-auto">
+						<table class="w-full min-w-[40rem] border-separate border-spacing-0 text-sm" data-slot="invitations">
 							<thead>
-								<tr class="text-muted-foreground border-border border-b text-left text-xs">
-									<th class="py-2 pr-3 font-medium">Vendor</th>
-									<th class="px-3 py-2 font-medium">Where it stands</th>
-									<th class="px-3 py-2 font-medium">Link works until</th>
-									<th class="py-2 pl-3 text-right font-medium"><span class="sr-only">Actions</span></th>
+								<tr>
+									<th class={cn(TH, 'pl-0')}>Vendor</th>
+									<th class={TH}>Where it stands</th>
+									<th class={TH}>Link works until</th>
+									<th class={cn(TH, 'pr-0 text-right')}><span class="sr-only">Actions</span></th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each loaded.invitations as inv (inv.vendor.id)}
 									{@const s = inv.state}
 									{@const dead = s.kind === 'revoked' || s.kind === 'expired'}
-									<tr class="border-border border-b" data-state={s.kind}>
-										<td class="py-2.5 pr-3">
-											<div class="flex flex-col">
-												<span class="font-medium">{inv.vendor.name}</span>
-												<span class="text-muted-foreground text-xs">{inv.vendor.email}{inv.vendor.fpt ? ', linked to a Flow PT Group' : ''}</span>
+									<tr class="group" data-state={s.kind}>
+										<td class={cn(TD, 'pl-0')}>
+											<div class="flex min-w-0 flex-col">
+												<span class="truncate font-medium">{inv.vendor.name}</span>
+												<span class="text-muted-foreground truncate text-xs">{inv.vendor.email}{inv.vendor.fpt ? ', linked to a Flow PT Group' : ''}</span>
 											</div>
 										</td>
-										<td class="px-3 py-2.5">
-											<span class="inline-flex items-center gap-2">
+										<td class={TD}>
+											<span class="inline-flex flex-wrap items-center gap-x-2">
 												<span class={cn('size-1.5 rounded-full', TONE[s.kind])} aria-hidden="true"></span>
 												{stateLabel(s)}
-												{#if 'at' in s && s.at}<span class="text-muted-foreground text-xs">{time.format(new Date(s.at))}</span>{/if}
+												{#if 'at' in s && s.at}<span class="text-muted-foreground text-xs tabular-nums">{time.format(new Date(s.at))}</span>{/if}
 											</span>
 										</td>
-										<td class="text-muted-foreground px-3 py-2.5">{dead ? '' : day.format(new Date(inv.expiresAt))}</td>
-										<td class="py-2.5 pl-3 text-right whitespace-nowrap">
+										<td class={cn(TD, 'text-muted-foreground tabular-nums')}>{dead ? '' : day.format(new Date(inv.expiresAt))}</td>
+										<td class={cn(TD, 'pr-0 text-right whitespace-nowrap')}>
 											{#if loaded.status !== 'closed'}
-												<Button size="sm" variant="outline" onclick={() => void reissue(inv.vendor.id, inv.vendor.name)} disabled={busy !== null}>
+												<Button size="sm" variant="ghost" onclick={() => void reissue(inv.vendor.id, inv.vendor.name)} disabled={busy !== null}>
 													{busy === `reissue:${inv.vendor.id}` ? 'Making…' : 'New link'}
 												</Button>
 											{/if}
 											{#if !dead}
-												<Button size="sm" variant="ghost" onclick={() => void revoke(inv.vendor.id)} disabled={busy !== null}>
+												<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={() => void revoke(inv.vendor.id)} disabled={busy !== null}>
 													{busy === `revoke:${inv.vendor.id}` ? 'Revoking…' : 'Revoke'}
 												</Button>
 											{/if}
@@ -184,33 +191,18 @@
 								{/each}
 							</tbody>
 						</table>
-						<p class="text-muted-foreground text-xs">A vendor's bid shows as opened until they submit it. Drafts stay theirs.</p>
-					{/if}
-				</Section>
-
-				<Section title="Comparison" meta={`${submitted} of ${loaded.invitations.length} bids in`} data-slot="comparison">
-					<div class="bg-card flex flex-wrap items-center gap-4 rounded-lg border p-4">
-						<Columns3 class="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
-						<div class="flex min-w-0 flex-1 flex-col gap-0.5">
-							<p class="text-sm font-medium">{submitted === 0 ? 'No bid in yet' : 'The bids side by side'}</p>
-							<p class="text-muted-foreground text-xs">
-								{submitted === 0
-									? 'Once a vendor submits, its prices show here shot by shot. Drafts stay theirs.'
-									: 'Shot by shot in your base currency, with the rates you set, the totals and rebate estimates, and award scenarios.'}
-							</p>
-						</div>
-						<Button href={`/bids/${r.id}/compare`} variant={submitted === 0 ? 'outline' : 'default'} disabled={loaded.status === 'draft'}>Open the comparison</Button>
 					</div>
-				</Section>
+					<p class="text-muted-foreground text-xs">A vendor's bid shows as opened until they submit it. Drafts stay theirs.</p>
+				{/if}
+			</Section>
 
-				<Section title="The request as vendors get it">
-					<VendorSheet request={r} />
-				</Section>
-			</div>
-		</div>
+			<Section title="The request as vendors get it">
+				<VendorSheet request={r} />
+			</Section>
+		</PageBody>
 	{/if}
 {:catch error}
 	<PageState state="error" title="Could not open the request" line={error.message}>
-		{#snippet action()}<Button href="/bids">Requests</Button>{/snippet}
+		{#snippet action()}<Button href="/bids">Bid requests</Button>{/snippet}
 	</PageState>
 {/await}

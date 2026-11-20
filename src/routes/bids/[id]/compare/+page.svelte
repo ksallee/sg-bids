@@ -1,6 +1,6 @@
 <!--
-	A request's bids side by side, and the award scenarios. A workbench: the grid takes the width, the
-	scenario rail sits on the right. The state and its logic are in $lib/app/compare and $lib/pure.
+	A request's bids side by side, and the award scenarios. A workbench: the grid takes the full width
+	and the rest of the height, the scenario rail sits on the right. The state and its logic are in $lib/app/compare and $lib/pure.
 -->
 <script lang="ts">
 	import { page } from '$app/state';
@@ -63,16 +63,13 @@
 	{#if s?.data && s.grid}
 		{@const r = s.data.request}
 		{@const needRates = s.grid.columns.filter((c) => c.needsRate).length}
-		<PageHeader title={`Compare: ${r.header.title ?? 'Untitled request'}`}>
+		<PageHeader title={`Compare: ${r.header.title ?? 'Untitled request'}`} back={{ href: `/bids/${r.id}`, label: 'The request' }}>
 			{#snippet context()}
 				<StatusChip status={s!.data!.status} />
 				<span class="text-foreground">{r.header.project}</span>
-				<span aria-hidden="true">·</span><span class="font-mono text-xs">{s!.data!.code}</span>
-				<span aria-hidden="true">·</span><span>Round {r.header.round}</span>
-				<span aria-hidden="true">·</span><span>{s!.grid!.columns.length} bids in {r.header.baseCurrency}</span>
-			{/snippet}
-			{#snippet actions()}
-				<Button variant="outline" href={`/bids/${r.id}`}>The request</Button>
+				<span class="text-foreground font-mono text-xs">{s!.data!.code}</span>
+				<span>Round {r.header.round}</span>
+				<span>{s!.grid!.columns.length} {s!.grid!.columns.length === 1 ? 'bid' : 'bids'} in {r.header.baseCurrency}</span>
 			{/snippet}
 			{#if needRates > 0}
 				<Notice tone="warning">

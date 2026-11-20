@@ -13,7 +13,7 @@ import { cushion, drafts } from '$lib/drafts';
 import { isLocalId, localId, savable } from '$lib/pure/persist';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { fptApi } from '$lib/io/fpt-api';
-import { createField, readCreateRight } from '$lib/io/fpt-field-create';
+import { createField, createMany, readCreateRight } from '$lib/io/fpt-field-create';
 import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
@@ -298,6 +298,23 @@ export class Builder {
 		if (this.data.state === 'ready') this.data = { state: 'ready', value: { ...this.data.value, shape } };
 		this.setMapping(plan.kind, plan.slot, answer.name, { fresh: true });
 		return answer;
+	}
+
+	/**
+	 * Create the planned fields in order (`createMany`), then read the schema again once and map each
+	 * created field. Answers what the site said to each one it was sent; a refusal stops the run.
+	 */
+	async createFields(plans: readonly PlannedCreate[], onEach?: (index: number, answer: CreateAnswer) => void): Promise<CreateAnswer[]> {
+		const auth = liveAuth();
+		const answers = await createMany(fptApi(auth.siteUrl, auth.token), plans, onEach);
+		const made = answers.flatMap((answer, i) => (answer.state === 'created' || answer.state === 'renamed' ? [{ plan: plans[i], name: answer.name }] : []));
+		if (made.length === 0) return answers;
+		const context = liveContext();
+		context.schema.invalidate();
+		const shape = await loadShape(context);
+		if (this.data.state === 'ready') this.data = { state: 'ready', value: { ...this.data.value, shape } };
+		for (const { plan, name } of made) this.setMapping(plan.kind, plan.slot, name, { fresh: true });
+		return answers;
 	}
 
 	fieldsFor(kind: ItemKind): string[] {

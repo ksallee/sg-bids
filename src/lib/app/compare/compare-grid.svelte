@@ -38,13 +38,15 @@
 	const GROUP = 40;
 	const LABEL_W = 264;
 	const COL_W = 184;
+	/** A vendor column grows to this, so a price stays near its shot on a wide screen; the item column takes the rest. */
+	const COL_MAX = 360;
 
 	const grid = $derived(s.grid!);
 	const data = $derived(s.data!);
 	const display = $derived(s.view?.display ?? []);
 	const offsets = $derived(offsetsOf(display, { group: GROUP, row: ROW }));
 	const columns = $derived(grid.columns);
-	const template = $derived(`${LABEL_W}px repeat(${columns.length}, minmax(${COL_W}px, 1fr))`);
+	const template = $derived(`minmax(${LABEL_W}px, 1fr) repeat(${columns.length}, minmax(${COL_W}px, ${COL_MAX}px))`);
 	const minWidth = $derived(LABEL_W + columns.length * COL_W);
 
 	let scroller = $state<HTMLDivElement | null>(null);

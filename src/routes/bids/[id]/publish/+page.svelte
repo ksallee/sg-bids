@@ -58,21 +58,20 @@
 {:then}
 	{#if s?.data}
 		{@const r = s.data.request}
-		<PageHeader title="Publish the award to Flow PT">
+		<PageHeader title="Publish the award to Flow PT" back={{ href: `/bids/${r.id}/compare`, label: 'Compare' }}>
 			{#snippet context()}
 				<StatusChip status={s!.data!.status} />
 				<span class="text-foreground">{r.header.title ?? 'Untitled request'}</span>
 				<span>{s!.scenario ? `Scenario: ${s!.scenario.name}` : 'No scenario chosen'}</span>
 			{/snippet}
 			{#snippet actions()}
-				<Button variant="outline" href={`/bids/${r.id}`}>The request</Button>
-				<Button variant="outline" href={`/bids/${r.id}/compare`}>Compare</Button>
+				<Button variant="ghost" href={`/bids/${r.id}`}>The request</Button>
 			{/snippet}
 		</PageHeader>
 
 		<div class="flex min-h-0 flex-1 flex-col lg:flex-row">
-			<div class="min-h-0 min-w-0 flex-1 overflow-y-auto">
-				<div class="flex max-w-5xl flex-col gap-6 px-6 py-6">
+			<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6">
+				<div class="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 py-6">
 					{#if s.phase === 'done'}
 						<Notice tone="info" data-slot="published">Published and read back. Every write landed as sent.</Notice>
 					{:else if s.phase === 'failed'}
@@ -127,7 +126,11 @@
 					{:else if s.previewing}
 						<PageState state="loading" title="Reading what Flow PT holds…" />
 					{:else}
-						<PageState state="empty" title="The preview shows here" line="Once nothing on the right blocks, every write to Flow PT shows here before anything is written." />
+						<PageState state="empty" title="The preview shows here" line="Once nothing on the right blocks, every write to Flow PT shows here before anything is written.">
+							{#snippet action()}
+								{#if !s!.scenario}<Button variant="outline" href={`/bids/${r.id}/compare`}>Choose a scenario</Button>{/if}
+							{/snippet}
+						</PageState>
 					{/if}
 				</div>
 			</div>
