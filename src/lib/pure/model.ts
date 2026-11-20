@@ -180,6 +180,8 @@ export interface BidLine {
 	readonly notes?: string;
 	/** How the vendor plans to do the work. */
 	readonly methodology?: string;
+	/** What the price takes for granted for this shot or asset. */
+	readonly assumptions?: string;
 	readonly elementsNeeded?: string;
 	readonly startWeek?: string;
 	/** The vendor will not do this shot or asset. */

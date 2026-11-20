@@ -1,0 +1,160 @@
+/**
+ * A vendor's draft as it arrives over the wire, read field by field into a `BidDraft`. Nothing the
+ * vendor sends is trusted: unknown keys are dropped (ids, status, round: the server owns them),
+ * every amount is whole minor units, zero or more, and every list and text has a size cap. The
+ * vendor never sends an exchange rate; the rate is always null.
+ *
+ * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store.
+ */
+
+import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PaymentMilestone, RebateSplit } from './model';
+import type { Money } from './money';
+import { isPercent } from './percent';
+import type { BidDraft } from './rows';
+
+export type DraftInput = { readonly ok: true; readonly draft: BidDraft } | { readonly ok: false; readonly message: string };
+
+const MAX_TEXT = 20_000;
+const MAX_LINES = 10_000;
+const CODE = /^[A-Z]{3}$/;
+const COST_KINDS: readonly NonShotCostKind[] = ['overhead', 'supervision', 'on_set', 'contingency', 'other'];
+
+class Wrong extends Error {
+	constructor(readonly where: string) {
+		super(where);
+	}
+}
+
+type Obj = Record<string, unknown>;
+
+function object(value: unknown, where: string): Obj {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Wrong(where);
+	return value as Obj;
+}
+
+function list(value: unknown, where: string, max: number): unknown[] {
+	if (!Array.isArray(value) || value.length > max) throw new Wrong(where);
+	return value;
+}
+
+function text(value: unknown, where: string, max = MAX_TEXT): string {
+	if (typeof value !== 'string' || value.length > max) throw new Wrong(where);
+	return value;
+}
+
+function optionalText(value: unknown, where: string): string | undefined {
+	return value === undefined ? undefined : text(value, where);
+}
+
+function amount(value: unknown, where: string): Money {
+	const o = object(value, where);
+	if (!Number.isSafeInteger(o.minor) || (o.minor as number) < 0 || typeof o.currency !== 'string' || !CODE.test(o.currency)) throw new Wrong(where);
+	return { minor: o.minor as number, currency: o.currency };
+}
+
+function percent(value: unknown, where: string): string {
+	if (typeof value !== 'string' || value.length > 40 || !isPercent(value)) throw new Wrong(where);
+	return value;
+}
+
+function bool(value: unknown, where: string): boolean {
+	if (typeof value !== 'boolean') throw new Wrong(where);
+	return value;
+}
+
+/** Keys whose value is undefined are left out, so the draft matches what the store reads back. */
+function defined<T extends Obj>(record: T): T {
+	return Object.fromEntries(Object.entries(record).filter(([, v]) => v !== undefined)) as T;
+}
+
+function line(value: unknown, where: string): BidDraft['lines'][number] {
+	const o = object(value, where);
+	const target = object(o.target, `${where}.target`);
+	if ((target.kind !== 'shot' && target.kind !== 'asset') || typeof target.id !== 'string' || target.id === '' || target.id.length > 200) {
+		throw new Wrong(`${where}.target`);
+	}
+	const departments =
+		o.departments === undefined
+			? undefined
+			: list(o.departments, `${where}.departments`, 100).map((d, i): DepartmentCost => {
+					const at = `${where}.departments[${i}]`;
+					const row = object(d, at);
+					return defined({
+						department: text(row.department, `${at}.department`, 200),
+						days: row.days === undefined ? undefined : percent(row.days, `${at}.days`),
+						cost: row.cost === undefined ? undefined : amount(row.cost, `${at}.cost`)
+					});
+				});
+	const result: Omit<BidLine, 'id'> = defined({
+		target: { kind: target.kind, id: target.id },
+		total: amount(o.total, `${where}.total`),
+		excluded: bool(o.excluded, `${where}.excluded`),
+		departments,
+		compute: o.compute === undefined ? undefined : amount(o.compute, `${where}.compute`),
+		markup: o.markup === undefined ? undefined : amount(o.markup, `${where}.markup`),
+		notes: optionalText(o.notes, `${where}.notes`),
+		methodology: optionalText(o.methodology, `${where}.methodology`),
+		assumptions: optionalText(o.assumptions, `${where}.assumptions`),
+		elementsNeeded: optionalText(o.elementsNeeded, `${where}.elementsNeeded`),
+		startWeek: optionalText(o.startWeek, `${where}.startWeek`)
+	});
+	return result;
+}
+
+function adjustment(value: unknown, where: string): Adjustment | null {
+	if (value === null || value === undefined) return null;
+	const o = object(value, where);
+	if (o.kind === 'amount') return { kind: 'amount', amount: amount(o.amount, where) };
+	if (o.kind === 'percent') return { kind: 'percent', percent: percent(o.percent, where) };
+	throw new Wrong(where);
+}
+
+function split(value: unknown, where: string): RebateSplit {
+	const o = object(value, where);
+	const base = object(o.base, `${where}.base`);
+	let parsed: RebateSplit['base'];
+	if (base.kind === 'all' || base.kind === 'labour') parsed = { kind: base.kind };
+	else if (base.kind === 'contract') parsed = { kind: 'contract', percent: percent(base.percent, `${where}.base`) };
+	else throw new Wrong(`${where}.base`);
+	return {
+		jurisdiction: text(o.jurisdiction, `${where}.jurisdiction`, 20),
+		workPercent: percent(o.workPercent, `${where}.workPercent`),
+		rate: percent(o.rate, `${where}.rate`),
+		base: parsed
+	};
+}
+
+export function readDraft(value: unknown): DraftInput {
+	try {
+		const o = object(value, 'the bid');
+		if (typeof o.currency !== 'string' || !CODE.test(o.currency)) throw new Wrong('currency');
+		const draft: BidDraft = defined({
+			number: text(o.number ?? '', 'number', 200),
+			date: text(o.date ?? '', 'date', 10),
+			currency: o.currency,
+			rate: null,
+			validUntil: o.validUntil === undefined ? undefined : text(o.validUntil, 'validUntil', 10),
+			assumptions: list(o.assumptions ?? [], 'assumptions', 500).map((a, i) => text(a, `assumptions[${i}]`)),
+			exclusions: list(o.exclusions ?? [], 'exclusions', 500).map((a, i) => text(a, `exclusions[${i}]`)),
+			milestones: list(o.milestones ?? [], 'milestones', 100).map((m, i): PaymentMilestone => {
+				const at = `milestones[${i}]`;
+				const row = object(m, at);
+				return defined({ label: text(row.label, `${at}.label`, 500), percent: percent(row.percent, `${at}.percent`), due: optionalText(row.due, `${at}.due`) });
+			}),
+			lines: list(o.lines, 'lines', MAX_LINES).map((l, i) => line(l, `lines[${i}]`)),
+			costs: list(o.costs ?? [], 'costs', 200).map((c, i): NonShotCost => {
+				const at = `costs[${i}]`;
+				const row = object(c, at);
+				if (!COST_KINDS.includes(row.kind as NonShotCostKind)) throw new Wrong(`${at}.kind`);
+				return { kind: row.kind as NonShotCostKind, label: text(row.label, `${at}.label`, 500), amount: amount(row.amount, `${at}.amount`), labour: bool(row.labour, `${at}.labour`) };
+			}),
+			discount: adjustment(o.discount, 'discount'),
+			tax: adjustment(o.tax, 'tax'),
+			rebate: list(o.rebate ?? [], 'rebate', 50).map((s, i) => split(s, `rebate[${i}]`))
+		});
+		return { ok: true, draft };
+	} catch (error) {
+		if (error instanceof Wrong) return { ok: false, message: `The bid could not be read at ${error.where}.` };
+		throw error;
+	}
+}
