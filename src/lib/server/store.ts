@@ -335,10 +335,17 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return { id: row.id, vendorName: row.vendor_name, live: row.revoked_at === null && new Date(row.expires_at).getTime() > now().getTime() };
 	}
 
-	/** Whether an invitation still exists, by id: its link was replaced when its token no longer opens it. */
-	async function invitationExists(invitationId: string): Promise<boolean> {
-		if (!/^[0-9a-f-]{36}$/i.test(invitationId)) return false;
-		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('id', invitationId).maybeSingle());
+	/**
+	 * Whether this token once opened this invitation and production has since replaced it. Only
+	 * then is the answer "replaced": a cookie naming an invitation with any other token learns
+	 * nothing of it, not even that it exists.
+	 */
+	async function wasReplaced(invitationId: string, token: unknown): Promise<boolean> {
+		const parsed = parseToken(token);
+		if (!parsed || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invitationId)) return false;
+		const row = await run<{ id: string } | null>(
+			db.from('invitations').select('id').eq('id', invitationId).contains('replaced_token_hashes', [hashToken(parsed)]).maybeSingle()
+		);
 		return row !== null;
 	}
 
@@ -463,7 +470,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		saveScenario,
 		openInvitation,
 		linkInvitation,
-		invitationExists,
+		wasReplaced,
 		vendorBidRecords,
 		vendorState,
 		saveDraftBid,

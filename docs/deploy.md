@@ -15,6 +15,12 @@ The hosted copy is a demo. Bids hold shot lists and prices, so a studio runs its
    them that no site serves. The server never follows a redirect from Flow PT.
 5. Open the deployment and sign in as yourself.
 
+Vendor links: a link is `/v/<token>`, so the token is in the path of the first request and in
+your host's request logs (Vercel's included) for as long as they are kept. That is inherent to a
+link. The first request does no lookup and renders nothing: it moves the token to a cookie and
+redirects at once, so the token stays out of the address bar, the history and any referrer. Keep
+the logs private, and give a vendor a new link (it replaces the old one) if a log leaks.
+
 Supabase: the requests and bids live in your own Supabase project. The schema is in
 `supabase/migrations/`; `docs/development.md` describes it. The steps to wire it to your deployment
 land with the first page that uses it.

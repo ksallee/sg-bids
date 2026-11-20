@@ -4,6 +4,7 @@
 // another vendor's live link, the page asks first, naming both, and only a post from this site
 // switches (`$lib/server/vendor-http`).
 import { error, redirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
+import { hashToken } from '$lib/pure/token';
 import { serverStore } from '$lib/server/env';
 import {
 	address,
@@ -23,15 +24,17 @@ async function opening(event: Pick<RequestEvent, 'cookies' | 'getClientAddress'>
 	const token = event.cookies.get(OPENING_COOKIE);
 	if (!token) redirect(303, '/v');
 	const who = address(event);
+	const hash = hashToken(token);
 	const now = Date.now();
-	if (lookups.blocked(who, now)) redirect(303, '/v?link=wait');
+	if (!lookups.allowed(who, hash, now)) redirect(303, '/v?link=wait');
 	const invitation = await serverStore().linkInvitation(token);
 	if (!invitation) {
-		lookups.fail(who, now);
+		lookups.fail(who, hash, now);
 		clearOpeningCookie(event.cookies);
 		clearVendorCookie(event.cookies);
 		redirect(303, '/v?link=invalid');
 	}
+	lookups.pass(hash);
 	return { token, invitation };
 }
 

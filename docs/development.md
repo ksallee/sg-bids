@@ -122,8 +122,11 @@ When the browser already holds another vendor's live link, `/v/open` does not re
 bid on screen. The form names the vendor at the top at all times, so a switch is plain to see.
 
 When production gives a vendor a new link, the old token stops working and the vendor keeps its
-bids. A vendor still holding the old cookie gets 410 and a page saying the link was replaced; the
-new link opens its draft or submitted bid as it was.
+bids. A trigger keeps the hashes of an invitation's last ten tokens
+(`20261121120000_replaced_tokens.sql`). A vendor still holding an old cookie gets 410 and a page
+saying the link was replaced; the new link opens its draft or submitted bid as it was. Any other
+cookie that fails gets 401, whatever invitation id it names, so the answer never tells an outsider
+whether an invitation exists.
 
 The page at `/v` calls these, each authorised by the cookie (`src/lib/server/vendor-api.ts`). Every
 write also names the invitation and the bid the page loaded, `{invitationId, bidId}`. When the
@@ -150,10 +153,12 @@ the stored key (`src/lib/pure/vendor-keys.ts`). Bids, scenarios and awards keep 
 and the Flow PT refs stay server side, for production and the award. The test seeds distinctive
 Flow PT ids and finds none in any vendor answer.
 
-Failed lookups are counted per client address: twenty in ten minutes, then 429 for the rest of the
-window (`src/lib/pure/rate-limit.ts`). The count lives in one server instance. On Vercel each
-instance keeps its own, so it slows a guesser and caps one instance's database calls; it is not a
-global limit. The token's 32 random bytes are the real guard.
+Only failed lookups count, per client address and per token: twenty in ten minutes, then 429 for
+the rest of the window, before any database call (`src/lib/pure/rate-limit.ts`). A token that
+worked on the instance passes even when its address is held back, so one bad client behind a
+shared address does not lock out the vendors beside it. The count lives in one server instance. On
+Vercel each instance keeps its own, so it slows a guesser and caps one instance's database calls;
+it is not a global limit. The token's 32 random bytes are the real guard.
 
 ### A dev request to bid on
 

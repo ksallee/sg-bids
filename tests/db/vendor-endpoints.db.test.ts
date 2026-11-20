@@ -203,7 +203,8 @@ describe('the vendor endpoints', () => {
 		expect(row.status).toBe('draft');
 	});
 
-	it('refuse a browser with no link, a bad link, and a guesser after twenty misses', async () => {
+	it('refuse a browser with no link, a bad link, and a guesser after twenty misses, but not the vendor beside it', async () => {
+		const { a } = await issuedWithTwoVendors();
 		const none = browser('203.0.113.9');
 		expect((await none.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
 
@@ -212,25 +213,50 @@ describe('the vendor endpoints', () => {
 		expect(opened.headers.get('location')).toBe('/v?link=invalid');
 		expect(bad.jar.has('sg_bids_vendor')).toBe(false);
 
-		// A token of the right shape that no invitation holds: no cookie, and it counts as a miss.
-		const guesser = browser('203.0.113.11');
-		const wrong = 'A'.repeat(42) + 'E';
+		// Vendor A works behind the same shared address the guesser will use.
+		const shared = '203.0.113.11';
+		const vendorA = browser(shared);
+		await vendorA.open(open, openPage, a.token);
+		expect((await vendorA.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(200);
+
+		// Tokens of the right shape that no invitation holds: no cookie, and each counts as a miss.
+		const guesser = browser(shared);
+		const wrong = (i: number) => 'A'.repeat(40) + String.fromCharCode(66 + i, 66 + i) + 'E';
 		for (let i = 0; i < 10; i++) {
-			const miss = await guesser.open(open, openPage, wrong);
+			const miss = await guesser.open(open, openPage, wrong(i));
 			expect(miss.headers.get('location')).toBe('/v?link=invalid');
 		}
 		expect(guesser.jar.has('sg_bids_vendor')).toBe(false);
-		// A forged cookie misses too.
-		guesser.jar.set('sg_bids_vendor', { value: wrong, options: {} });
-		for (let i = 0; i < 10; i++) expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		// Forged cookies miss too.
+		for (let i = 10; i < 20; i++) {
+			guesser.jar.set('sg_bids_vendor', { value: wrong(i), options: {} });
+			expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		}
+		guesser.jar.set('sg_bids_vendor', { value: wrong(20), options: {} });
 		const blocked = await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
 		expect(blocked.status).toBe(429);
 		expect(blocked.json).toEqual({ error: 'Too many tries. Wait a few minutes.' });
-		const held = await guesser.open(open, openPage, wrong);
+		const held = await guesser.open(open, openPage, wrong(21));
 		expect(held.headers.get('location')).toBe('/v?link=wait');
+
+		// The vendor beside it is not locked out: its link worked here, so it passes.
+		expect((await vendorA.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(200);
+		expect((await vendorA.call(bidRoute.GET as Handler, 'GET', '/v/api/bid')).status).toBe(200);
 
 		// Another address is not held back.
 		expect((await bad.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+	});
+
+	it('hold back one token tried from many addresses', async () => {
+		const wrong = 'Z'.repeat(42) + 'E';
+		for (let i = 0; i < 20; i++) {
+			const one = browser(`198.51.100.${i + 1}`);
+			one.jar.set('sg_bids_vendor', { value: wrong, options: {} });
+			expect((await one.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		}
+		const late = browser('198.51.100.200');
+		late.jar.set('sg_bids_vendor', { value: wrong, options: {} });
+		expect((await late.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(429);
 	});
 
 	it('tell a vendor whose link production replaced, and open its bids with the new link', async () => {
@@ -273,13 +299,20 @@ describe('the vendor endpoints', () => {
 		expect(bid.json.versions.map((v: { status: string }) => v.status)).toEqual(['submitted', 'draft']);
 		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === vd.ids.get('shot:sh010')).total.minor).toBe(95_000);
 
-		// A forged cookie naming another vendor's invitation with a dead token learns nothing of it.
+		// A forged cookie naming another vendor's invitation learns nothing of it, not even that it
+		// exists: "replaced" needs a token that once opened that very invitation.
 		const forger = browser('203.0.113.14');
-		forger.jar.set('sg_bids_vendor', { value: `${b.invitation.id}.${a.token}`, options: {} });
-		const probe = await forger.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
-		expect(probe.status).toBe(410);
-		expect(probe.text).not.toContain(b.invitation.name);
-		expect(probe.text).not.toContain(b.invitation.id);
+		const unknown = (await sql`select gen_random_uuid() as id`)[0].id as string;
+		const answers: string[] = [];
+		for (const value of [`${b.invitation.id}.${a.token}`, `${b.invitation.id}.${'Q'.repeat(42)}E`, `${unknown}.${'Q'.repeat(42)}E`]) {
+			forger.jar.set('sg_bids_vendor', { value, options: {} });
+			const probe = await forger.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
+			expect(probe.status, value).toBe(401);
+			expect(probe.text).not.toContain(b.invitation.name);
+			expect(probe.text).not.toContain(b.invitation.id);
+			answers.push(probe.text);
+		}
+		expect(new Set(answers).size).toBe(1);
 	});
 
 	it('refuse a write that is not JSON', async () => {
