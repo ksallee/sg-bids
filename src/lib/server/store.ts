@@ -236,6 +236,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	): Promise<Invited> {
 		const request = await requestRow(principal, requestId);
 		if (request.status === 'closed') throw new StoreError(409, 'The request is closed.');
+		if (request.status === 'awarded') throw new StoreError(409, 'The request is awarded. Undo the award to invite another vendor.');
 		const token = encodeToken(random(TOKEN_BYTES));
 		const expires = (expiresAt ?? new Date(now().getTime() + DEFAULT_INVITATION_DAYS * 86_400_000)).toISOString();
 		const row = await run<InvitationView>(
@@ -374,7 +375,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return {
 			invitation: vendor,
 			code: request.code,
-			status: request.status === 'closed' ? 'closed' : 'issued',
+			// A vendor is told bidding is closed once the request is awarded, never who won.
+			status: request.status === 'issued' ? 'issued' : 'closed',
 			issuedAt: request.issued_at,
 			expiresAt: row.expires_at,
 			request: requestFromRows(request, items, [vendor]),

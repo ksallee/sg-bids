@@ -7,6 +7,9 @@
 import { call } from '$lib/api';
 import type { Comparison, StoredRate, StoredScenario } from '$lib/server/comparison';
 import type { ScenarioPick } from '$lib/pure/model';
+import type { Publication } from '$lib/pure/award-record';
+import type { AwardRecordWire } from '$lib/pure/award-wire';
+import type { FptSite, Written } from '$lib/pure/fpt-award';
 
 export type { BidVersion, Comparison, StoredRate, StoredScenario } from '$lib/server/comparison';
 
@@ -19,5 +22,9 @@ export const compareApi = {
 		call<{ scenario: StoredScenario }>('scenario-save', projectId, { requestId, ...scenario }),
 	rename: (projectId: number, requestId: string, scenarioId: string, name: string) => call<{ scenario: StoredScenario }>('scenario-rename', projectId, { requestId, scenarioId, name }),
 	remove: (projectId: number, requestId: string, scenarioId: string) => call<{ ok: true }>('scenario-delete', projectId, { requestId, scenarioId }),
-	choose: (projectId: number, requestId: string, scenarioId: string | null) => call<{ scenarios: StoredScenario[] }>('scenario-choose', projectId, { requestId, scenarioId })
+	choose: (projectId: number, requestId: string, scenarioId: string | null) => call<{ scenarios: StoredScenario[] }>('scenario-choose', projectId, { requestId, scenarioId }),
+	recordAward: (projectId: number, body: Omit<AwardRecordWire, 'site' | 'written'> & { site: FptSite; written: Written }) =>
+		call<{ publication: Publication }>('award-record', projectId, { ...body }),
+	undoAward: (projectId: number, requestId: string, remaining: Written | null, error: string | null) =>
+		call<{ publication: Publication | null }>('award-undo', projectId, { requestId, remaining, error })
 };

@@ -66,8 +66,16 @@ describe('freezeShot', () => {
 		expect(freezeShot(SHOT_1002, { ...STOCK, episode: EPISODE_FROM_SEQUENCE }, sequences).episode).toBeUndefined();
 	});
 
-	it('falls back to the id when the row has no code', () => {
-		expect(freezeShot(shotRow(9, {}), {}).code).toBe('Shot 9');
+	it('labels a shot with no code by its position, never by its Flow PT id', () => {
+		expect(freezeShot(shotRow(918273, {}), {}, new Map(), 12).code).toBe('Shot 12');
+		expect(freezeShot(shotRow(918273, { code: '  ' }), {}, new Map(), 3).code).toBe('Shot 3');
+		expect(freezeShot(shotRow(918273, {}), {}).code).toBe('Shot');
+		expect(JSON.stringify(freezeShot(shotRow(918273, {}), {}, new Map(), 1))).not.toContain('Shot 918273');
+	});
+
+	it("leaves out an Episode the site gives no name, never naming it by id", () => {
+		const sequences = sequenceIndex([sequenceRow(31, 'sh010', { type: 'Episode', id: 4774, name: null } as never)], 'episode');
+		expect(freezeShot(SHOT_1001, { ...STOCK, episode: EPISODE_FROM_SEQUENCE }, sequences).episode).toBeUndefined();
 	});
 });
 
@@ -82,6 +90,10 @@ describe('freezeAsset', () => {
 			omitted: false
 		});
 		expect(freezeAsset(ASSET_502, { description: 'description', type: 'sg_asset_type' }).description).toBeUndefined();
+	});
+
+	it('labels an asset with no code by its position', () => {
+		expect(freezeAsset({ ...ASSET_501, id: 5544, attributes: {} }, {}, 2).name).toBe('Asset 2');
 	});
 });
 

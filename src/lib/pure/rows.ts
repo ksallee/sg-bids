@@ -37,7 +37,7 @@ interface Tenant {
 	project_id: number;
 }
 
-export type RequestStatus = 'draft' | 'issued' | 'closed';
+export type RequestStatus = 'draft' | 'issued' | 'awarded' | 'closed';
 export type BidRowStatus = 'draft' | 'submitted' | 'withdrawn';
 
 export interface RequestRow extends Tenant {

@@ -145,6 +145,13 @@ describe('mergePicked', () => {
 	it('names the picks it has no row for', () => {
 		expect(mergePicked([], [1001, 42], [SHOT_1001], freeze).missing).toEqual([42]);
 	});
+
+	it('gives the freeze each new item its position in the picks, from 1', () => {
+		const at: number[] = [];
+		const kept = shot('shot-1001', { fpt: { type: 'Shot', id: 1001 } });
+		mergePicked([kept], [1001, 1002], [SHOT_1001, SHOT_1002], (row, position) => (at.push(position), freeze(row)));
+		expect(at).toEqual([2]);
+	});
 });
 
 describe('addPicked', () => {
@@ -154,6 +161,13 @@ describe('addPicked', () => {
 		const items = addPicked([kept], [SHOT_1001, SHOT_1002], freeze);
 		expect(items.map((i) => i.id)).toEqual(['shot-1001', 'shot-1002']);
 		expect(items[0].notes).toBe('mine');
+	});
+
+	it('gives the freeze each new item its position after the kept ones', () => {
+		const at: number[] = [];
+		const kept = shot('shot-7', { fpt: { type: 'Shot', id: 7 } });
+		addPicked([kept], [SHOT_1001, SHOT_1002], (row, position) => (at.push(position), shot(`shot-${row.id}`)));
+		expect(at).toEqual([2, 3]);
 	});
 });
 

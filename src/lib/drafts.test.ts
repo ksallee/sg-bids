@@ -34,7 +34,7 @@ function fakeApi() {
 			calls.push({ projectId, body });
 			return { request: { ...draft(UUID) } };
 		},
-		get: async () => ({ request: draft(UUID), status: 'draft', issuedAt: null, invitations: [] })
+		get: async () => ({ request: draft(UUID), status: 'draft', issuedAt: null, invitations: [], award: null })
 	};
 	return { remote, calls };
 }

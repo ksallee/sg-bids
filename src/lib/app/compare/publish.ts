@@ -1,21 +1,13 @@
 /**
- * The seam between the award scenario and Flow PT. Not connected yet: a later step wires it to the
- * FPT write layer (`$lib/io/fpt-award` publishAward, `$lib/pure/fpt-award` planAward), from
- * production's own session, and records the award rows that lock the rates.
- *
- * What it will do: write a Bid per vendor in the scenario and a Bid Line per awarded shot or asset,
- * add each vendor's Group to the shots and assets it wins, read every write back, and keep the undo.
+ * The seam between the award scenario and Flow PT. The button opens `/bids/[id]/publish`, which
+ * checks the site, previews every write, publishes from production's own session, reads it back and
+ * records the award (`$lib/app/award`).
  */
 
-import type { StoredScenario } from '$lib/compare-api';
+export const PUBLISH_CONNECTED = true;
 
-/** False until the FPT layer is connected. The button reads it. */
-export const PUBLISH_CONNECTED = false;
-
-export const PUBLISH_LINE =
-	'Publishing writes the chosen scenario to Flow PT: a Bid per vendor, a Bid Line per awarded shot or asset, and the vendor Group on what it wins. It comes in a later step.';
-
-export async function publishAward(scenario: StoredScenario): Promise<never> {
-	void scenario;
-	throw new Error('Publishing the award is not connected yet.');
+export function publishLine(chosen: boolean, awarded: boolean): string {
+	if (!chosen) return 'Mark a scenario as chosen to publish it.';
+	if (awarded) return 'Published. Publish again to update Flow PT to the chosen scenario.';
+	return 'Writes the chosen scenario to Flow PT: a Bid per vendor, a Bid Line per awarded shot or asset, and the vendor Group on what it wins. A preview comes first.';
 }

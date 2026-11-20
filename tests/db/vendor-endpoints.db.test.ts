@@ -5,6 +5,7 @@
  */
 import type { RequestEvent } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { freezeShot } from '$lib/pure/freeze';
 import { hashToken } from '$lib/pure/token';
 import { createComparison } from '$lib/server/comparison';
 import { createRequests } from '$lib/server/requests';
@@ -47,13 +48,18 @@ describe('the vendor endpoints and Flow PT', () => {
 		const SHOT = 918273645;
 		const ASSET = 564738291;
 		const OTHER = 778899001;
+		// A Shot with no code, frozen as the builder freezes it, third in the picks.
+		const NOCODE = 665544332;
+		const uncoded = freezeShot({ type: 'Shot', id: NOCODE, attributes: {}, relationships: {} } as never, {}, new Map(), 3);
+		expect(uncoded.code).toBe('Shot 3');
 		const request = await s.createDraftRequest(production, {
 			code: 'BR-FPT',
 			header: header(),
 			items: {
 				shots: [
 					{ id: `shot-${SHOT}`, code: 'SH010', fpt: { type: 'Shot', id: SHOT }, omitted: false, assetIds: [`asset-${ASSET}`] },
-					{ id: `shot-${OTHER}`, code: 'SH020', fpt: { type: 'Shot', id: OTHER }, omitted: false, assetIds: [] }
+					{ id: `shot-${OTHER}`, code: 'SH020', fpt: { type: 'Shot', id: OTHER }, omitted: false, assetIds: [] },
+					uncoded
 				],
 				assets: [{ id: `asset-${ASSET}`, name: 'Hero', fpt: { type: 'Asset', id: ASSET } }]
 			}
@@ -65,9 +71,10 @@ describe('the vendor endpoints and Flow PT', () => {
 		await A.open(open, openPage, a.token);
 		const req = (await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).json;
 		const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-		const [sh010, sh020] = req.shots as { id: string; assetIds: string[] }[];
+		const [sh010, sh020, third] = req.shots as { id: string; code: string; assetIds: string[] }[];
 		const [hero] = req.assets as { id: string }[];
-		for (const id of [sh010.id, sh020.id, hero.id]) expect(id).toMatch(UUID);
+		for (const id of [sh010.id, sh020.id, third.id, hero.id]) expect(id).toMatch(UUID);
+		expect(third.code).toBe('Shot 3');
 		expect(sh010.assetIds).toEqual([hero.id]);
 
 		// A bids by those ids, through every move.
@@ -98,11 +105,12 @@ describe('the vendor endpoints and Flow PT', () => {
 
 		// No Flow PT id in any answer, not even inside another number.
 		const everything = A.answers.map((x) => x.text).join('\n');
-		for (const id of [SHOT, ASSET, OTHER]) expect(everything, String(id)).not.toContain(String(id));
+		for (const id of [SHOT, ASSET, OTHER, NOCODE]) expect(everything, String(id)).not.toContain(String(id));
 
 		// Production sees the lines on its own keys, with the Flow PT refs the award writes to.
 		const [own] = await s.listBids(production, request.id);
 		expect(own.bid.lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
+		expect((await s.getRequest(production, request.id)).shots.map((x) => x.id)).toContain(`shot-${NOCODE}`);
 		const stored = await s.getRequest(production, request.id);
 		expect(stored.shots[0].fpt).toEqual({ type: 'Shot', id: SHOT });
 

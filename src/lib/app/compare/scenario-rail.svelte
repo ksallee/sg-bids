@@ -1,7 +1,7 @@
 <!--
 	The award scenario beside the grid: which scenario, its live summary (total, each vendor's share
 	and rows, the non-shot costs line per vendor, against the lowest per row, rows left), the bulk
-	picks, a second scenario side by side, the chosen mark, and the publish seam (disabled).
+	picks, a second scenario side by side, the chosen mark, and the way to publish the chosen one.
 -->
 <script lang="ts">
 	import Star from '@lucide/svelte/icons/star';
@@ -17,13 +17,15 @@
 	import type { Money } from '$lib/pure/money';
 	import { differingRows, picksFromList, summarize, type ScenarioSummary } from '$lib/pure/scenario';
 	import { cn } from '$lib/utils.js';
-	import { PUBLISH_CONNECTED, PUBLISH_LINE } from './publish';
+	import { PUBLISH_CONNECTED, publishLine } from './publish';
 	import type { CompareState } from './state.svelte';
 	import { vendorTone } from './tones';
 
 	let { state: s }: { state: CompareState } = $props();
 
 	const grid = $derived(s.grid!);
+	const chosen = $derived(s.scenarios.some((x) => x.chosen));
+	const line = $derived(publishLine(chosen, s.data?.publication?.state === 'published'));
 	const summary = $derived(s.summary!);
 	let renaming = $state(false);
 	let name = $state('');
@@ -252,9 +254,13 @@
 				<Star class={cn('size-3.5', s.active.chosen && 'fill-current')} />{s.active.chosen ? 'Chosen. Unmark it' : 'Mark as the chosen scenario'}
 			</Button>
 		{/if}
-		<Button disabled={!PUBLISH_CONNECTED} title={PUBLISH_LINE} data-slot="publish">
-			<Send class="size-3.5" />Publish the award
-		</Button>
-		<p class="text-muted-foreground text-xs">{PUBLISH_LINE}</p>
+		{#if PUBLISH_CONNECTED && chosen}
+			<Button href={`/bids/${s.requestId}/publish`} title={line} data-slot="publish">
+				<Send class="size-3.5" />{s.data?.publication ? 'Publish again' : 'Publish the award'}
+			</Button>
+		{:else}
+			<Button disabled title={line} data-slot="publish"><Send class="size-3.5" />Publish the award</Button>
+		{/if}
+		<p class="text-muted-foreground text-xs">{line}</p>
 	</div>
 </aside>

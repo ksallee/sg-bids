@@ -36,6 +36,7 @@ export const TABLES = [
 	'award_scenarios',
 	'award_scenario_items',
 	'awards',
+	'award_publications',
 	'bid_rates'
 ] as const;
 
@@ -60,6 +61,8 @@ const PRODUCTION: Grants = {
 	award_scenarios: ['read', 'insert', 'update', 'delete'],
 	award_scenario_items: ['read', 'insert', 'delete'],
 	awards: ['read', 'insert', 'update'],
+	// What the award wrote to Flow PT. Written by `sg_record_award` and `sg_clear_award` only.
+	award_publications: ['read'],
 	// Production's rate per bid, to the base currency. The database locks it at the award.
 	bid_rates: ['read', 'insert', 'update', 'delete']
 };
@@ -103,7 +106,7 @@ export function scope(principal: Principal, table: Table, action: Action): Scope
 	}
 	switch (table) {
 		case 'bid_requests':
-			return { eq: { id: principal.requestId }, in: { status: ['issued', 'closed'] } };
+			return { eq: { id: principal.requestId }, in: { status: ['issued', 'awarded', 'closed'] } };
 		case 'request_items':
 			return { eq: { request_id: principal.requestId } };
 		case 'invitations':

@@ -6,6 +6,9 @@
  * its `name`, the target's `cached_display_name` (060). No thumbnail is kept: `image` is a
  * presigned URL (081) and expires, so a stored request would point at nothing. Copying the
  * picture into storage is later work.
+ *
+ * A row with no code is labelled by its position in the picks, `Shot 12`, never by its Flow PT id:
+ * the label goes to every vendor, and the id is production's.
  */
 
 import type { EntityRow } from 'sg-widgets-core';
@@ -57,9 +60,14 @@ function count(row: EntityRow, field: string | null | undefined): number | undef
 	return Math.round(value);
 }
 
-function code(row: EntityRow): string {
+function code(row: EntityRow): string | null {
 	const value = row.attributes?.code;
-	return typeof value === 'string' && value.trim() !== '' ? value : `${row.type} ${row.id}`;
+	return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/** The code, or a neutral label by position: `Shot 12`, or `Shot` with no position. */
+function label(row: EntityRow, kind: 'Shot' | 'Asset', position: number | undefined): string {
+	return code(row) ?? (position === undefined ? kind : `${kind} ${position}`);
 }
 
 /** Drop the keys left undefined, so a copy holds only what it has. */
@@ -67,7 +75,8 @@ function compact<T extends object>(value: T): T {
 	return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 }
 
-export function freezeShot(row: EntityRow, mapping: Mapping, sequences: SequenceIndex = new Map()): RequestShot {
+/** `position`: the item's place in the picks, from 1, for the label of a row with no code. */
+export function freezeShot(row: EntityRow, mapping: Mapping, sequences: SequenceIndex = new Map(), position?: number): RequestShot {
 	const sequence = link(row, mapping.sequence);
 	const episode =
 		mapping.episode === EPISODE_FROM_SEQUENCE
@@ -75,7 +84,7 @@ export function freezeShot(row: EntityRow, mapping: Mapping, sequences: Sequence
 			: link(row, mapping.episode)?.name || undefined;
 	return compact({
 		id: shotItemId(row.id),
-		code: code(row),
+		code: label(row, 'Shot', position),
 		fpt: { type: 'Shot', id: row.id },
 		description: text(row, mapping.description),
 		episode,
@@ -90,10 +99,10 @@ export function freezeShot(row: EntityRow, mapping: Mapping, sequences: Sequence
 	});
 }
 
-export function freezeAsset(row: EntityRow, mapping: Mapping): RequestAsset {
+export function freezeAsset(row: EntityRow, mapping: Mapping, position?: number): RequestAsset {
 	return compact({
 		id: assetItemId(row.id),
-		name: code(row),
+		name: label(row, 'Asset', position),
 		fpt: { type: 'Asset', id: row.id },
 		description: text(row, mapping.description),
 		type: text(row, mapping.type),
@@ -107,7 +116,8 @@ export function sequenceIndex(rows: readonly EntityRow[], episodeField: string |
 	return new Map(
 		rows.map((row) => {
 			const episode = episodeField ? link(row, episodeField) : null;
-			return [row.id, { id: row.id, code: code(row), episode: episode ? { id: episode.id, name: episode.name ?? `Episode ${episode.id}` } : null }];
+			// An Episode with no name stays unnamed: its label would reach vendors.
+			return [row.id, { id: row.id, code: code(row) ?? `Sequence ${row.id}`, episode: episode ? { id: episode.id, name: episode.name ?? '' } : null }];
 		})
 	);
 }

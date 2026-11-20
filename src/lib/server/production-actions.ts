@@ -6,6 +6,7 @@
 
 import { nextRound } from '$lib/pure/persist';
 import { parseId, parseSave, parseVendor } from '$lib/pure/wire';
+import { loadPublication } from './award-actions';
 import { database, serverStore } from './env';
 import { StoreError } from './errors';
 import type { VerifiedProduction } from './production';
@@ -41,12 +42,13 @@ export function listRequests(production: VerifiedProduction) {
 
 export async function getRequest(production: VerifiedProduction, body: Body) {
 	const requestId = id(body.id);
-	const [request, meta, invitations] = await Promise.all([
+	const [request, meta, invitations, award] = await Promise.all([
 		serverStore().getRequest(production, requestId),
 		serverRequests().requestMeta(production, requestId),
-		serverRequests().listInvitations(production, requestId)
+		serverRequests().listInvitations(production, requestId),
+		loadPublication(production, requestId)
 	]);
-	return { request, ...meta, invitations };
+	return { request, ...meta, invitations, award };
 }
 
 export async function saveRequest(production: VerifiedProduction, body: Body) {

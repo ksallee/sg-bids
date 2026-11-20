@@ -53,6 +53,13 @@
 		<div class="flex-1"></div>
 
 		<div class="flex shrink-0 items-center gap-1 text-sm sm:gap-2">
+			{#if !vendor}
+				<a
+					href="/how"
+					class="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-md px-1.5 py-1 outline-none focus-visible:ring-2"
+					data-slot="how-link">How it works</a
+				>
+			{/if}
 			{#if live?.siteUrl}
 				<a
 					href="/connect"
