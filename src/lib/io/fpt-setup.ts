@@ -56,6 +56,8 @@ async function vendorGroup(api: FptApi, named: string | undefined): Promise<{ co
 async function rights(api: FptApi, group: string, type: string): Promise<RightsRead> {
 	const answer = await api.raw('GET', `/schema/permission_groups/${encodeURIComponent(group)}/entity_types/${encodeURIComponent(type)}`);
 	if (answer.status === 200) return { ok: true, data: (answer.body as { data?: unknown } | null)?.data ?? null };
+	// The script key reads no person's group: 404 `Unknown permission group code` (162).
+	if (answer.status === 404) return { ok: false, status: 404, reason: `No group '${group}' for this caller. A script key reads none.` };
 	return { ok: false, status: answer.status, reason: `${errorTitle(answer).replace(/\.?$/, '.')}` };
 }
 
