@@ -14,6 +14,7 @@
 	import StatusChip from '$lib/app/status-chip.svelte';
 	import LinkOnce from '$lib/app/request/link-once.svelte';
 	import InviteForm from '$lib/app/request/invite-form.svelte';
+	import AwardPanel from '$lib/app/award/award-panel.svelte';
 	import VendorSheet from '$lib/app/builder/vendor-sheet.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { api, type LoadedRequest } from '$lib/api';
@@ -25,6 +26,7 @@
 
 	const id = $derived(page.params.id ?? '');
 	let projectId = $state<number | null>(null);
+	let siteUrl = $state('');
 	let loaded = $state<LoadedRequest | null>(null);
 	let problem = $state<string | null>(null);
 	let shown = $state<{ name: string; link: string } | null>(null);
@@ -34,6 +36,7 @@
 	async function load(): Promise<void> {
 		const live = await prepareLive();
 		if (live.problem) throw new Error(live.problem);
+		siteUrl = live.siteUrl;
 		const project = currentProject(live.siteUrl);
 		if (!project) throw new Error('Pick the project on the requests list first.');
 		projectId = project.id;
@@ -124,8 +127,12 @@
 					<LinkOnce name={shown.name} link={shown.link} onDone={() => (shown = null)} />
 				{/if}
 
+				{#if loaded.award}
+					<AwardPanel projectId={projectId!} request={r} publication={loaded.award} {siteUrl} onChange={() => void api.get(projectId!, id).then((next) => (loaded = next))} />
+				{/if}
+
 				<Section title="Vendors" meta={`${loaded.invitations.length} invited`}>
-					{#if loaded.status !== 'closed'}
+					{#if loaded.status === 'draft' || loaded.status === 'issued'}
 						<InviteForm projectId={projectId!} requestId={r.id} onInvited={invited} />
 					{/if}
 					{#if loaded.invitations.length === 0}

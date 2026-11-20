@@ -12,6 +12,7 @@
 	import GridToolbar from '$lib/app/compare/grid-toolbar.svelte';
 	import RowDetail from '$lib/app/compare/row-detail.svelte';
 	import ScenarioRail from '$lib/app/compare/scenario-rail.svelte';
+	import AwardPanel from '$lib/app/award/award-panel.svelte';
 	import { CompareState } from '$lib/app/compare/state.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { currentProject } from '$lib/current-project';
@@ -21,10 +22,12 @@
 	const id = $derived(page.params.id ?? '');
 	let s = $state<CompareState | null>(null);
 	let detail = $state<Row | null>(null);
+	let siteUrl = $state('');
 
 	async function load(): Promise<void> {
 		const live = await prepareLive();
 		if (live.problem) throw new Error(live.problem);
+		siteUrl = live.siteUrl;
 		const project = currentProject(live.siteUrl);
 		if (!project) throw new Error('Pick the project on the requests list first.');
 		const next = new CompareState(project.id, id);
@@ -77,6 +80,12 @@
 			{/if}
 			{#if s.data.awarded}<Notice tone="info">The award is made. The rates are locked.</Notice>{/if}
 		</PageHeader>
+
+		{#if s.data.publication}
+			<div class="border-b px-6 py-4">
+				<AwardPanel projectId={s.projectId} request={r} publication={s.data.publication} siteUrl={siteUrl} onChange={() => void s!.load()} />
+			</div>
+		{/if}
 
 		{#if s.grid.columns.length === 0}
 			<PageState state="empty" title="No bids in yet" line="Bids show here once vendors submit them. Drafts stay theirs.">
