@@ -38,7 +38,11 @@
 	} = $props();
 
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
-	const view = $derived(count(kind) === 0 && views[kind] === 'picked' ? 'add' : views[kind]);
+	// An empty kind opens on adding, and stays there once something is picked, until the person leaves it.
+	$effect.pre(() => {
+		if (count(kind) === 0 && views[kind] === 'picked') views = { ...views, [kind]: 'add' };
+	});
+	const view = $derived(count(kind) === 0 ? 'add' : views[kind]);
 	const setView = (next: ItemsView) => (views = { ...views, [kind]: next });
 	let breakdownOpen = $state(false);
 

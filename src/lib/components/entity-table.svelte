@@ -485,9 +485,22 @@
 			};
 		});
 	});
+	/**
+	 * The last column takes what the scrolling box has beyond the columns, so the table fills it
+	 * (sg-widgets #378, PR #380). Inline until sg-widgets-core ships `fillWidths`.
+	 */
+	function fillWidths(sizes: readonly number[], box: number): number[] {
+		const widths = [...sizes];
+		if (widths.length === 0 || !Number.isFinite(box) || box <= 0) return widths;
+		const extra = Math.floor(box) - widths.reduce((sum, size) => sum + size, 0);
+		if (extra > 0) widths[widths.length - 1] += extra;
+		return widths;
+	}
+	let room = $state(0);
+	const widths = $derived(fillWidths(layout.map((entry) => entry.size), room));
 	const totalWidth = $derived.by(() => {
 		void sizing;
-		return table.getTotalSize();
+		return Math.max(table.getTotalSize(), widths.reduce((sum, width) => sum + width, 0));
 	});
 
 	/* rows, grouped or flat ------------------------------------------------ */
@@ -950,7 +963,13 @@
 	<div
 		{@attach (el: HTMLDivElement) => {
 			body.setScroller(el);
-			return () => body.setScroller(null);
+			const observer = new ResizeObserver(() => (room = el.clientWidth));
+			observer.observe(el);
+			room = el.clientWidth;
+			return () => {
+				observer.disconnect();
+				body.setScroller(null);
+			};
 		}}
 		onkeydown={onTableKeydown}
 		data-slot="entity-table-scroll"
@@ -959,8 +978,8 @@
 	>
 		<Table.Root style="table-layout:fixed;width:{totalWidth}px">
 			<colgroup>
-				{#each layout as entry (entry.id)}
-					<col style="width:{entry.size}px" />
+				{#each layout as entry, i (entry.id)}
+					<col style="width:{widths[i] ?? entry.size}px" />
 				{/each}
 			</colgroup>
 			<Table.Header class="bg-background sticky top-0 z-10">

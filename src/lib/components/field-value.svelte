@@ -225,7 +225,11 @@
 	{:else if kind === 'list'}
 		<span class="truncate">{text}</span>
 	{:else}
-		<!-- `text` keeps its newlines: a description is free text and often multi-line. -->
-		<span class="min-w-0 break-words whitespace-pre-wrap">{text}</span>
+		<!-- `text` keeps its newlines: a description is free text and often multi-line. Compact keeps it to one line, whole in the title (sg-widgets #379, PR #380). -->
+		{#if density === 'compact'}
+			<span class="min-w-0 truncate" title={text}>{text}</span>
+		{:else}
+			<span class="min-w-0 break-words whitespace-pre-wrap">{text}</span>
+		{/if}
 	{/if}
 </span>

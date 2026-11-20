@@ -16,6 +16,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import Notice from '$lib/app/notice.svelte';
 	import Segmented from '$lib/app/segmented.svelte';
+	import FieldLabel from '$lib/app/field-label.svelte';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -226,7 +227,7 @@
 				/>
 				{#if source === 'paste'}
 					<div class="flex flex-col gap-1.5">
-						<label for="breakdown-paste" class="text-sm font-medium">Paste the cells</label>
+						<FieldLabel for="breakdown-paste" required>Paste the cells</FieldLabel>
 						<Textarea
 							id="breakdown-paste"
 							bind:value={pasted}
@@ -260,7 +261,9 @@
 							<table class="w-full min-w-[44rem] border-separate border-spacing-0 text-sm" data-slot="breakdown-typed">
 								<thead class="bg-muted">
 									<tr class="text-muted-foreground text-left text-xs">
-										{#each TYPED_COLUMNS as c (c.key)}<th class={cn('border-border border-b px-2 py-2 font-medium', c.width)}>{c.label}</th>{/each}
+										{#each TYPED_COLUMNS as c (c.key)}<th class={cn('border-border border-b px-2 py-2', c.key === 'code' ? 'text-foreground font-semibold' : 'font-normal', c.width)}
+												>{c.label}{#if c.key === 'code'}<span class="text-destructive ml-0.5" aria-hidden="true" title="Required">*</span>{/if}</th
+											>{/each}
 										<th class="border-border w-10 border-b"><span class="sr-only">Remove</span></th>
 									</tr>
 								</thead>
@@ -273,6 +276,7 @@
 														class={cn('h-8', c.key === 'code' && 'font-mono text-xs', c.key === 'frames' && 'text-right tabular-nums')}
 														bind:value={typed[r][c.key]}
 														inputmode={c.key === 'frames' ? 'numeric' : undefined}
+														aria-required={c.key === 'code' ? 'true' : undefined}
 														aria-label={`${c.label}, row ${r + 1}`}
 													/>
 												</td>

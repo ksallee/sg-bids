@@ -46,7 +46,7 @@
 						<ArrowLeft class="size-3.5" aria-hidden="true" />{back.label}
 					</a>
 				{/if}
-				<h1 class="truncate text-xl leading-tight font-semibold tracking-tight" {title}>{title}</h1>
+				<h1 class="text-xl leading-tight font-semibold tracking-tight break-words sm:truncate" {title}>{title}</h1>
 				{#if typeof context === 'string'}
 					<p class="text-muted-foreground truncate text-sm" title={context}>{context}</p>
 				{:else if context}
