@@ -57,7 +57,7 @@ describe('vendor', () => {
 	});
 
 	it('reads the request it was invited to, once issued, and its items', () => {
-		expect(scope(vendor, 'bid_requests', 'read')).toEqual({ eq: { id: 'req-1' }, in: { status: ['issued', 'closed'] } });
+		expect(scope(vendor, 'bid_requests', 'read')).toEqual({ eq: { id: 'req-1' }, in: { status: ['issued', 'awarded', 'closed'] } });
 		expect(scope(vendor, 'request_items', 'read').eq).toEqual({ request_id: 'req-1' });
 		expect(allowed(vendor, 'bid_requests', 'update')).toBe(false);
 		expect(allowed(vendor, 'request_items', 'insert')).toBe(false);
@@ -73,7 +73,7 @@ describe('vendor', () => {
 	});
 
 	it('never reaches scenarios, awards or rates', () => {
-		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards', 'bid_rates'];
+		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'];
 		for (const table of hidden) {
 			for (const action of ['read', 'insert', 'update', 'delete'] as const) {
 				expect(allowed(vendor, table, action)).toBe(false);

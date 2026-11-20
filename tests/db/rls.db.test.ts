@@ -23,6 +23,7 @@ const SAMPLE: Record<Table, Record<string, unknown>> = {
 	award_scenarios: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, name: 'S' },
 	award_scenario_items: { scenario_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
 	awards: { request_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_line_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
+	award_publications: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, state: 'published', site: {}, written: {}, published_by: {} },
 	bid_rates: { bid_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, rate: '1.2', rate_date: '2026-11-20' }
 };
 
@@ -45,6 +46,8 @@ beforeAll(async () => {
 	const [line] = await sql`select id from public.bid_lines where bid_id = ${bidA.id} and item_key = 'sh010'`;
 	await sql`insert into public.awards (request_id, site_host, project_id, item_kind, item_key, bid_line_id, share_percent)
 		values (${request.id}, ${production.siteHost}, ${production.projectId}, 'shot', 'sh010', ${line.id}, '100')`;
+	await sql`insert into public.award_publications (request_id, site_host, project_id, state, site, written, published_by)
+		values (${request.id}, ${production.siteHost}, ${production.projectId}, 'published', '{}', '{}', '{}')`;
 	// A rate, on another request: an award locks the rates of its own.
 	const other = await issuedWithTwoVendors();
 	const pounds = await other.s.saveDraftBid(other.a.token, draftIn('GBP', 80_000));

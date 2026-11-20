@@ -7,8 +7,9 @@
 import { productionClaim } from '$lib/live';
 import type { BidRequest, InvitedVendor } from '$lib/pure/model';
 import type { InvitationState } from '$lib/pure/invitations';
+import type { Publication } from '$lib/pure/award-record';
 
-export type RequestStatus = 'draft' | 'issued' | 'closed';
+export type RequestStatus = 'draft' | 'issued' | 'awarded' | 'closed';
 
 export interface RequestOverview {
 	id: string;
@@ -34,6 +35,8 @@ export interface LoadedRequest {
 	status: RequestStatus;
 	issuedAt: string | null;
 	invitations: InvitationView[];
+	/** What the award wrote to Flow PT, or null. */
+	award: Publication | null;
 }
 
 export interface Invited {

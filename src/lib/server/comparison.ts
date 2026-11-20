@@ -10,6 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { scope, type ProductionPrincipal, type Table } from '$lib/pure/access';
+import { publicationFromRow, type Publication, type PublicationRow } from '$lib/pure/award-record';
 import { applyRate, shownVersions, type BidRecord } from '$lib/pure/compare';
 import type { AwardScenario, BidRequest, Id, ScenarioPick, VendorBid } from '$lib/pure/model';
 import { targetKey } from '$lib/pure/model';
@@ -73,6 +74,8 @@ export interface Comparison {
 	readonly scenarios: readonly StoredScenario[];
 	/** The request has an award: rates are locked. */
 	readonly awarded: boolean;
+	/** What the award wrote to Flow PT, or null. */
+	readonly publication: Publication | null;
 }
 
 export interface ScenarioInput {
@@ -158,13 +161,14 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 	 */
 	async function loadComparison(principal: ProductionPrincipal, requestId: string, asked: readonly string[] = []): Promise<Comparison> {
 		const row = await requestRow(principal, requestId);
-		const [items, invitations, bidRows, rateRows, awards, scenarios] = await Promise.all([
+		const [items, invitations, bidRows, rateRows, awards, scenarios, publication] = await Promise.all([
 			all<RequestItemRow>(() => read(principal, 'request_items').eq('request_id', requestId)),
 			run<Omit<InvitationRow, 'token_hash'>[]>(read(principal, 'invitations', INVITATION_COLUMNS).eq('request_id', requestId).order('created_at')),
 			run<BidRow[]>(read(principal, 'bids').eq('request_id', requestId).order('created_at')),
 			run<RateRow[]>(read(principal, 'bid_rates').eq('request_id', requestId)),
 			run<{ id: string }[]>(read(principal, 'awards', 'id').eq('request_id', requestId).limit(1)),
-			scenarioList(principal, requestId)
+			scenarioList(principal, requestId),
+			run<PublicationRow | null>(read(principal, 'award_publications').eq('request_id', requestId).maybeSingle())
 		]);
 		const request = requestFromRows(row, items, invitations.map(vendorFromRow));
 		const versions: BidVersion[] = bidRows.map((b) => {
@@ -209,7 +213,17 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 				rateOf.get(b.id) ?? null
 			)
 		);
-		return { request, code: row.code, status: row.status, versions, bids, rates, scenarios, awarded: awards.length > 0 };
+		return {
+			request,
+			code: row.code,
+			status: row.status,
+			versions,
+			bids,
+			rates,
+			scenarios,
+			awarded: awards.length > 0,
+			publication: publication ? publicationFromRow(publication) : null
+		};
 	}
 
 	/** Set the rate of a bid to the base currency with its date, or clear it with null. */
