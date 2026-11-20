@@ -40,3 +40,25 @@ jobs:
       - run: pnpm test
 
       - run: pnpm build
+
+  database:
+    name: database tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.18.0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # A throwaway Postgres and PostgREST in Docker, removed pass or fail (`scripts/test-db.mjs`).
+      - run: pnpm test:db
+        env:
+          SG_BIDS_TEST_RUN: gh-${{ github.run_id }}-${{ github.run_attempt }}

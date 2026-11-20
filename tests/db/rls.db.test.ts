@@ -4,6 +4,7 @@
  * PostgREST (the path a key takes) and in SQL. Row level security alone holds even if a grant
  * comes back.
  */
+import type { TransactionSql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TABLES, type Table } from '$lib/pure/access';
 import { createComparison } from '$lib/server/comparison';
@@ -55,6 +56,33 @@ afterAll(async () => {
 	await sql.end();
 });
 
+type Sql = ReturnType<typeof superuser> | TransactionSql;
+
+/**
+ * What the catalog says is wrong with `public`, from the catalog alone, not from `TABLES`: a table
+ * that a later migration adds and forgets fails here. Every table (plain or partitioned) has row
+ * level security; no table, view, sequence or function is granted to `anon` or `authenticated`.
+ */
+async function guard(db: Sql): Promise<string[]> {
+	const problems: string[] = [];
+	const noRls = await db`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+		where n.nspname = 'public' and c.relkind in ('r', 'p') and not c.relrowsecurity order by c.relname`;
+	for (const row of noRls) problems.push(`public.${row.relname} has no row level security.`);
+	const relations = await db`select c.relname, r.rolname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+		cross join pg_roles r
+		where n.nspname = 'public' and c.relkind in ('r', 'p', 'v', 'm', 'f', 'S') and r.rolname in ('anon', 'authenticated')
+			and (case when c.relkind = 'S' then has_sequence_privilege(r.oid, c.oid, 'usage, select, update')
+				else has_table_privilege(r.oid, c.oid, 'select, insert, update, delete, truncate, references, trigger') end)
+		order by c.relname, r.rolname`;
+	for (const row of relations) problems.push(`public.${row.relname} is granted to ${row.rolname}.`);
+	const functions = await db`select p.proname, r.rolname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+		cross join pg_roles r
+		where n.nspname = 'public' and r.rolname in ('anon', 'authenticated') and has_function_privilege(r.oid, p.oid, 'execute')
+		order by p.proname, r.rolname`;
+	for (const row of functions) problems.push(`public.${row.proname}() is executable by ${row.rolname}.`);
+	return problems;
+}
+
 describe('the schema', () => {
 	it('has row level security on every table and not one policy', async () => {
 		const tables = await sql`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -73,6 +101,32 @@ describe('the schema', () => {
 			cross join pg_roles r
 			where n.nspname = 'public' and r.rolname in ('anon', 'authenticated') and has_function_privilege(r.oid, p.oid, 'execute')`;
 		expect(functions).toHaveLength(0);
+	});
+
+	it('passes the guard: every relation in public has row level security and no public grant', async () => {
+		expect(await guard(sql)).toEqual([]);
+	});
+
+	it('gives a table or function added later nothing for the public roles, and the guard catches one without row level security', async () => {
+		await sql
+			.begin(async (tx) => {
+				// As a later migration would: created by the migration role, no grant, no revoke, no RLS.
+				await tx.unsafe('create table public.sg_guard_probe (id integer)');
+				await tx.unsafe('create function public.sg_guard_probe_fn() returns integer language sql as $$ select 1 $$');
+				const granted = await tx`select r.rolname,
+						has_table_privilege(r.oid, 'public.sg_guard_probe', 'select, insert, update, delete') as tbl,
+						has_function_privilege(r.oid, 'public.sg_guard_probe_fn()', 'execute') as fn
+					from pg_roles r where r.rolname in ('anon', 'authenticated')`;
+				for (const row of granted) {
+					expect(row.tbl, `${row.rolname} on the table`).toBe(false);
+					expect(row.fn, `${row.rolname} on the function`).toBe(false);
+				}
+				expect(await guard(tx)).toEqual(['public.sg_guard_probe has no row level security.']);
+				throw new Error('roll back');
+			})
+			.catch((error: Error) => {
+				if (error.message !== 'roll back') throw error;
+			});
 	});
 
 	it('every table has rows to protect', async () => {

@@ -12,8 +12,9 @@ Open http://localhost:5181, name the site and sign in through the App Session La
     pnpm build
     pnpm test:db
 
-`.github/workflows/gates.yml` runs the first three on every pull request and on pushes to `dev`
-and `main`. `pnpm test` needs no Docker. `pnpm test:db` does: see Database below.
+`.github/workflows/gates.yml` runs all four on every pull request and on pushes to `dev` and
+`main`, the database tests in a job of their own. `pnpm test` needs no Docker. `pnpm test:db`
+does: see Database below.
 
 ## Port
 
@@ -154,15 +155,20 @@ seeds a bigger request.
 
     pnpm test:db
 
-`scripts/test-db.mjs` starts two throwaway containers, `sg-bids-test` (`postgres:17`) and
-`sg-bids-test-rest` (`postgrest/postgrest:v12.2.12`), on free ports on 127.0.0.1, on the network
-`sg-bids-test-net`. It creates the roles a Supabase project has (`tests/db/supabase-roles.sql`),
+`scripts/test-db.mjs` starts two throwaway containers, `sg-bids-test-<run>` (`postgres:17`) and
+`sg-bids-test-<run>-rest` (`postgrest/postgrest:v12.2.12`), on free ports on 127.0.0.1, on the
+network `sg-bids-test-<run>-net`. `<run>` is `SG_BIDS_TEST_RUN` when set, else random, so two runs
+on one machine never meet. It creates the roles a Supabase project has (`tests/db/supabase-roles.sql`),
 runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no other container.
 
 `tests/db/setup.ts` applies every migration twice to the fresh database. The tests prove:
 
 - `anon` and `authenticated` read, write and call nothing, through PostgREST and in SQL, and row
   level security alone stops them even with the grants given back (`rls.db.test.ts`);
+- every table in `public` has row level security and nothing in `public` is granted to `anon` or
+  `authenticated`, read from the catalog, so a table a later migration adds without it fails; a
+  table or function created later gets no grant to them by default
+  (`20261121110000_default_privileges.sql`, `rls.db.test.ts`);
 - a tenant reaches none of another tenant's rows through any store function, and vendor A's token
   reaches none of vendor B's invitation or bids; expired, revoked, malformed and unknown tokens are
   refused; only token hashes are stored (`access.db.test.ts`);
