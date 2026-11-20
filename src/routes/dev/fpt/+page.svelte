@@ -7,12 +7,15 @@
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import Notice from '$lib/app/notice.svelte';
+	import ProjectPicker from '$lib/components/project-picker.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { currentProject } from '$lib/current-project';
 	import { liveAuth, liveContext, prepareLive, whoAmI } from '$lib/live';
 	import { fptApi } from '$lib/io/fpt-api';
 	import { ensureFields, readSetup, type EnsureResult, type SetupRead } from '$lib/io/fpt-setup';
 
 	const live = prepareLive();
+	let project = $state<{ id: number; name: string } | null>(null);
 	let projectId = $state<number | null>(null);
 	let read = $state<Promise<SetupRead> | null>(null);
 	let ensured = $state<EnsureResult | null>(null);
@@ -21,19 +24,22 @@
 
 	const api = () => fptApi(liveAuth().siteUrl, liveAuth().token);
 
-	async function projects() {
-		const result = await liveContext().client.search('Project', { fields: ['name'], sort: 'name', page: { size: 500 } });
-		return result.data.map((p) => ({ id: p.id, name: String(p.attributes.name ?? p.id) }));
-	}
+	// Start on the project the builder last picked in this browser.
+	$effect(() => {
+		void live.then((state) => {
+			const remembered = state.problem ? null : currentProject(state.siteUrl);
+			if (remembered && projectId === null) pick(remembered);
+		});
+	});
 
 	async function load(id: number): Promise<SetupRead> {
 		const me = await whoAmI();
 		return readSetup(api(), id, { me: me?.id });
 	}
 
-	function pick(event: Event) {
-		const value = Number((event.currentTarget as HTMLSelectElement).value);
-		projectId = Number.isFinite(value) && value > 0 ? value : null;
+	function pick(next: { id: number; name: string } | null) {
+		project = next;
+		projectId = next?.id ?? null;
 		ensured = null;
 		read = projectId === null ? null : load(projectId);
 	}
@@ -61,15 +67,13 @@
 		<PageState state="empty" title="Not connected" line={state.problem} />
 	{:else}
 		<PageHeader title="Flow PT setup" context="Dev only. The Bid and Bid Line fields, and what the Vendor role can see.">
-			{#await projects() then list}
-				<label class="flex items-center gap-2 text-sm">
-					Project
-					<select class="border-input bg-background rounded-md border px-2 py-1" onchange={pick}>
-						<option value="">Pick a project</option>
-						{#each list as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
-					</select>
-				</label>
-			{/await}
+			<div class="max-w-sm">
+				<ProjectPicker
+					context={liveContext()}
+					value={project ? { type: 'Project', id: project.id, name: project.name } : null}
+					onValueChange={(next) => pick(next ? { id: next.id, name: next.name ?? `Project ${next.id}` } : null)}
+				/>
+			</div>
 		</PageHeader>
 
 		<div class="flex flex-col gap-6 px-6 py-4 text-sm">
