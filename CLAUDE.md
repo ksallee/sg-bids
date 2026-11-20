@@ -39,6 +39,7 @@ metaphors, no "not X, Y", no filler.
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
 - `src/lib/app/`: the app's own components (shell, banner, page header).
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
+- `docs/data-model.md`: the bid request, vendor bid, award and change order, field by field.
 - `docs/development.md`: running the app, the port, the env, the deploy.
 - `docs/deploy.md`: deploying your own copy.
 

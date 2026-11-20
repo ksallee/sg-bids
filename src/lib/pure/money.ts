@@ -106,6 +106,16 @@ export function add(a: Money, b: Money): Money {
 	return fromBig(BigInt(a.minor) + BigInt(b.minor), a.currency);
 }
 
+export function subtract(a: Money, b: Money): Money {
+	if (a.currency !== b.currency) throw new Error(`Cannot subtract ${b.currency} from ${a.currency}.`);
+	return fromBig(BigInt(a.minor) - BigInt(b.minor), a.currency);
+}
+
+/** The sum of a list, every amount in `currency`. Zero for an empty list. */
+export function sum(amounts: readonly Money[], currency: string): Money {
+	return amounts.reduce((total, amount) => add(total, amount), money(0, currency));
+}
+
 function validDay(text: string): boolean {
 	const parts = DAY.exec(text);
 	if (!parts) return false;
@@ -129,7 +139,7 @@ export function rate(from: string, to: string, value: string, date: string): Rat
 }
 
 /** `n / d` for a positive `d`, rounded half away from zero. */
-function divideRounded(n: bigint, d: bigint): bigint {
+export function divideRounded(n: bigint, d: bigint): bigint {
 	const quotient = n / d;
 	const remainder = n % d;
 	const abs = remainder < 0n ? -remainder : remainder;
