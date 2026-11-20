@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeFields } from 'sg-widgets-core';
-import { ASSET_FIELDS_A, ASSET_FIELDS_B, SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
-import { EPISODE_FROM_SEQUENCE, cleanMapping, detectMapping, readFields, slotOptions, slotsFor, type SiteShape } from './field-map';
+import { ASSET_FIELDS_A, ASSET_FIELDS_B, SEQUENCE_FIELDS_A, SEQUENCE_FIELDS_CUSTOM, SEQUENCE_FIELDS_TWO, SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
+import { EPISODE_FROM_SEQUENCE, cleanMapping, sequenceEpisodeField, detectMapping, readFields, slotOptions, slotsFor, type SiteShape } from './field-map';
 
 const shotA = normalizeFields(SHOT_FIELDS_A);
 const assetA = normalizeFields(ASSET_FIELDS_A);
@@ -111,5 +111,18 @@ describe('readFields', () => {
 
 	it('leaves out what the schema lacks', () => {
 		expect(readFields('asset', { description: 'sg_brief', type: 'sg_asset_type', difficulty: null }, assetB)).toEqual(['code', 'sg_brief', 'sg_asset_type']);
+	});
+});
+
+describe('sequenceEpisodeField', () => {
+	it('finds the stock episode link (entity_types/Sequence)', () => {
+		expect(sequenceEpisodeField(normalizeFields(SEQUENCE_FIELDS_A))).toBe('episode');
+	});
+	it('takes a lone custom link to Episode', () => {
+		expect(sequenceEpisodeField(normalizeFields(SEQUENCE_FIELDS_CUSTOM))).toBe('sg_ep');
+	});
+	it('has none when nothing links an Episode, or two do and neither is the stock one', () => {
+		expect(sequenceEpisodeField(normalizeFields(SHOT_FIELDS_A))).toBeNull();
+		expect(sequenceEpisodeField(normalizeFields(SEQUENCE_FIELDS_TWO))).toBeNull();
 	});
 });

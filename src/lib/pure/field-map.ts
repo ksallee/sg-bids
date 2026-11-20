@@ -167,6 +167,12 @@ export function cleanMapping(kind: ItemKind, saved: Mapping, schema: Record<stri
 	);
 }
 
+/** Sequence's field linking an Episode: `episode` when the site has it, else the one entity field to Episode, else none. */
+export function sequenceEpisodeField(sequenceSchema: Record<string, FieldSchema>): string | null {
+	const links = Object.values(sequenceSchema).filter((field) => field.dataType === 'entity' && field.validTypes?.includes('Episode'));
+	return links.find((field) => field.name === 'episode')?.name ?? (links.length === 1 ? links[0].name : null);
+}
+
 /** The fields a pick reads: the code, the thumbnail and the status when the type has them, then the mapping. */
 export function readFields(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>): string[] {
 	const wanted = ['code', 'image', 'sg_status_list', ...slotsFor(kind).map((spec) => mapping[spec.slot])];

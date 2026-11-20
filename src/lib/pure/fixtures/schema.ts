@@ -70,6 +70,26 @@ export const ASSET_FIELDS_A = response([
 	assetA('episodes', 'Episodes', 'multi_entity', { valid_types: ['Episode'] })
 ]);
 
+const seq = (name: string, label: string, type: string, props: Props = {}) => field('Sequence', name, label, type, props);
+
+/** The stock Sequence links an Episode as `episode` (entity_types/Sequence). */
+export const SEQUENCE_FIELDS_A = response([
+	seq('code', 'Sequence Name', 'text'),
+	seq('shots', 'Shots', 'multi_entity', { valid_types: ['Shot'] }),
+	seq('episode', 'Episode', 'entity', { valid_types: ['Episode'] }),
+	seq('assets', 'Assets', 'multi_entity', { valid_types: ['Asset'] })
+]);
+
+/** A Sequence with a custom Episode link and no stock one. */
+export const SEQUENCE_FIELDS_CUSTOM = response([seq('code', 'Sequence Name', 'text'), seq('sg_ep', 'Episode', 'entity', { valid_types: ['Episode'] })]);
+
+/** Two custom Episode links, neither the stock one: no way to tell which. */
+export const SEQUENCE_FIELDS_TWO = response([
+	seq('code', 'Sequence Name', 'text'),
+	seq('sg_ep_a', 'Episode A', 'entity', { valid_types: ['Episode'] }),
+	seq('sg_ep_b', 'Episode B', 'entity', { valid_types: ['Episode'] })
+]);
+
 export const SHOT_FIELDS_B = response([
 	shotA('code', 'Shot Code', 'text'),
 	shotA('sg_brief', 'Brief', 'text'),
