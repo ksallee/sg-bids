@@ -32,6 +32,8 @@ What production sends. One per bid package.
 
 | field | what | seen in |
 |---|---|---|
+| code | production's reference for the request | sg-bids |
+| title | the request's title | sg-bids |
 | project | the show | 2+ |
 | projectRef | the Flow PT Project | sg-bids |
 | studio | the studio | 2+ |
@@ -43,6 +45,7 @@ What production sends. One per bid package.
 | dueDate | when bids are due | 2+ |
 | baseCurrency | the currency of the comparison | 2+ |
 | turnoverWeek | turnover week | 2+ |
+| turnoverDate | turnover date | sg-bids |
 | deliveryDate | delivery date | 2+ |
 | deliveryFormat | delivery format | 2+ |
 | materialLink | link to the bid material | 2+ |
@@ -64,6 +67,7 @@ What production sends. One per bid package.
 | assetIds | linked assets | 2+ |
 | thumbnail | thumbnail | 2+ |
 | directorNotes | director's notes | 2+ |
+| notes | production's note to the vendors | sg-bids |
 | techRequirements | tech requirements per department | OpenBID |
 
 ### Asset
@@ -76,6 +80,8 @@ What production sends. One per bid package.
 | description | what it is | 2+ |
 | type, difficulty | kind of asset and how hard | 2+ |
 | timesUsed | how many shots use it | 2+ |
+| omitted | the asset is out | sg-bids |
+| notes | production's note to the vendors | sg-bids |
 
 ### Invited vendor
 
