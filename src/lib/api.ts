@@ -8,6 +8,7 @@ import { productionClaim, siteClaim } from '$lib/live';
 import type { BidRequest, InvitedVendor } from '$lib/pure/model';
 import type { InvitationState } from '$lib/pure/invitations';
 import type { Publication } from '$lib/pure/award-record';
+import type { Deleted, DeletionFacts } from '$lib/pure/request-delete';
 
 export type RequestStatus = 'draft' | 'issued' | 'awarded' | 'closed';
 
@@ -102,6 +103,10 @@ export const api = {
 	invite: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null }) => call<Invited>('invite', projectId, { requestId, vendor }),
 	revoke: (projectId: number, invitationId: string) => call<{ ok: true }>('revoke', projectId, { invitationId }),
 	reissue: (projectId: number, invitationId: string) => call<{ token: string; expiresAt: string }>('reissue', projectId, { invitationId }),
+	/** What deleting the request would take with it, or the award that stops it. */
+	deleteCheck: (projectId: number, id: string) => call<{ facts: DeletionFacts }>('delete-check', projectId, { id }),
+	/** Deletes the request and everything under it. `code` is the request's code, as typed. */
+	deleteRequest: (projectId: number, id: string, code: string) => call<{ deleted: Deleted }>('delete', projectId, { id, code }),
 	/** Breakdown rows matched to Flow PT. Only the Flow PT row changes; vendors see nothing new. */
 	linkItems: (projectId: number, requestId: string, links: { kind: 'shot' | 'asset'; key: string; fpt: { type: string; id: number } }[]) =>
 		call<{ request: BidRequest }>('link-items', projectId, { requestId, links })

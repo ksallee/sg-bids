@@ -62,7 +62,7 @@
 	}
 </script>
 
-<section class="flex flex-col gap-4 rounded-lg border p-4" data-slot="award-panel" data-state={publication.state} aria-label="The award">
+<section id="award" class="flex scroll-mt-4 flex-col gap-4 rounded-lg border p-4" data-slot="award-panel" data-state={publication.state} aria-label="The award">
 	<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
 		<h2 class="text-base font-semibold">{title}</h2>
 		<p class="text-muted-foreground text-sm">

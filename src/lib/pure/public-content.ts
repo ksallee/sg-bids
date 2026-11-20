@@ -158,6 +158,7 @@ export const HOW = {
 			'The link holds a random token. The app keeps only its hash.',
 			`A link lasts ${LINK_DAYS} days unless production sets another date. Production can revoke it, or send a new link that replaces it. The bid is kept.`,
 			'A vendor saves a draft, then submits it. It can withdraw a submitted bid or send a new version.',
+			'A vendor can discard a draft. A new version it discards leaves the last submitted one in place.',
 			'Prices can be pasted from a spreadsheet: a column of prices, or rows of code and price.'
 		]
 	} satisfies Question,
@@ -178,7 +179,8 @@ export const HOW = {
 		id: 'stays',
 		q: 'What stays in the app?',
 		a: 'Everything else: the requests, the bids and the comparison. The app keeps it in its own database, and only its server reads it.',
-		list: ['The request and its frozen Shots and Assets.', 'The invitations.', 'Every bid with its lines, costs, rebates and versions.', 'The rates and the scenarios.', 'The award record.']
+		list: ['The request and its frozen Shots and Assets.', 'The invitations.', 'Every bid with its lines, costs, rebates and versions.', 'The rates and the scenarios.', 'The award record.'],
+		note: 'Production can delete a request with all of it. A draft goes after one confirm. An issued request asks for its code first, and its vendors’ links then say the request was withdrawn. While the award is in Flow PT, undo it first. Deleting writes nothing to Flow PT and cannot be undone.'
 	} satisfies Question,
 	see: {
 		id: 'see',

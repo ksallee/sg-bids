@@ -2,12 +2,18 @@
 	A request's page, on a centred reading measure: who is invited and where each stands, inviting a
 	vendor (the link shows once), revoking and making a new link, then the request as vendors get it.
 	The way to the comparison is the page's primary action once a bid is in; before that, inviting
-	is. Vendor names and Groups live on the invitations, never in the request.
+	is. Vendor names and Groups live on the invitations, never in the request. The menu beside the
+	actions deletes the request (`$lib/app/request/delete-request`).
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Columns3 from '@lucide/svelte/icons/columns-3';
+	import Ellipsis from '@lucide/svelte/icons/ellipsis';
+	import DeleteRequest from '$lib/app/request/delete-request.svelte';
+	import { deletedNote } from '$lib/app/request/deleted-note.svelte';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import { deletedLine } from '$lib/pure/request-delete';
 	import Notice from '$lib/app/notice.svelte';
 	import PageBody from '$lib/app/page-body.svelte';
 	import PageHeader from '$lib/app/page-header.svelte';
@@ -80,6 +86,8 @@
 		});
 	}
 
+	let deleteOpen = $state(false);
+
 	const time = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 	const day = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -114,6 +122,14 @@
 				<span class="tabular-nums">{plural(counts.shots, 'shot')}, {plural(counts.assets, 'asset')}</span>
 			{/snippet}
 			{#snippet actions()}
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger class="hover:bg-accent focus-visible:ring-ring inline-flex size-8 items-center justify-center rounded-md outline-none focus-visible:ring-2" aria-label="More for this request" data-slot="request-more">
+						<Ellipsis class="size-4" />
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="end">
+						<DropdownMenu.Item class="text-destructive" onSelect={() => (deleteOpen = true)} data-slot="request-delete">{loaded!.status === 'draft' ? 'Delete draft…' : 'Delete request…'}</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
 				{#if loaded!.status === 'draft'}
 					<Button href={`/bids/new?id=${r.id}`}>Edit the draft</Button>
 				{:else}
@@ -200,6 +216,16 @@
 				<VendorSheet request={r} />
 			</Section>
 		</PageBody>
+
+		<DeleteRequest
+			bind:open={deleteOpen}
+			projectId={projectId!}
+			requestId={r.id}
+			ondeleted={(gone) => {
+				deletedNote.line = deletedLine(gone);
+				void goto('/bids');
+			}}
+		/>
 	{/if}
 {:catch error}
 	<PageState state="error" title="Could not open the request" line={error.message}>

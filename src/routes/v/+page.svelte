@@ -1,8 +1,10 @@
 <!--
 	The vendor's bid, reached through the link production sent. No sign-in: the link cookie is the
 	key. The request as production froze it, a price per shot and asset, the other costs, the
-	rebate estimate and the terms, with live totals beside. Drafts save on their own. After a submit
-	the bid is read only, and Revise opens the next version.
+	rebate estimate and the terms, with live totals beside. Drafts save on their own, and Discard
+	this draft drops one: back to empty, or to the last submitted version. After a submit the bid is
+	read only, and Revise opens the next version. A link whose request production deleted says so,
+	and nothing more.
 
 	The form logic is `$lib/pure/bid-form`; the calls are `$lib/vendor-client`.
 -->
@@ -88,8 +90,14 @@
 		saved = JSON.stringify(formToDraft(form, mark).draft);
 	}
 
+	const WITHDRAWN = { title: 'This request was withdrawn by the production', line: 'There is nothing to bid on. Nothing is needed from you.', link: true };
+
 	async function load(): Promise<void> {
 		const link = page.url.searchParams.get('link');
+		if (link === 'withdrawn') {
+			problem = WITHDRAWN;
+			return;
+		}
 		if (link === 'invalid') {
 			problem = { title: 'This link does not work', line: 'Check the link in your invitation, or ask production for a new one.', link: true };
 			return;
@@ -105,7 +113,8 @@
 		} catch (error) {
 			const status = error instanceof VendorError ? error.status : 0;
 			const line = error instanceof Error ? error.message : String(error);
-			if (status === 410) problem = { title: 'This link was replaced', line, link: true };
+			if (status === 410 && error instanceof VendorError && error.reason === 'withdrawn') problem = WITHDRAWN;
+			else if (status === 410) problem = { title: 'This link was replaced', line, link: true };
 			else if (status === 401 || status === 403) problem = { title: status === 401 ? 'This link does not work' : 'This link is closed', line, link: true };
 			else problem = { title: 'The bid could not load', line, link: false };
 		}
@@ -114,6 +123,10 @@
 
 	/** The browser now holds another vendor's link: this page stops, and says so. */
 	function otherSession(error: unknown): boolean {
+		if (error instanceof VendorError && error.reason === 'withdrawn') {
+			problem = WITHDRAWN;
+			return true;
+		}
 		if (!(error instanceof VendorError) || error.reason !== 'session') return false;
 		problem = { title: 'Another bid is open in this browser', line: 'Reload the page to see whose.', link: false };
 		return true;
@@ -164,8 +177,8 @@
 		};
 	});
 
-	// Submit, withdraw, revise.
-	let confirming = $state<'submit' | 'withdraw' | null>(null);
+	// Submit, withdraw, revise, discard.
+	let confirming = $state<'submit' | 'withdraw' | 'discard' | null>(null);
 	let busy = $state(false);
 	let moveError = $state<string | null>(null);
 
@@ -190,6 +203,20 @@
 			busy = false;
 		}
 	}
+
+	/** Drop the open draft. The page refills from what is left: nothing, or the last submitted version. */
+	async function discardDraft(): Promise<void> {
+		if (!loaded?.bidId) return;
+		const named = loaded;
+		await move(() => vendorApi.discard(named));
+	}
+
+	const canDiscard = $derived(view?.bid?.status === 'draft');
+	const discardLine = $derived(
+		earlier
+			? `Your changes since version ${earlier.version} go. Production still sees version ${earlier.version}.`
+			: 'Your prices and answers go, and the form is empty again. Production never saw this draft.'
+	);
 
 	const stamp = $derived.by(() => {
 		const at = view?.bid?.withdrawnAt ?? view?.bid?.submittedAt;
@@ -296,6 +323,8 @@
 					onsubmit={openSubmit}
 					onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 					onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+					ondiscard={() => ((moveError = null), (confirming = 'discard'))}
+					{canDiscard}
 					onproblem={(p) => void goTo(p)}
 				/>
 			</div>
@@ -314,6 +343,8 @@
 				onsubmit={openSubmit}
 				onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 				onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+				ondiscard={() => ((moveError = null), (confirming = 'discard'))}
+				{canDiscard}
 				onproblem={(p) => void goTo(p)}
 			/>
 		</aside>
@@ -362,5 +393,18 @@
 		onconfirm={() => loaded?.bidId && move(() => vendorApi.withdraw(loaded))}
 	>
 		<p>Production will see this bid as withdrawn. You can start a new version after.</p>
+	</ConfirmDialog>
+
+	<ConfirmDialog
+		open={confirming === 'discard'}
+		title={earlier ? `Discard version ${view?.bid?.version}` : 'Discard this draft'}
+		confirm="Discard draft"
+		tone="destructive"
+		{busy}
+		error={moveError}
+		oncancel={() => (confirming = null)}
+		onconfirm={() => void discardDraft()}
+	>
+		<p>{discardLine} This cannot be undone.</p>
 	</ConfirmDialog>
 {/if}

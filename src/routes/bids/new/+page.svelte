@@ -5,13 +5,21 @@
 	height, with what the vendor gets and what is left before the issue on its bar. The field mapping
 	opens on demand. Review is the last look before Issue. The URL holds the stored id and the view.
 	The draft is stored as it changes; an issued request opens read only, on its review, with New
-	round. Nothing here writes to Flow PT but a field the person asks to create.
+	round. Nothing here writes to Flow PT but a field the person asks to create. The menu beside the
+	actions deletes a stored draft, or discards one not stored yet.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import Ellipsis from '@lucide/svelte/icons/ellipsis';
+	import DeleteRequest from '$lib/app/request/delete-request.svelte';
+	import { deletedNote } from '$lib/app/request/deleted-note.svelte';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import { deletedLine } from '$lib/pure/request-delete';
+	import { isLocalId } from '$lib/pure/persist';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
 	import Notice from '$lib/app/notice.svelte';
@@ -19,7 +27,7 @@
 	import PageState from '$lib/app/page-state.svelte';
 	import FieldsDialog from '$lib/app/builder/fields-dialog.svelte';
 	import HeaderPanel from '$lib/app/builder/header-panel.svelte';
-	import ItemsPanel, { type ItemsView } from '$lib/app/builder/items-panel.svelte';
+	import ItemsPanel from '$lib/app/builder/items-panel.svelte';
 	import ProjectGate from '$lib/app/builder/project-gate.svelte';
 	import ReviewView from '$lib/app/builder/review-view.svelte';
 	import SaveLine from '$lib/app/builder/save-line.svelte';
@@ -50,7 +58,8 @@
 	const view = $derived(parseView(page.url.searchParams, builder.readOnly));
 	let folds = $state({ delivery: false, assumptions: false });
 	let kind = $state<ItemKind>('shot');
-	let views = $state<Record<ItemKind, ItemsView>>({ shot: 'picked', asset: 'picked' });
+	/** The kind the Flow PT picker is open for, over the items area. */
+	let adding = $state<ItemKind | null>(null);
 	let revealed = $state<ReadonlySet<string>>(new Set());
 	let fieldsOpen = $state(false);
 	let projectOpen = $state(false);
@@ -75,7 +84,7 @@
 		if (target === 'items') {
 			const k: ItemKind = builder.state.shots.length === 0 && builder.state.assets.length > 0 ? 'asset' : 'shot';
 			kind = k;
-			if (builder.state.shots.length + builder.state.assets.length === 0) views = { ...views, [k]: 'add' };
+			if (builder.state.shots.length + builder.state.assets.length === 0) adding = k;
 		}
 		if (target === 'project') projectOpen = true;
 		else await focusControl(target);
@@ -102,6 +111,21 @@
 	}
 
 	const title = $derived(builder.state.form.title.trim() || 'New bid request');
+
+	// Deleting the draft: a stored one through the server, one not stored yet from this tab only.
+	let deleteOpen = $state(false);
+	let discardOpen = $state(false);
+	const stored = $derived(!isLocalId(builder.state.id));
+	async function discardLocal(): Promise<void> {
+		await builder.discard();
+		discardOpen = false;
+		await goto('/bids');
+	}
+	async function afterDelete(line: string): Promise<void> {
+		await builder.discard();
+		deletedNote.line = line;
+		await goto('/bids');
+	}
 </script>
 
 <svelte:head><title>{title} · SG Bids</title></svelte:head>
@@ -148,6 +172,16 @@
 					<Button variant="outline" onclick={() => void go('edit')} data-slot="back-to-edit"><ArrowLeft data-icon="inline-start" />Back to the request</Button>
 					<Button onclick={() => (confirming = true)} disabled={!builder.readiness.canIssue || builder.saving.kind === 'waiting'} data-slot="issue">Issue the request</Button>
 				{:else}
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger class="hover:bg-accent focus-visible:ring-ring inline-flex size-8 items-center justify-center rounded-md outline-none focus-visible:ring-2" aria-label="More for this draft" data-slot="draft-more">
+							<Ellipsis class="size-4" />
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="end">
+							<DropdownMenu.Item class="text-destructive" onSelect={() => (stored ? (deleteOpen = true) : (discardOpen = true))} data-slot="draft-delete">
+								{stored ? 'Delete draft…' : 'Discard draft…'}
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 					<Button variant="ghost" onclick={() => (fieldsOpen = true)} disabled={!builder.mappingStatus} data-slot="open-fields">
 						<Settings2 data-icon="inline-start" />Fields
 						{#if unmapped > 0}<span class="border-warning/60 text-foreground rounded-full border px-1.5 text-xs leading-4 tabular-nums" title={`${unmapped} with no Flow PT field`}>{unmapped}</span>{/if}
@@ -172,11 +206,26 @@
 			{#if builder.data.state === 'error'}
 				<div class="px-6 pt-3"><Notice tone="destructive" title="Could not read the project.">{' '}{builder.data.message}</Notice></div>
 			{/if}
-			<ItemsPanel {builder} bind:kind bind:views onFields={() => (fieldsOpen = true)} onFocus={(t) => void focusOn(t)} />
+			<ItemsPanel {builder} bind:kind bind:adding onFields={() => (fieldsOpen = true)} onFocus={(t) => void focusOn(t)} />
 			<FieldsDialog {builder} bind:open={fieldsOpen} />
 		{/if}
 		{#if !builder.readOnly}
 			<ProjectGate {builder} dialog bind:open={projectOpen} />
+			{#if stored && builder.state.project}
+				<DeleteRequest bind:open={deleteOpen} projectId={builder.state.project.id} requestId={builder.state.id} ondeleted={(gone) => void afterDelete(deletedLine(gone))} />
+			{/if}
+			<Dialog.Root bind:open={discardOpen}>
+				<Dialog.Content class="sm:max-w-md">
+					<Dialog.Header>
+						<Dialog.Title>Discard the unsaved draft?</Dialog.Title>
+						<Dialog.Description>{title}. It lives in this tab only. This cannot be undone.</Dialog.Description>
+					</Dialog.Header>
+					<Dialog.Footer>
+						<Button variant="outline" onclick={() => (discardOpen = false)}>Keep it</Button>
+						<Button variant="destructive" onclick={() => void discardLocal()}>Discard draft</Button>
+					</Dialog.Footer>
+				</Dialog.Content>
+			</Dialog.Root>
 		{/if}
 	{/if}
 {:catch error}

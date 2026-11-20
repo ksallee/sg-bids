@@ -23,6 +23,7 @@ const bidRoute = await import('../../src/routes/v/api/bid/+server');
 const submitRoute = await import('../../src/routes/v/api/bid/submit/+server');
 const withdrawRoute = await import('../../src/routes/v/api/bid/withdraw/+server');
 const reviseRoute = await import('../../src/routes/v/api/bid/revise/+server');
+const discardRoute = await import('../../src/routes/v/api/bid/discard/+server');
 
 const sql = superuser();
 
@@ -335,6 +336,95 @@ describe('the vendor endpoints', () => {
 			answers.push(probe.text);
 		}
 		expect(new Set(answers).size).toBe(1);
+	});
+
+	it('tell a vendor whose request production deleted that it was withdrawn, and nothing more', async () => {
+		const { s, production, a, b, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
+		const A = browser('203.0.113.15');
+		await A.open(open, openPage, a.token);
+		const me = a.invitation.id;
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: first.json.bid.id });
+
+		await s.deleteRequest(production, request.id, 'BR-1');
+		const seen = A.answers.length;
+
+		// The old cookie: every endpoint answers the same withdrawn line, and nothing is written.
+		const withdrawn = { error: 'This request was withdrawn by the production.', reason: 'withdrawn' };
+		const calls: [Handler, string, string, unknown][] = [
+			[requestRoute.GET as Handler, 'GET', '/v/api/request', undefined],
+			[bidRoute.GET as Handler, 'GET', '/v/api/bid', undefined],
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(1) }],
+			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: first.json.bid.id }],
+			[withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { invitationId: me, bidId: first.json.bid.id }],
+			[discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: me, bidId: first.json.bid.id }]
+		];
+		for (const [handler, method, path, body] of calls) {
+			const answer = await A.call(handler, method, path, body);
+			expect(answer.status, path).toBe(410);
+			expect(answer.json, path).toEqual(withdrawn);
+			expect(answer.headers.get('cache-control')).toBe('no-store');
+		}
+		// The link itself, opened again, in this browser and in a fresh one.
+		expect((await A.open(open, openPage, a.token)).headers.get('location')).toBe('/v?link=withdrawn');
+		const fresh = browser('203.0.113.16');
+		expect((await fresh.open(open, openPage, b.token)).headers.get('location')).toBe('/v?link=withdrawn');
+		expect(fresh.jar.has('sg_bids_vendor')).toBe(false);
+
+		// No detail: not the code, the vendors, the project, an amount or an id.
+		const after = A.answers.slice(seen).map((x) => x.text).join('\n');
+		for (const secret of ['BR-1', 'Vendor A', 'Vendor B', a.invitation.id, b.invitation.id, request.id, first.json.bid.id, '100000', 'Show']) {
+			expect(after, secret).not.toContain(secret);
+		}
+		expect((await sql`select count(*)::int as n from public.bids where request_id = ${request.id}`)[0].n).toBe(0);
+
+		// A token that never was still learns only that the link does not work.
+		const guess = browser('203.0.113.17');
+		expect((await guess.open(open, openPage, 'W'.repeat(42) + 'E')).headers.get('location')).toBe('/v?link=invalid');
+		guess.jar.set('sg_bids_vendor', { value: `${me}.${'W'.repeat(42)}E`, options: {} });
+		expect((await guess.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+	});
+
+	it('discard a first draft back to empty, and a revision back to the last submitted version', async () => {
+		const { a, b, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
+		const s = holder.store as Store;
+		const A = browser('203.0.113.18');
+		await A.open(open, openPage, a.token);
+		const me = a.invitation.id;
+
+		// A first draft, discarded: no bid at all.
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
+		const gone = await A.call(discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: me, bidId: first.json.bid.id });
+		expect(gone.status).toBe(200);
+		expect(gone.json).toEqual({ bid: null, versions: [] });
+
+		// Bid again, submit, revise, then discard the revision: the submitted version is the latest.
+		const again = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(90_000) });
+		expect(again.json.bid.version).toBe(1);
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: again.json.bid.id });
+		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: again.json.bid.id });
+		await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: revised.json.bid.id, draft: vd(1) });
+		const back = await A.call(discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: me, bidId: revised.json.bid.id });
+		expect(back.status).toBe(200);
+		expect(back.json.bid).toMatchObject({ id: again.json.bid.id, status: 'submitted', version: 1 });
+		expect(back.json.versions.map((v: { status: string }) => v.status)).toEqual(['submitted']);
+
+		// A submitted bid is not discarded: it is the latest, but not a draft.
+		const kept = await A.call(discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: me, bidId: again.json.bid.id });
+		expect(kept.status).toBe(409);
+		expect((await sql`select status from public.bids where id = ${again.json.bid.id}`)[0].status).toBe('submitted');
+
+		// Another vendor's draft is out of reach, by the handler and by the store.
+		const bDraft = await s.saveDraftBid(b.token, draft(5));
+		expect((await A.call(discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: me, bidId: bDraft.id })).status).toBe(409);
+		expect((await A.call(discardRoute.POST as Handler, 'POST', '/v/api/bid/discard', { invitationId: b.invitation.id, bidId: bDraft.id })).status).toBe(409);
+		expect((await sql`select status from public.bids where id = ${bDraft.id}`)[0].status).toBe('draft');
+
+		// The next draft opens version 2 again.
+		const next = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: again.json.bid.id });
+		expect(next.json.bid.version).toBe(2);
 	});
 
 	it('refuse a write that is not JSON', async () => {

@@ -87,7 +87,7 @@ Frozen in the database, by triggers: an issued request's items, code, round, cur
 (a change is a new round), and a submitted bid with its lines (a change is a new version; it may
 only be withdrawn). Writes that must land whole are SQL functions: `sg_save_request_items`,
 `sg_save_bid_draft`, `sg_save_scenario`, `sg_save_award_scenario`, `sg_set_bid_rate`,
-`sg_choose_scenario`, `sg_record_award`, `sg_clear_award`. Production's rate per bid lives in
+`sg_choose_scenario`, `sg_record_award`, `sg_clear_award`, `sg_delete_request`. Production's rate per bid lives in
 `bid_rates`; a trigger refuses it on a draft or a base currency bid and locks it once the request
 has an award or is closed.
 
@@ -112,13 +112,26 @@ breakdown row with no Flow PT row gets one, once, and nothing else on the row ch
 publish creates in Flow PT are in the publication record's `written.items`, so the undo deletes
 exactly those.
 
+Deleting (`20261124100000_delete.sql`). `sg_delete_request` deletes a request and every row under
+it for the caller's tenant, in one transaction, and answers what went, counted. It locks the
+request and refuses while an award is in Flow PT: an `award_publications` row, published, partial or
+part undone, or an award row. The freezes are not loosened. The function sets a transaction local
+setting, `sg.delete_request`, to the request's id, and each freeze trigger lets a DELETE of that
+request's rows through, and nothing else: an update or an insert is refused as before, and so is a
+row of another request. The server reaches the database only through PostgREST, which sets no
+setting a client names, and each call is its own transaction. The hashes of the request's link
+tokens, live and former, go to `withdrawn_links`, alone, so a dead link can say the request was
+withdrawn. Deleting never writes to Flow PT.
+
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
 
 ### Production endpoints
 
 The browser reaches the data layer through `src/routes/api/production/<action>`: `list`, `get`,
-`save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`. Each is a POST whose body carries
+`save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`, `delete-check` (what deleting the
+request would take with it, or the award that stops it) and `delete` (`{id, code}`, the request's
+code as typed). Each is a POST whose body carries
 `claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
 `production.ts` before anything else. `src/lib/pure/wire.ts` checks the rest of the body and lets
 through only the model's header and item fields.
@@ -161,6 +174,11 @@ saying the link was replaced; the new link opens its draft or submitted bid as i
 cookie that fails gets 401, whatever invitation id it names, so the answer never tells an outsider
 whether an invitation exists.
 
+When production deletes the request, its links die with it. A cookie or a link whose token hash is
+in `withdrawn_links` gets 410 with `reason` `withdrawn`, or lands on `/v?link=withdrawn`: "This
+request was withdrawn by the production.", and nothing of the request. Only the token itself finds
+its hash, so a guess still gets 401.
+
 The page at `/v` calls these, each authorised by the cookie (`src/lib/server/vendor-api.ts`). Every
 write also names the invitation and the bid the page loaded, `{invitationId, bidId}`. When the
 cookie now holds another invitation, or the bid moved on in another tab, the write is refused with
@@ -174,6 +192,7 @@ cookie now holds another invitation, or the bid moved on in another tab, the wri
 | `POST /v/api/bid/submit` | `{invitationId, bidId}`: submit the draft |
 | `POST /v/api/bid/withdraw` | `{invitationId, bidId}`: withdraw the submitted bid |
 | `POST /v/api/bid/revise` | `{invitationId, bidId}`: open the next version as a copy of the latest |
+| `POST /v/api/bid/discard` | `{invitationId, bidId}`: discard the open draft, back to empty or to the last submitted version |
 
 Every answer under `/v` says `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and
 `X-Robots-Tag: noindex, nofollow` (`src/hooks.server.ts`). No answer carries another vendor:
@@ -240,6 +259,13 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
 - the award records its rows from the stored chosen scenario, marks the request awarded and locks
   the rates; published again it replaces the rows; a partial run changes no row; the undo clears
   it or keeps what is left; a vendor is told bidding is closed (`award.db.test.ts`);
+- a request is deleted whole by `sg_delete_request`, in its own tenant only (another host, another
+  project and a missing id answer the same 404), never while an award is in Flow PT; every table
+  under it is empty after; the freezes still stop every direct delete and update; the public roles
+  cannot call it; the endpoints take the tenant from the verified claim (`delete.db.test.ts`);
+- a vendor whose request was deleted is told it was withdrawn and nothing more, and a vendor
+  discards its draft back to empty or to the last submitted version (`vendor-endpoints.db.test.ts`,
+  `vendor.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.

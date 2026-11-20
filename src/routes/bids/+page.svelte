@@ -2,9 +2,12 @@
 	Bid requests: the person's requests in every project they may read on the site, newest first,
 	with the project, status, round, due date, invitations and bids in. The project is a filter, not a
 	gate; a new request picks its project once, in the builder. A draft this tab holds but has not
-	stored yet is offered on top. The list and its filter are `$lib/pure/request-list`.
+	stored yet is offered on top. Each row's menu deletes it (`$lib/app/request/delete-request`). The
+	list and its filter are `$lib/pure/request-list`.
 -->
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import FileText from '@lucide/svelte/icons/file-text';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
@@ -13,6 +16,10 @@
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import StatusChip from '$lib/app/status-chip.svelte';
+	import DeleteRequest from '$lib/app/request/delete-request.svelte';
+	import { deletedNote } from '$lib/app/request/deleted-note.svelte';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import ListPicker from '$lib/components/list-picker.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -21,6 +28,7 @@
 	import { cushion } from '$lib/drafts';
 	import { liveState } from '$lib/live';
 	import { listView } from '$lib/pure/request-list';
+	import { deletedLine, type Deleted } from '$lib/pure/request-delete';
 	import { connectHref, requestHref } from '$lib/pure/routes';
 	import type { BidRequest } from '$lib/pure/model';
 	import { cn } from '$lib/utils.js';
@@ -56,6 +64,26 @@
 		return `${view.counts.total} ${view.counts.total === 1 ? 'request' : 'requests'} in ${projects} ${projects === 1 ? 'project' : 'projects'} you can see on this site, newest first.`;
 	});
 	const clear = () => ((project = null), (query = ''));
+
+	// Deleting: the row whose menu asked, then the list again with a line saying what went.
+	let deleting = $state<{ id: string; projectId: number } | null>(null);
+	let deleteOpen = $state(false);
+	function ask(row: { id: string; projectId: number }): void {
+		deleting = { id: row.id, projectId: row.projectId };
+		deleteOpen = true;
+	}
+	function deleted(gone: Deleted): void {
+		deletedNote.line = deletedLine(gone);
+		if (data) data = { ...data, requests: data.requests.filter((r) => r.id !== deleting?.id) };
+	}
+
+	// The draft this tab holds but has not stored: discarded after one confirm.
+	let discardOpen = $state(false);
+	async function discardLocal(): Promise<void> {
+		await cushion.clear();
+		local = null;
+		discardOpen = false;
+	}
 	const TH = 'text-muted-foreground border-border h-9 border-b px-3 text-left text-xs font-medium whitespace-nowrap';
 	const TD = 'border-border border-b px-3 py-2';
 </script>
@@ -93,13 +121,37 @@
 	{/if}
 </PageHeader>
 
+{#if deletedNote.line}
+	<div class="border-border border-b px-6 py-2.5">
+		<Notice tone="info" data-slot="deleted-note">
+			{deletedNote.line}
+			{#snippet action()}<Button size="sm" variant="ghost" onclick={() => (deletedNote.line = null)}>Dismiss</Button>{/snippet}
+		</Notice>
+	</div>
+{/if}
+
 {#if local}
 	<div class="border-border border-b px-6 py-2.5">
 		<Notice tone="info" title="A draft is not saved yet.">
 			{' '}{local.header.title ?? 'Untitled'}{local.header.project ? `, ${local.header.project}` : ''}. It saves once it has a project and a code.
-			{#snippet action()}<Button size="sm" variant="outline" href="/bids/new">Open it</Button>{/snippet}
+			{#snippet action()}
+				<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={() => (discardOpen = true)} data-slot="discard-local">Discard</Button>
+				<Button size="sm" variant="outline" href="/bids/new">Open it</Button>
+			{/snippet}
 		</Notice>
 	</div>
+	<Dialog.Root bind:open={discardOpen}>
+		<Dialog.Content class="sm:max-w-md">
+			<Dialog.Header>
+				<Dialog.Title>Discard the unsaved draft?</Dialog.Title>
+				<Dialog.Description>{local.header.title ?? 'Untitled'}. It lives in this tab only. This cannot be undone.</Dialog.Description>
+			</Dialog.Header>
+			<Dialog.Footer>
+				<Button variant="outline" onclick={() => (discardOpen = false)}>Keep it</Button>
+				<Button variant="destructive" onclick={() => void discardLocal()}>Discard draft</Button>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
 {/if}
 
 {#if error}
@@ -133,6 +185,7 @@
 				<col class="w-32" />
 				<col class="w-24" />
 				<col class="w-24" />
+				<col class="w-14" />
 			</colgroup>
 			<thead class="bg-background sticky top-0 z-10">
 				<tr>
@@ -142,7 +195,8 @@
 					<th class={cn(TH, 'text-right')}>Round</th>
 					<th class={TH}>Bids due</th>
 					<th class={cn(TH, 'text-right')}>Invited</th>
-					<th class={cn(TH, 'pr-6 text-right')}>Bids in</th>
+					<th class={cn(TH, 'text-right')}>Bids in</th>
+					<th class={cn(TH, 'pr-6')}><span class="sr-only">Actions</span></th>
 				</tr>
 			</thead>
 			<tbody>
@@ -163,12 +217,32 @@
 						<td class={cn(TD, 'text-right tabular-nums')}>{row.round}</td>
 						<td class={cn(TD, 'whitespace-nowrap tabular-nums', !row.dueDate && 'text-muted-foreground')}>{row.dueDate ? day(row.dueDate) : 'None'}</td>
 						<td class={cn(TD, 'text-right tabular-nums', row.invited === 0 && 'text-muted-foreground')}>{row.invited}</td>
-						<td class={cn(TD, 'pr-6 text-right tabular-nums', row.submitted === 0 && 'text-muted-foreground')}>
+						<td class={cn(TD, 'text-right tabular-nums', row.submitted === 0 && 'text-muted-foreground')}>
 							{#if row.invited > 0}<span class="text-foreground font-medium">{row.submitted}</span>{' '}<span class="text-muted-foreground">of {row.invited}</span>{:else}{row.submitted}{/if}
+						</td>
+						<td class={cn(TD, 'py-1 pr-6 text-right')}>
+							<DropdownMenu.Root>
+								<DropdownMenu.Trigger
+									class="hover:bg-accent focus-visible:ring-ring text-muted-foreground hover:text-foreground relative z-10 inline-flex size-8 items-center justify-center rounded-md outline-none focus-visible:ring-2"
+									aria-label={`More for ${row.code}`}
+									data-slot="row-actions"
+								>
+									<Ellipsis class="size-4" />
+								</DropdownMenu.Trigger>
+								<DropdownMenu.Content align="end">
+									<DropdownMenu.Item onSelect={() => (remember(row), goto(requestHref(row)))}>Open</DropdownMenu.Item>
+									<DropdownMenu.Separator />
+									<DropdownMenu.Item class="text-destructive" onSelect={() => ask(row)} data-slot="row-delete">{row.status === 'draft' ? 'Delete draft…' : 'Delete request…'}</DropdownMenu.Item>
+								</DropdownMenu.Content>
+							</DropdownMenu.Root>
 						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
+{/if}
+
+{#if deleting}
+	<DeleteRequest bind:open={deleteOpen} projectId={deleting.projectId} requestId={deleting.id} ondeleted={deleted} />
 {/if}

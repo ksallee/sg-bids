@@ -22,6 +22,13 @@ describe('the facts the pages state', () => {
 		expect(HOW.money.list).toContain(`A request can be based in any of ${CURRENCIES.length} ISO 4217 currencies.`);
 	});
 
+	it('says how a request is deleted and a vendor draft discarded', () => {
+		expect(HOW.stays.note).toContain('delete a request');
+		expect(HOW.stays.note).toContain('undo it first');
+		expect(HOW.stays.note).toContain('writes nothing to Flow PT');
+		expect(HOW.vendors.list.some((line) => line.startsWith('A vendor can discard a draft.'))).toBe(true);
+	});
+
 	it('links the docs on GitHub, in the main branch', () => {
 		for (const link of Object.values(DOCS)) expect(link.href.startsWith(REPO)).toBe(true);
 		expect(DOCS.deploy.href).toBe(`${REPO}/blob/main/docs/deploy.md`);
