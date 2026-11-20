@@ -7,7 +7,7 @@
  * nothing, and reads nothing of this app's.
  */
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { bodyOf, forwardFailed, launcherBase, siteFromBody } from '../_launcher';
+import { bodyOf, forward, forwardFailed, launcherBase, siteFromBody } from '../_launcher';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const fields = await bodyOf(request);
@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	let res: Response;
 	try {
-		res = await fetch(`${site}${launcherBase}`, {
+		res = await forward(`${site}${launcherBase}`, {
 			method: 'POST',
 			headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
 			body: new URLSearchParams({ appName, machineId }).toString()

@@ -3,7 +3,9 @@
  * are in `src/lib/server/production.ts`. Facts from `../sg-groundtruth/corpus`:
  *
  * - The server calls only a site host on its allowlist, matched exactly: both Flow PT domains
- *   resolve any name, so a suffix match forwards to hosts no site serves (129).
+ *   resolve any name, so a suffix match forwards to hosts no site serves (129). A suffix is allowed
+ *   only when the deployment writes it out (`*.shotgrid.autodesk.com`), for a demo any site may use.
+ *   Hosted sites live under `shotgrid.autodesk.com` and `shotgunstudio.com` (129).
  * - A session token spends at `POST /api/v1/auth/access_token`, `grant_type=session_token`, for a
  *   600 s bearer (recipe 012, 052). A token the site refuses is 400 code 102 (126).
  * - The bearer's middle segment is base64url JSON with a `user` claim `{type, id}`: `HumanUser`
@@ -32,15 +34,39 @@ function hostOf(url: string): string | null {
 	}
 }
 
-/** The hosts the server may call: a comma list, else the host of the site the sign-in form offers. */
+const LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+/** An allowlist entry: an exact host, or `*.` and a suffix of two labels or more. Null for anything else. */
+function entry(text: string): string | null {
+	const value = text.trim().toLowerCase();
+	if (value.startsWith('*.')) return HOST.test(value.slice(2)) ? value : null;
+	return HOST.test(value) ? value : null;
+}
+
+/**
+ * The hosts the server may call: a comma list, else the host of the site the sign-in form offers.
+ * Unset both, nobody. An entry is an exact host, or a suffix written out as `*.shotgrid.autodesk.com`:
+ * one label under it, never the suffix itself or two labels. A suffix is an explicit choice: the
+ * corpus advises exact hosts (129).
+ */
 export function allowedHosts(list: string | undefined, defaultSite: string | undefined): string[] {
 	const named = (list ?? '')
 		.split(',')
-		.map((host) => host.trim().toLowerCase())
-		.filter(Boolean);
-	if (named.length > 0) return named;
+		.filter((text) => text.trim() !== '')
+		.map(entry)
+		.filter((value): value is string => value !== null);
+	if ((list ?? '').trim() !== '') return named;
 	const fallback = defaultSite ? hostOf(defaultSite) : null;
 	return fallback ? [fallback] : [];
+}
+
+function allows(allowed: readonly string[], host: string): boolean {
+	return allowed.some((rule) => {
+		if (!rule.startsWith('*.')) return rule === host;
+		const suffix = rule.slice(1);
+		return host.endsWith(suffix) && LABEL.test(host.slice(0, -suffix.length));
+	});
 }
 
 /** The site's origin and host when it is https on the default port, with no credentials, and allowed. */
@@ -54,7 +80,7 @@ export function siteOrigin(siteUrl: unknown, allowed: readonly string[]): { orig
 	}
 	if (url.protocol !== 'https:' || url.port !== '' || url.username !== '' || url.password !== '') return null;
 	const host = url.hostname.toLowerCase();
-	if (!allowed.includes(host)) return null;
+	if (!HOST.test(host) || !allows(allowed, host)) return null;
 	return { origin: `https://${host}`, host };
 }
 

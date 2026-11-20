@@ -9,7 +9,7 @@
  * is not written down anywhere on the way.
  */
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { badRequest, bodyOf, forwardFailed, launcherBase, siteFromBody } from '../_launcher';
+import { badRequest, bodyOf, forward, forwardFailed, launcherBase, siteFromBody } from '../_launcher';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const fields = await bodyOf(request);
@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	let res: Response;
 	try {
-		res = await fetch(`${site}${launcherBase}/${fields.id}`, { method: 'PUT', headers: { Accept: 'application/json' } });
+		res = await forward(`${site}${launcherBase}/${fields.id}`, { method: 'PUT', headers: { Accept: 'application/json' } });
 	} catch (error) {
 		return forwardFailed(error);
 	}

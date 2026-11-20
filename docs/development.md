@@ -48,7 +48,9 @@ reads them.
 
 The browser calls the site's `/api/v1` itself. The App Session Launcher answers no CORS headers, so
 its two calls go through this app's `/live/session-request` and `/live/session-poll`, which hold
-nothing. The approved session token stays in the browser's `localStorage`. The corpus entries are
+nothing. They take no sign-in, so they call only a host on `FPT_SITE_HOSTS` (the list the
+production check uses, `docs/deploy.md`) and follow no redirect; any other site is 403 and nothing
+is called. The approved session token stays in the browser's `localStorage`. The corpus entries are
 `052_app_session_launcher`, `062_cors` and `130_launcher_answers` in `../sg-groundtruth/corpus`.
 
 ## Database
@@ -203,7 +205,9 @@ builds a preview. `src/lib/deploy.test.ts` holds it to that. The page is a clien
 (`ssr = false`) and the routes under `/live/` are serverless functions.
 
 Set in the Vercel project, value never in the repo: `PUBLIC_FPT_SITE_URL`, `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default, and
+`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default (the public
+demo, open to any hosted site, sets `*.shotgrid.autodesk.com,*.shotgunstudio.com`; see
+`docs/deploy.md`), and
 `FPT_PRODUCTION_ROLES` when production is not `admin,manager`. Never set
 the `FPT_API_*` lines on Vercel.
 

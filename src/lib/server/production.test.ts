@@ -92,6 +92,9 @@ describe('verifyProduction', () => {
 			'https://studio.example.com/api/v1/schema/permission_groups?permission_rule_set_entity_type=HumanUser'
 		]);
 		for (const call of calls.slice(2)) expect(new Headers(call.init?.headers).get('authorization')).toBe(`Bearer ${person}`);
+		// A redirect from the site is an error, never followed to another host.
+		expect(calls).toHaveLength(4);
+		for (const call of calls) expect(call.init?.redirect, call.url).toBe('error');
 	});
 
 	it('takes a bearer the browser minted, without a token call', async () => {

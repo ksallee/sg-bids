@@ -3,7 +3,8 @@
  * check with the site allowlist. Server only: `$lib/server` never reaches the browser.
  *
  * `SUPABASE_URL` and `SUPABASE_SECRET_KEY` name the project. `FPT_SITE_HOSTS` lists the Flow PT
- * hosts this deployment serves, comma separated; unset, it is the host of `PUBLIC_FPT_SITE_URL`.
+ * hosts this deployment serves, comma separated, exact hosts or a suffix written `*.<domain>`
+ * (`fpt-session.ts`); unset, it is the host of `PUBLIC_FPT_SITE_URL`; neither set, nobody.
  * `FPT_PRODUCTION_ROLES` lists the permission group codes that may act as production, comma
  * separated; unset, `admin,manager`.
  */
@@ -34,10 +35,15 @@ export function serverStore(): Store {
 	return store;
 }
 
+/** The Flow PT hosts the server may call: the production check and the sign-in launcher alike. */
+export function fptSiteHosts(): string[] {
+	return allowedHosts(env.FPT_SITE_HOSTS, publicEnv.PUBLIC_FPT_SITE_URL);
+}
+
 export function verifyProductionClaim(claim: ProductionClaim): Promise<VerifiedProduction> {
 	return verifyProduction(claim, {
 		fetch,
-		allowedHosts: allowedHosts(env.FPT_SITE_HOSTS, publicEnv.PUBLIC_FPT_SITE_URL),
+		allowedHosts: fptSiteHosts(),
 		allowScript: dev,
 		productionRoles: productionRoles(env.FPT_PRODUCTION_ROLES)
 	});
