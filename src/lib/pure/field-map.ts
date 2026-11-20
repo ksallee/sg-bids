@@ -74,9 +74,11 @@ const SHOT_SLOTS: readonly SlotSpec[] = [
 		label: 'Description',
 		line: 'What happens in the shot.',
 		dataTypes: ['text'],
-		names: ['description', 'sg_description'],
+		// A description of the bid's own comes first: editing the stock one for vendors changes
+		// the production description (`live-columns.descriptionAdvice`).
+		names: ['sg_bid_description', 'description', 'sg_description'],
 		pattern: /desc|brief|summary/i,
-		create: { dataType: 'text', display: 'Description' }
+		create: { dataType: 'text', display: 'Bid Description' }
 	},
 	{
 		slot: 'frames',

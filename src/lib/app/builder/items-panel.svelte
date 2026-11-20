@@ -1,15 +1,15 @@
 <!--
 	The main work: the Shots and the Assets of the request, filling the rest of the page. One bar: a
 	tab per kind with its count, two buttons that add (from Flow PT, from a breakdown), then what the
-	vendor gets and what is left before the issue. The list under it is the request's own rows,
-	edited in place. Add from Flow PT opens the picker over this whole area (`fpt-picker.svelte`);
+	vendor gets and what is left before the issue. The table under it is the request's own rows,
+	edited in place and in bulk, live to Flow PT where a field feeds the column (`request-table`). Add from Flow PT opens the picker over this whole area (`fpt-picker.svelte`);
 	Done comes back here with the rows just added marked and in view. Add from a breakdown opens its
 	dialog. The section carries `f-items`, the id the readiness list points at for "nothing picked".
 -->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import FptPicker from './fpt-picker.svelte';
-	import PickedList from './picked-list.svelte';
+	import RequestTable from './request-table.svelte';
 	import SummaryBar from './summary-bar.svelte';
 	import BreakdownDialog from './breakdown-dialog.svelte';
 	import MatchLine from './match-line.svelte';
@@ -112,7 +112,7 @@
 		<MatchLine {builder} />
 		<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-h-0 min-w-0 flex-1 flex-col">
 			{#key kind}
-				<PickedList {builder} {kind} {fresh} onAdd={openPicker} onBreakdown={() => (breakdownOpen = true)} {onFields} />
+				<RequestTable {builder} {kind} {fresh} onAdd={openPicker} onBreakdown={() => (breakdownOpen = true)} {onFields} />
 			{/key}
 		</div>
 	{/if}

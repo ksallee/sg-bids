@@ -3,8 +3,10 @@
 	thing a vendor reads. Shots then Assets, one row per concept: its name and what it is for, the
 	field, and for a concept with no field, what that means (it can still be set per item in the
 	request). When concepts have no field, "Create missing fields" opens one form for all of them
-	(`create-missing`); one concept can still be created on its own. Closing keeps the mapping for
-	this project in this browser. Defaults and options from `$lib/pure/field-map`.
+	(`create-missing`); one concept can still be created on its own. A change reads the draft's rows
+	again, so every live value follows the mapping. When Description reads the stock field, a line
+	suggests a field of the bid's own. Closing keeps the mapping for this project in this browser.
+	Defaults and options from `$lib/pure/field-map`.
 -->
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
@@ -16,6 +18,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { missingConcepts } from '$lib/pure/field-create-many';
 	import { mappingWords, slotOptions, slotsFor, type ItemKind, type Slot } from '$lib/pure/field-map';
+	import { descriptionAdvice } from '$lib/pure/live-columns';
 	import { cn } from '$lib/utils.js';
 	import type { Builder } from '$lib/app/builder.svelte';
 
@@ -24,24 +27,9 @@
 	let creating = $state<{ kind: ItemKind; slot: Slot } | null>(null);
 	let creatingMany = $state(false);
 	let created = $state<string | null>(null);
-	let copying = $state(false);
-	let copyError = $state<string | null>(null);
 
-	const picked = $derived(builder.state.shots.length + builder.state.assets.length);
 	const status = $derived(builder.mappingStatus);
 	const missing = $derived(builder.mapping ? missingConcepts(builder.mapping).filter((m) => m.creatable) : []);
-
-	async function copyAgain(): Promise<void> {
-		copying = true;
-		copyError = null;
-		try {
-			await builder.refreeze();
-		} catch (error) {
-			copyError = error instanceof Error ? error.message : String(error);
-		} finally {
-			copying = false;
-		}
-	}
 
 	function changed(next: boolean): void {
 		if (next) return;
@@ -80,8 +68,14 @@
 									clearable
 									placeholder="Not mapped"
 									clearLabel="Leave it unmapped"
-									onValueChange={(v) => builder.setMapping(kind, spec.slot, v)}
+									onValueChange={(v) => void builder.setMapping(kind, spec.slot, v)}
 								/>
+							{/if}
+							{#if spec.slot === 'description' && descriptionAdvice(kind, builder.mapping[kind])}
+								<p class="border-warning/70 flex flex-col items-start gap-1.5 border-l-2 pl-2.5 text-xs" data-slot="description-advice">
+									<span class="text-foreground">{descriptionAdvice(kind, builder.mapping[kind])}</span>
+									<Button size="sm" variant="outline" class="h-7" onclick={() => void builder.setMapping(kind, 'description', null)} data-slot="description-unmap">Leave it unmapped</Button>
+								</p>
 							{/if}
 							{#if value === null}
 								<p class="text-muted-foreground text-xs" data-slot="unmapped-line">
@@ -134,8 +128,8 @@
 			<Dialog.Header class="border-border border-b px-5 pt-5 pb-4">
 				<Dialog.Title>Fields from Flow PT</Dialog.Title>
 				<Dialog.Description>
-					Which field on this site fills each thing a vendor reads. {status ? mappingWords(status).headline : ''} Mapping is optional: anything left unmapped can still be set per item in
-					the request. Kept for this project in this browser.
+					Which field on this site fills each thing a vendor reads. {status ? mappingWords(status).headline : ''} A mapped field is live: editing it in the request changes Flow PT.
+					Anything left unmapped can still be set per item, in the request only. Kept for this project in this browser.
 				</Dialog.Description>
 			</Dialog.Header>
 			<div class="flex min-h-0 flex-col gap-6 overflow-y-auto px-5 py-4">
@@ -148,15 +142,7 @@
 						{/snippet}
 					</Notice>
 				{/if}
-				{#if builder.stale}
-					<Notice tone="warning" title="The picked items keep their old values.">
-						{' '}{picked} {picked === 1 ? 'item was' : 'items were'} copied with the previous fields. Copying again drops your edits to them.
-						{#snippet action()}
-							<Button size="sm" variant="outline" onclick={() => void copyAgain()} disabled={copying}>{copying ? 'Copying…' : 'Copy again'}</Button>
-						{/snippet}
-					</Notice>
-				{/if}
-				{#if copyError}<Notice tone="destructive" title="Could not copy them again.">{' '}{copyError}</Notice>{/if}
+				{#if builder.live.state === 'error'}<Notice tone="destructive" title="Could not read the rows again.">{' '}{builder.live.message}</Notice>{/if}
 				{@render kindBlock('shot', 'Shots')}
 				{@render kindBlock('asset', 'Assets')}
 			</div>

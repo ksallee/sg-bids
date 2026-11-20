@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { asset, request, shot } from './fixtures';
 import { emptyHeaderForm } from './header';
-import { isLocalId, localId, nextRound, savable } from './persist';
+import { hasContent, isLocalId, localId, nextRound, savable } from './persist';
 import type { BuilderState } from './request';
 
 function state(extra: Partial<BuilderState> = {}): BuilderState {
@@ -39,9 +39,18 @@ describe('savable', () => {
 		expect(out.ok && 'thumbnail' in out.items.shots[0]).toBe(false);
 	});
 
-	it('waits for a project and nothing else', () => {
+	it('waits for a project, then for a title or a row', () => {
 		expect(savable(state({ project: null }))).toEqual({ ok: false, reason: 'Pick a project to save the draft.' });
-		expect(savable(state({ form: emptyHeaderForm(), shots: [], assets: [] })).ok).toBe(true);
+		expect(savable(state({ form: emptyHeaderForm(), shots: [], assets: [] }))).toEqual({ ok: false, reason: 'Give it a title or add a row to save the draft.' });
+		expect(savable(state({ form: { ...emptyHeaderForm(), title: 'Main bid' }, shots: [], assets: [] })).ok).toBe(true);
+		expect(savable(state({ form: emptyHeaderForm(), assets: [] })).ok).toBe(true);
+	});
+
+	it('holds a draft with content, and nothing for one with none', () => {
+		expect(hasContent(state({ form: { ...emptyHeaderForm(), title: '  ' }, shots: [], assets: [] }))).toBe(false);
+		expect(hasContent(state({ form: { ...emptyHeaderForm(), code: 'DS_R1' }, shots: [], assets: [] }))).toBe(false);
+		expect(hasContent(state({ form: emptyHeaderForm(), shots: [] }))).toBe(true);
+		expect(hasContent(state({ shots: [], assets: [] }))).toBe(true);
 	});
 
 	it('saves a blank code as the code given, else as one made from the project', () => {
