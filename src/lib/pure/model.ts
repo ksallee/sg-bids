@@ -49,6 +49,9 @@ export interface BidRequest {
 }
 
 export interface RequestHeader {
+	/** Production's own reference for the request: `SHOW_R1`. */
+	readonly code?: string;
+	readonly title?: string;
 	readonly project: string;
 	readonly projectRef?: EntityRef;
 	readonly studio?: string;
@@ -63,6 +66,8 @@ export interface RequestHeader {
 	/** The currency production compares and awards in. Each vendor bids in its own. */
 	readonly baseCurrency: string;
 	readonly turnoverWeek?: string;
+	/** When the plates and material are turned over to the vendor. */
+	readonly turnoverDate?: Day;
 	readonly deliveryDate?: Day;
 	readonly deliveryFormat?: string;
 	/** A link to the bid material: cut, script, boards. */
@@ -88,6 +93,8 @@ export interface RequestShot {
 	readonly assetIds: readonly Id[];
 	readonly thumbnail?: string;
 	readonly directorNotes?: string;
+	/** Production's note to the vendors on this shot. */
+	readonly notes?: string;
 	/** Tech requirements by department name. */
 	readonly techRequirements?: Readonly<Record<string, string>>;
 }
@@ -100,6 +107,10 @@ export interface RequestAsset {
 	readonly type?: string;
 	readonly difficulty?: string;
 	readonly timesUsed?: number;
+	/** The asset is out. Absent means in. */
+	readonly omitted?: boolean;
+	/** Production's note to the vendors on this asset. */
+	readonly notes?: string;
 }
 
 export interface InvitedVendor {
