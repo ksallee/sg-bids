@@ -25,7 +25,10 @@ gitignored and never committed. Nothing from it that names a site goes in the re
   grows there, issue and PR there, never a private extension here.
 - Default theme only (`src/app.css`, sg-widgets' default). Light and dark switch in the navbar,
   following the system preference at first.
-- No backend yet. The vendor link will need one; nothing for it lands before its own issue.
+- Supabase holds requests and bids. Only server code touches it, with the secret key; row level
+  security is on with no policy. Every query carries the filter `src/lib/pure/access.ts` gives
+  the verified principal: production's site host and project id, or a vendor's invitation.
+  Freezes live in the database too. `docs/development.md` says how.
 - No LLM in the app. Deterministic.
 - Never commit `BRIEF.md`, `.env*` files other than `.env.example`, tokens, or a site URL.
 
@@ -40,7 +43,10 @@ metaphors, no "not X, Y", no filler.
 - `src/lib/app/`: the app's own components (shell, banner, page header).
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
 - `docs/data-model.md`: the bid request, vendor bid, award and change order, field by field.
-- `docs/development.md`: running the app, the port, the env, the deploy.
+- `src/lib/server/`: the data layer and the production check. Server only.
+- `supabase/migrations/`: the schema, timestamped plain SQL, idempotent.
+- `tests/db/`: database tests, run by `pnpm test:db` against a throwaway Postgres in Docker.
+- `docs/development.md`: running the app, the port, the env, the database, the deploy.
 - `docs/deploy.md`: deploying your own copy.
 
 ## Process
@@ -52,4 +58,4 @@ metaphors, no "not X, Y", no filler.
 
 ## Commands
 
-    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build
+    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build / pnpm test:db
