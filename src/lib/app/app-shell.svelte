@@ -8,6 +8,7 @@
 	import type { Snippet } from 'svelte';
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
+	import { browser } from '$app/environment';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { isDark, setMode } from '$lib/theme';
 	import { prepareLive, type LiveState } from '$lib/live';
@@ -18,13 +19,17 @@
 	let { children, vendor = false }: { children: Snippet; vendor?: boolean } = $props();
 
 	let live = $state<LiveState | null>(null);
+	// The public pages render at build too (`(public)/+layout.ts`): nothing there reads the browser.
 	// svelte-ignore state_referenced_locally
-	if (!vendor) void prepareLive().then((value) => (live = value));
+	if (!vendor && browser) void prepareLive().then((value) => (live = value));
 
-	let dark = $state(isDark());
+	// Dark until the browser says otherwise, as `app.html` starts, so a prerendered page hydrates
+	// onto the same markup it was built with.
+	let dark = $state(true);
 
 	// In `system` mode the OS can flip the scheme under the page; the icon and label follow it.
 	$effect(() => {
+		dark = isDark();
 		const media = matchMedia('(prefers-color-scheme: dark)');
 		const follow = (): void => {
 			dark = isDark();

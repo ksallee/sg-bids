@@ -1,6 +1,9 @@
 # sg-bids
 
-VFX bidding for Flow Production Tracking. MIT.
+sg-bids is a free, open source web app that runs VFX bid rounds for Flow Production Tracking
+(formerly ShotGrid). Production builds a bid request from its Shots and Assets, vendors bid through
+a link with no Flow PT account, production compares the bids in one currency, and the award is
+written back to Flow PT. MIT. Demo: https://sg-bids.vercel.app
 
 1. Build a bid request from your Shots and Assets in Flow PT. The request keeps a frozen copy.
 2. Invite vendors. Each gets a link, and may be tied to its Flow PT Group.

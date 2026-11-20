@@ -1,7 +1,7 @@
 <!--
 	The app's mark and lockup, a sibling of sg-task-templates' and sg-notes' in its type and its two
 	inks: the accent once, the quiet ink for the rest. The mark: three bids side by side, the awarded
-	one in the accent. `src/lib/assets/favicon.svg` is this drawing with the default palette's values
+	one in the accent. `static/favicon.svg` is this drawing with the default palette's values
 	pinned.
 -->
 <script lang="ts">
