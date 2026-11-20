@@ -7,6 +7,8 @@
  * (probe 062), so its two calls are the only ones that need this server.
  */
 import { json } from '@sveltejs/kit';
+import { siteOrigin } from '$lib/pure/fpt-session';
+import { fptSiteHosts } from '$lib/server/env';
 
 /** The one path either endpoint appends to the site a caller names. */
 export const launcherBase = '/internal_api/app_session_request';
@@ -20,20 +22,20 @@ export function forwardFailed(error: unknown): Response {
 }
 
 /**
- * The site root to forward to, or the 400 to answer instead. Https only: the
- * session token the launcher hands back is a credential for the person who
- * approved.
+ * The site root to forward to, or the answer to give instead. The endpoints take no sign-in, so
+ * the site must be on the same allowlist the production check uses (`FPT_SITE_HOSTS`): https, the
+ * default port, an allowed host. Anything else is 403 and nothing is called.
  */
 export function siteFromBody(value: unknown): string | Response {
 	if (typeof value !== 'string' || value.trim() === '') return badRequest("'siteUrl' is required.");
-	let url: URL;
-	try {
-		url = new URL(value.trim());
-	} catch {
-		return badRequest("'siteUrl' must be a URL.");
-	}
-	if (url.protocol !== 'https:') return badRequest("'siteUrl' must be https.");
-	return url.origin;
+	const site = siteOrigin(value, fptSiteHosts());
+	if (!site) return json({ message: 'This app does not serve that site.' }, { status: 403 });
+	return site.origin;
+}
+
+/** A call to the site that follows no redirect: a site answers at its own host (129). */
+export function forward(url: string, init: RequestInit): Promise<Response> {
+	return fetch(url, { ...init, redirect: 'error' });
 }
 
 export async function bodyOf(request: Request): Promise<Record<string, unknown> | Response> {

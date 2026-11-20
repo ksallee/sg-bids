@@ -46,6 +46,42 @@ describe('a vendor bid in its own currency', () => {
 	});
 });
 
+describe('submitBid', () => {
+	it('refuses a total at or below zero, and a discount above the subtotal, and leaves the draft a draft', async () => {
+		const { s, a } = await issuedWithTwoVendors();
+		// draft(100) prices 100 + 200 live: a subtotal of 300.
+		const cases = [
+			{ discount: { kind: 'percent' as const, percent: '100' } },
+			{ discount: { kind: 'amount' as const, amount: { minor: 300, currency: 'USD' } } },
+			{ discount: { kind: 'amount' as const, amount: { minor: 5_000, currency: 'USD' } } }
+		];
+		for (const extra of cases) {
+			const saved = await s.saveDraftBid(a.token, draft(100, extra));
+			const error = await refusal(() => s.submitBid(a.token, saved.id));
+			expect(error.status).toBe(422);
+			expect(error.message).toContain('The total must be above zero.');
+			const [row] = await sql`select status from public.bids where id = ${saved.id}`;
+			expect(row.status).toBe('draft');
+		}
+		const fine = await s.saveDraftBid(a.token, draft(100, { discount: { kind: 'amount', amount: { minor: 299, currency: 'USD' } } }));
+		expect((await s.submitBid(a.token, fine.id)).status).toBe('submitted');
+	});
+
+	it('refuses to save percents out of range or a currency off the ISO list, even past the reader', async () => {
+		const { s, a } = await issuedWithTwoVendors();
+		const tax = await refusal(() => s.saveDraftBid(a.token, draft(100, { tax: { kind: 'percent', percent: '250' } })));
+		expect(tax.status).toBe(422);
+		expect(tax.message).toBe('A tax is 100% at most.');
+		const odd = {
+			...draft(100),
+			currency: 'XYZ',
+			lines: draft(100).lines.map((l) => ({ ...l, total: { minor: l.total.minor, currency: 'XYZ' } }))
+		};
+		expect((await refusal(() => s.saveDraftBid(a.token, odd))).status).toBe(422);
+		expect(await sql`select id from public.bids where invitation_id = ${a.invitation.id}`).toHaveLength(0);
+	});
+});
+
 describe('withdrawBid', () => {
 	it('withdraws a submitted bid, once, and a new version may follow', async () => {
 		const { s, a } = await issuedWithTwoVendors();

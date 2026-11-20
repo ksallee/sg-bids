@@ -119,6 +119,24 @@ export async function issuedWithTwoVendors(options: StoreOptions = {}) {
 	return { s, production, request, a, b };
 }
 
+/** The vendor's id of each request item, `kind:key` to row id: what a vendor's draft names. */
+export async function vendorIds(sql: ReturnType<typeof superuser>, requestId: string): Promise<Map<string, string>> {
+	const rows = await sql`select kind, key, id from public.request_items where request_id = ${requestId}`;
+	return new Map(rows.map((r) => [`${r.kind}:${r.key}`, r.id as string]));
+}
+
+/** A draft as a vendor's page sends it: each line names its item by the vendor's id. */
+export function forVendor(input: BidDraft, ids: ReadonlyMap<string, string>): BidDraft {
+	return {
+		...input,
+		lines: input.lines.map((l) => {
+			const id = ids.get(`${l.target.kind}:${l.target.id}`);
+			if (!id) throw new Error(`No vendor id for ${l.target.kind} ${l.target.id}.`);
+			return { ...l, target: { ...l.target, id } };
+		})
+	};
+}
+
 /** Runs `fn`, expecting a refusal; answers it. */
 export async function refusal(fn: () => unknown): Promise<Error & { status?: number; code?: string }> {
 	try {

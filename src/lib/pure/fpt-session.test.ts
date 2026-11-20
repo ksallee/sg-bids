@@ -33,6 +33,40 @@ describe('allowedHosts', () => {
 		expect(allowedHosts(undefined, undefined)).toEqual([]);
 		expect(allowedHosts('', 'not a url')).toEqual([]);
 	});
+
+	it('keeps a suffix only when written out as `*.` and two labels or more, and drops what is not a host', () => {
+		expect(allowedHosts('*.ShotGrid.Autodesk.com, studio.example.com', undefined)).toEqual(['*.shotgrid.autodesk.com', 'studio.example.com']);
+		expect(allowedHosts('*, *.com, *.*.example.com, a*.example.com, https://x.example.com, x.example.com:443, ok.example.com', undefined)).toEqual([
+			'ok.example.com'
+		]);
+	});
+});
+
+describe('siteOrigin with a suffix', () => {
+	const hosts = ['*.shotgrid.autodesk.com'];
+
+	it('allows one label under the suffix, https on the default port', () => {
+		expect(siteOrigin('https://mystudio.shotgrid.autodesk.com', hosts)).toEqual({ origin: 'https://mystudio.shotgrid.autodesk.com', host: 'mystudio.shotgrid.autodesk.com' });
+		expect(siteOrigin('https://my-studio-2.ShotGrid.autodesk.com/page', hosts)?.host).toBe('my-studio-2.shotgrid.autodesk.com');
+	});
+
+	it('holds to the label boundary: not the suffix itself, not two labels, not a look-alike', () => {
+		for (const url of [
+			'https://shotgrid.autodesk.com',
+			'https://a.b.shotgrid.autodesk.com',
+			'https://evilshotgrid.autodesk.com',
+			'https://x.shotgrid.autodesk.com.evil.net',
+			'https://x.shotgrid.autodesk.com.',
+			'https://-x.shotgrid.autodesk.com',
+			'http://x.shotgrid.autodesk.com',
+			'https://x.shotgrid.autodesk.com:8443',
+			'https://user:pw@x.shotgrid.autodesk.com',
+			'https://169.254.169.254',
+			'https://localhost'
+		]) {
+			expect(siteOrigin(url, hosts), url).toBeNull();
+		}
+	});
 });
 
 describe('siteOrigin', () => {

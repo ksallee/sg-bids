@@ -39,6 +39,18 @@ describe('parseSave', () => {
 		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, assetIds: 'x' }], assets: [] } }).ok).toBe(false);
 		expect(parseSave({ id: 5, code: 'X', header, items: { shots: [], assets: [] } }).ok).toBe(false);
 	});
+
+	it('takes a bid material link only when it is http or https', () => {
+		const save = (materialLink: unknown) => parseSave({ code: 'X', header: { ...header, materialLink }, items: { shots: [], assets: [] } });
+		const ok = save('https://example.com/cut');
+		expect(ok.ok && ok.value.header.materialLink).toBe('https://example.com/cut');
+		for (const link of ['javascript:alert(document.cookie)', ' JAVASCRIPT:alert(1)', 'data:text/html,x', 'ftp://x.example.com', '//evil.example.com', 'cut']) {
+			expect(save(link), link).toEqual({ ok: false, message: 'The header does not fit a request.' });
+		}
+		// Blank is no link.
+		const blank = save('');
+		expect(blank.ok && 'materialLink' in blank.value.header).toBe(false);
+	});
 });
 
 describe('parseVendor', () => {

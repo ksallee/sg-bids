@@ -4,9 +4,12 @@
 -->
 <script lang="ts">
 	import ExternalLink from '@lucide/svelte/icons/external-link';
+	import { safeHref } from '$lib/pure/safe-href';
 	import type { VendorRequestView } from '$lib/pure/vendor-view';
 
 	let { request, day }: { request: VendorRequestView; day: (text: string) => string } = $props();
+
+	const materialHref = $derived(safeHref(request.header.materialLink));
 
 	const facts = $derived(
 		[
@@ -41,10 +44,10 @@
 			</ul>
 		</div>
 	{/if}
-	{#if request.header.materialLink}
+	{#if materialHref}
 		<a
 			class="text-primary inline-flex w-fit items-center gap-1.5 text-sm font-medium underline-offset-4 hover:underline"
-			href={request.header.materialLink}
+			href={materialHref}
 			target="_blank"
 			rel="noopener noreferrer">Open the bid material <ExternalLink class="size-3.5" aria-hidden="true" /></a
 		>

@@ -11,6 +11,7 @@ import { isCurrency } from './currencies';
 import { isDay } from './header';
 import type { EntityRef, InvitedVendor, RequestAsset, RequestHeader, RequestShot } from './model';
 import { validateVendor } from './invitations';
+import { isWebLink } from './safe-href';
 
 export type Parsed<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string };
 
@@ -51,6 +52,9 @@ function parseHeader(value: unknown): RequestHeader | null {
 	if (!isObject(value)) return null;
 	const text = texts(value, HEADER_TEXT);
 	if (!text || !isText(value.project)) return null;
+	// The link reaches a vendor as an href: http or https only (`safe-href.ts`). Blank is no link.
+	if (text.materialLink === '') delete text.materialLink;
+	else if (text.materialLink !== undefined && !isWebLink(text.materialLink as string)) return null;
 	if (!Number.isSafeInteger(value.round) || (value.round as number) < 1) return null;
 	if (!isText(value.baseCurrency) || !isCurrency(value.baseCurrency)) return null;
 	if (!Array.isArray(value.assumptions) || !value.assumptions.every(isText)) return null;

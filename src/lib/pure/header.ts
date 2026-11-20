@@ -6,6 +6,7 @@
 
 import { isCurrency } from './currencies';
 import type { Day, RequestHeader } from './model';
+import { isWebLink } from './safe-href';
 
 export interface HeaderForm {
 	code: string;
@@ -91,7 +92,7 @@ export function validateHeader(form: HeaderForm, today: Day): HeaderErrors {
 	}
 
 	const link = form.materialLink.trim();
-	if (link !== '' && !/^https?:\/\/\S+$/i.test(link)) errors.materialLink = 'The link starts with https:// or http://.';
+	if (link !== '' && !isWebLink(link)) errors.materialLink = 'The link starts with https:// or http://.';
 
 	for (const key of Object.keys(errors) as (keyof HeaderForm)[]) if (errors[key] === undefined) delete errors[key];
 	return errors;

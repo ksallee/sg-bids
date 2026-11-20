@@ -29,6 +29,7 @@ export const POST: RequestHandler = async () => {
 	// Form-encoded is the one content type the token endpoint accepts; JSON is 415.
 	const res = await fetch(`${siteUrl}/api/v1/auth/access_token`, {
 		method: 'POST',
+		redirect: 'error',
 		headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
 		body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }).toString()
 	});

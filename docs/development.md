@@ -12,8 +12,9 @@ Open http://localhost:5181, name the site and sign in through the App Session La
     pnpm build
     pnpm test:db
 
-`.github/workflows/gates.yml` runs the first three on every pull request and on pushes to `dev`
-and `main`. `pnpm test` needs no Docker. `pnpm test:db` does: see Database below.
+`.github/workflows/gates.yml` runs all four on every pull request and on pushes to `dev` and
+`main`, the database tests in a job of their own. `pnpm test` needs no Docker. `pnpm test:db`
+does: see Database below.
 
 ## Port
 
@@ -47,7 +48,9 @@ reads them.
 
 The browser calls the site's `/api/v1` itself. The App Session Launcher answers no CORS headers, so
 its two calls go through this app's `/live/session-request` and `/live/session-poll`, which hold
-nothing. The approved session token stays in the browser's `localStorage`. The corpus entries are
+nothing. They take no sign-in, so they call only a host on `FPT_SITE_HOSTS` (the list the
+production check uses, `docs/deploy.md`) and follow no redirect; any other site is 403 and nothing
+is called. The approved session token stays in the browser's `localStorage`. The corpus entries are
 `052_app_session_launcher`, `062_cors` and `130_launcher_answers` in `../sg-groundtruth/corpus`.
 
 ## Database
@@ -106,36 +109,56 @@ The page is `/bids/[id]/compare`. The builder's drafts go through
 
 ## The vendor link
 
-A vendor opens `/v/<token>`, the link `vendorLink` writes. That route finds the token's
-invitation and puts `<invitation id>.<token>` in a cookie, `sg_bids_vendor`: HttpOnly, Secure
-(SvelteKit drops Secure on http://localhost only), SameSite=Lax, path `/v`. Then it redirects to
-`/v`, so the token does not stay in the address bar, the history or a referrer. A link no
-invitation holds clears the cookie and lands on `/v?link=invalid`.
+A vendor opens `/v/<token>`, the link `vendorLink` writes. That route does no lookup: it moves
+the token to a ten minute cookie, `sg_bids_vendor_open`, and redirects to `/v/open`. `/v/open`
+finds the token's invitation and puts `<invitation id>.<token>` in the vendor cookie,
+`sg_bids_vendor`: HttpOnly, Secure (SvelteKit drops Secure on http://localhost only), SameSite=Lax,
+path `/v`. Then it redirects to `/v`, so the token does not stay in the address bar, the history or
+a referrer. A link no invitation holds clears the cookie and lands on `/v?link=invalid`.
+
+When the browser already holds another vendor's live link, `/v/open` does not replace it. It asks:
+"This link is for B. You have A's bid open.", and only a post from this site's own page switches
+(the Origin is checked, as SvelteKit does). So a link one vendor sends another cannot take over the
+bid on screen. The form names the vendor at the top at all times, so a switch is plain to see.
 
 When production gives a vendor a new link, the old token stops working and the vendor keeps its
-bids. A vendor still holding the old cookie gets 410 and a page saying the link was replaced; the
-new link opens its draft or submitted bid as it was.
+bids. A trigger keeps the hashes of an invitation's last ten tokens
+(`20261121120000_replaced_tokens.sql`). A vendor still holding an old cookie gets 410 and a page
+saying the link was replaced; the new link opens its draft or submitted bid as it was. Any other
+cookie that fails gets 401, whatever invitation id it names, so the answer never tells an outsider
+whether an invitation exists.
 
-The page at `/v` calls these, each authorised by the cookie alone (`src/lib/server/vendor-api.ts`):
+The page at `/v` calls these, each authorised by the cookie (`src/lib/server/vendor-api.ts`). Every
+write also names the invitation and the bid the page loaded, `{invitationId, bidId}`. When the
+cookie now holds another invitation, or the bid moved on in another tab, the write is refused with
+409 and `reason` `session` or `bid`, and nothing is written:
 
 | call | what |
 |---|---|
-| `GET /v/api/request` | the request as frozen, with no vendors list and no Flow PT ids |
+| `GET /v/api/request` | the request as frozen, the vendor's own name and invitation id, no vendors list, no Flow PT ids |
 | `GET /v/api/bid` | the vendor's latest bid, draft or submitted, and its versions |
-| `PUT /v/api/bid` | `{draft}`: save the draft, or open the next version after a submit |
-| `POST /v/api/bid/submit` | `{bidId}`: submit the draft |
-| `POST /v/api/bid/withdraw` | `{bidId}`: withdraw the submitted bid |
-| `POST /v/api/bid/revise` | open the next version as a copy of the latest |
+| `PUT /v/api/bid` | `{invitationId, bidId, draft}`: save the draft; `bidId` null before the first save |
+| `POST /v/api/bid/submit` | `{invitationId, bidId}`: submit the draft |
+| `POST /v/api/bid/withdraw` | `{invitationId, bidId}`: withdraw the submitted bid |
+| `POST /v/api/bid/revise` | `{invitationId, bidId}`: open the next version as a copy of the latest |
 
 Every answer under `/v` says `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and
 `X-Robots-Tag: noindex, nofollow` (`src/hooks.server.ts`). No answer carries another vendor:
 `src/lib/pure/vendor-view.ts` shapes each one, and `tests/db/vendor-endpoints.db.test.ts` walks
 every endpoint as one vendor of two and finds nothing of the other.
 
-Failed lookups are counted per client address: twenty in ten minutes, then 429 for the rest of the
-window (`src/lib/pure/rate-limit.ts`). The count lives in one server instance. On Vercel each
-instance keeps its own, so it slows a guesser and caps one instance's database calls; it is not a
-global limit. The token's 32 random bytes are the real guard.
+A stored item key holds the Flow PT id (`shot-<id>`, `src/lib/pure/freeze.ts`), so a vendor never
+sees it. Each shot and asset goes out by its row id, and each line a vendor sends is read back to
+the stored key (`src/lib/pure/vendor-keys.ts`). Bids, scenarios and awards keep the stored keys
+and the Flow PT refs stay server side, for production and the award. The test seeds distinctive
+Flow PT ids and finds none in any vendor answer.
+
+Only failed lookups count, per client address and per token: twenty in ten minutes, then 429 for
+the rest of the window, before any database call (`src/lib/pure/rate-limit.ts`). A token that
+worked on the instance passes even when its address is held back, so one bad client behind a
+shared address does not lock out the vendors beside it. The count lives in one server instance. On
+Vercel each instance keeps its own, so it slows a guesser and caps one instance's database calls;
+it is not a global limit. The token's 32 random bytes are the real guard.
 
 ### A dev request to bid on
 
@@ -154,15 +177,20 @@ seeds a bigger request.
 
     pnpm test:db
 
-`scripts/test-db.mjs` starts two throwaway containers, `sg-bids-test` (`postgres:17`) and
-`sg-bids-test-rest` (`postgrest/postgrest:v12.2.12`), on free ports on 127.0.0.1, on the network
-`sg-bids-test-net`. It creates the roles a Supabase project has (`tests/db/supabase-roles.sql`),
+`scripts/test-db.mjs` starts two throwaway containers, `sg-bids-test-<run>` (`postgres:17`) and
+`sg-bids-test-<run>-rest` (`postgrest/postgrest:v12.2.12`), on free ports on 127.0.0.1, on the
+network `sg-bids-test-<run>-net`. `<run>` is `SG_BIDS_TEST_RUN` when set, else random, so two runs
+on one machine never meet. It creates the roles a Supabase project has (`tests/db/supabase-roles.sql`),
 runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no other container.
 
 `tests/db/setup.ts` applies every migration twice to the fresh database. The tests prove:
 
 - `anon` and `authenticated` read, write and call nothing, through PostgREST and in SQL, and row
   level security alone stops them even with the grants given back (`rls.db.test.ts`);
+- every table in `public` has row level security and nothing in `public` is granted to `anon` or
+  `authenticated`, read from the catalog, so a table a later migration adds without it fails; a
+  table or function created later gets no grant to them by default
+  (`20261121110000_default_privileges.sql`, `rls.db.test.ts`);
 - a tenant reaches none of another tenant's rows through any store function, and vendor A's token
   reaches none of vendor B's invitation or bids; expired, revoked, malformed and unknown tokens are
   refused; only token hashes are stored (`access.db.test.ts`);
@@ -174,9 +202,23 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
 - production reads submitted bids only, the latest version by default; its rate applies until the
   award and is locked by the database after; scenarios save, rename, delete and one is chosen; a
   tenant reaches none of another's (`comparison.db.test.ts`);
+- a vendor link opened where another vendor's bid is open asks first, switches only on a
+  same-origin post, and a tab left on the other bid writes nothing (`vendor-session.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
+
+## Security headers
+
+`src/hooks.server.ts` sends on every answer: `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin` (`no-referrer` under `/v`, `same-origin` on `/v/open` so its form
+posts carry an Origin), `X-Frame-Options: DENY`, and HSTS over https. Pages get a
+Content-Security-Policy that SvelteKit writes from `src/lib/pure/security-headers.ts`
+(`vite.config.ts`, `csp`), with a nonce on each inline script, `app.html`'s included. The hook
+adds the hosts of `FPT_SITE_HOSTS` to `connect-src` and `img-src` (in `vite dev` the script key's
+site too), and the S3 media hosts to `img-src`. `style-src` keeps `'unsafe-inline'`: Svelte
+transitions and the widgets' floating parts write inline styles. An answer that is not a page gets
+`default-src 'none'; frame-ancestors 'none'`.
 
 ## Deploy
 
@@ -186,7 +228,9 @@ builds a preview. `src/lib/deploy.test.ts` holds it to that. The page is a clien
 (`ssr = false`) and the routes under `/live/` are serverless functions.
 
 Set in the Vercel project, value never in the repo: `PUBLIC_FPT_SITE_URL`, `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default, and
+`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default (the public
+demo, open to any hosted site, sets `*.shotgrid.autodesk.com,*.shotgunstudio.com`; see
+`docs/deploy.md`), and
 `FPT_PRODUCTION_ROLES` when production is not `admin,manager`. Never set
 the `FPT_API_*` lines on Vercel.
 

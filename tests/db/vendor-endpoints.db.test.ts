@@ -3,17 +3,20 @@
  * walks every endpoint; nothing of vendor B may appear in any answer: no name, address, id,
  * amount, text or count. The store is the test database's; only `$lib/server/env` is swapped.
  */
-import { isRedirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
+import type { RequestEvent } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '$lib/pure/token';
+import { createComparison } from '$lib/server/comparison';
 import { createRequests } from '$lib/server/requests';
 import type { Store } from '$lib/server/store';
-import { draft, issuedWithTwoVendors, rest, store, superuser } from './helpers';
+import { draft, forVendor, header, issuedWithTwoVendors, rest, store, superuser, tenant, vendor, vendorIds } from './helpers';
+import { browser, jarCookies, keys, type Handler } from './vendor-browser';
 
 const holder = vi.hoisted(() => ({ store: null as unknown }));
 vi.mock('$lib/server/env', () => ({ serverStore: () => holder.store }));
 
 const open = await import('../../src/routes/v/[token]/+server');
+const openPage = await import('../../src/routes/v/open/+page.server');
 const requestRoute = await import('../../src/routes/v/api/request/+server');
 const bidRoute = await import('../../src/routes/v/api/bid/+server');
 const submitRoute = await import('../../src/routes/v/api/bid/submit/+server');
@@ -21,6 +24,12 @@ const withdrawRoute = await import('../../src/routes/v/api/bid/withdraw/+server'
 const reviseRoute = await import('../../src/routes/v/api/bid/revise/+server');
 
 const sql = superuser();
+
+/** A draft as the vendor's page would send it for this request: lines on the vendor's item ids. */
+async function drafts(requestId: string) {
+	const ids = await vendorIds(sql, requestId);
+	return Object.assign((total: number) => forVendor(draft(total), ids), { ids });
+}
 
 beforeAll(() => {
 	holder.store = store();
@@ -30,69 +39,92 @@ afterAll(async () => {
 	await sql.end();
 });
 
-type Handler = (event: RequestEvent) => Response | Promise<Response>;
+describe('the vendor endpoints and Flow PT', () => {
+	it('never show a vendor a Flow PT id: items go out by an opaque id, and production keeps the Flow PT ref', async () => {
+		const s = holder.store as Store;
+		const production = tenant();
+		// Keyed as the builder's freeze keys them: `shot-<Flow PT id>`, `asset-<Flow PT id>`.
+		const SHOT = 918273645;
+		const ASSET = 564738291;
+		const OTHER = 778899001;
+		const request = await s.createDraftRequest(production, {
+			code: 'BR-FPT',
+			header: header(),
+			items: {
+				shots: [
+					{ id: `shot-${SHOT}`, code: 'SH010', fpt: { type: 'Shot', id: SHOT }, omitted: false, assetIds: [`asset-${ASSET}`] },
+					{ id: `shot-${OTHER}`, code: 'SH020', fpt: { type: 'Shot', id: OTHER }, omitted: false, assetIds: [] }
+				],
+				assets: [{ id: `asset-${ASSET}`, name: 'Hero', fpt: { type: 'Asset', id: ASSET } }]
+			}
+		});
+		const a = await s.inviteVendor(production, request.id, vendor('Vendor A'));
+		await s.issueRequest(production, request.id);
 
-function jarCookies(jar: Map<string, { value: string; options: Record<string, unknown> }>): Cookies {
-	return {
-		get: (name: string) => jar.get(name)?.value,
-		getAll: () => [...jar].map(([name, { value }]) => ({ name, value })),
-		set: (name: string, value: string, options: Record<string, unknown>) => void jar.set(name, { value, options }),
-		delete: (name: string) => void jar.delete(name),
-		serialize: () => ''
-	} as unknown as Cookies;
-}
+		const A = browser('203.0.113.30');
+		await A.open(open, openPage, a.token);
+		const req = (await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).json;
+		const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+		const [sh010, sh020] = req.shots as { id: string; assetIds: string[] }[];
+		const [hero] = req.assets as { id: string }[];
+		for (const id of [sh010.id, sh020.id, hero.id]) expect(id).toMatch(UUID);
+		expect(sh010.assetIds).toEqual([hero.id]);
 
-interface Answer {
-	status: number;
-	headers: Headers;
-	text: string;
-	json: any;
-}
+		// A bids by those ids, through every move.
+		const me = req.invitationId as string;
+		const lines = [
+			{ target: { kind: 'shot', id: sh010.id }, total: { minor: 100_000, currency: 'USD' }, excluded: false },
+			{ target: { kind: 'shot', id: sh020.id }, total: { minor: 0, currency: 'USD' }, excluded: true },
+			{ target: { kind: 'asset', id: hero.id }, total: { minor: 50_000, currency: 'USD' }, excluded: false }
+		];
+		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: { ...draft(1), lines } });
+		expect(saved.status).toBe(200);
+		expect(saved.json.bid.lines.map((l: { target: { id: string } }) => l.target.id).sort()).toEqual([sh010.id, sh020.id, hero.id].sort());
+		const v1 = saved.json.bid.id as string;
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: v1 });
+		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: v1 });
+		expect(revised.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === sh010.id).total.minor).toBe(100_000);
+		await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
 
-/** One vendor's browser: a cookie jar and an address. */
-function browser(address = '203.0.113.1') {
-	const jar = new Map<string, { value: string; options: Record<string, unknown> }>();
-	const answers: Answer[] = [];
-
-	async function call(handler: Handler, method: string, path: string, body?: unknown, params: Record<string, string> = {}): Promise<Answer> {
-		const url = new URL(`http://localhost:5181${path}`);
-		const init: RequestInit = { method };
-		if (body !== undefined) {
-			init.headers = { 'content-type': 'application/json' };
-			init.body = JSON.stringify(body);
+		// The stored key or a made-up id names nothing a vendor may bid on.
+		for (const id of [`shot-${SHOT}`, '00000000-0000-4000-8000-000000000000', hero.id]) {
+			const wrong = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', {
+				invitationId: me,
+				bidId: revised.json.bid.id,
+				draft: { ...draft(1), lines: [{ ...lines[0], target: { kind: 'shot', id } }] }
+			});
+			expect(wrong.status, id).toBe(422);
 		}
-		const event = { request: new Request(url, init), url, params, cookies: jarCookies(jar), getClientAddress: () => address } as unknown as RequestEvent;
-		let res: Response;
-		try {
-			res = await handler(event);
-		} catch (thrown) {
-			if (!isRedirect(thrown)) throw thrown;
-			res = new Response(null, { status: thrown.status, headers: { location: thrown.location } });
-		}
-		const text = await res.text();
-		const answer = { status: res.status, headers: res.headers, text, json: text ? JSON.parse(text) : null };
-		answers.push(answer);
-		return answer;
-	}
 
-	return { jar, answers, call };
-}
+		// No Flow PT id in any answer, not even inside another number.
+		const everything = A.answers.map((x) => x.text).join('\n');
+		for (const id of [SHOT, ASSET, OTHER]) expect(everything, String(id)).not.toContain(String(id));
 
-/** Every key anywhere in a JSON value. */
-function keys(value: unknown, into = new Set<string>()): Set<string> {
-	if (Array.isArray(value)) value.forEach((v) => keys(v, into));
-	else if (value && typeof value === 'object') {
-		for (const [k, v] of Object.entries(value)) {
-			into.add(k);
-			keys(v, into);
-		}
-	}
-	return into;
-}
+		// Production sees the lines on its own keys, with the Flow PT refs the award writes to.
+		const [own] = await s.listBids(production, request.id);
+		expect(own.bid.lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
+		const stored = await s.getRequest(production, request.id);
+		expect(stored.shots[0].fpt).toEqual({ type: 'Shot', id: SHOT });
+
+		// The comparison and its scenarios key rows on the same stored keys: the vendor's opaque
+		// ids never reach them.
+		const comparison = createComparison(rest('service_role'));
+		const grid = await comparison.loadComparison(production, request.id);
+		expect(grid.bids).toHaveLength(1);
+		expect(grid.bids[0].lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
+		const scenario = await comparison.saveScenario(production, request.id, {
+			name: 'All A',
+			picks: [{ target: { kind: 'shot', id: `shot-${SHOT}` }, shares: [{ bidId: v1, percent: '100' }] }],
+			costsLeftOut: []
+		});
+		expect(scenario.picks[0].target).toEqual({ kind: 'shot', id: `shot-${SHOT}` });
+	});
+});
 
 describe('the vendor endpoints', () => {
 	it('answer vendor A with nothing of vendor B, through every endpoint and every state', async () => {
-		const { a, b } = await issuedWithTwoVendors();
+		const { a, b, request: issued } = await issuedWithTwoVendors();
+		const vd = await drafts(issued.id);
 		const s = holder.store as Store;
 
 		// Vendor B bids with amounts, texts and versions of its own.
@@ -109,35 +141,40 @@ describe('the vendor endpoints', () => {
 
 		// Vendor A walks every endpoint.
 		const A = browser();
-		const opened = await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
+		const opened = await A.open(open, openPage, a.token);
 		expect(opened.status).toBe(303);
 		expect(opened.headers.get('location')).toBe('/v');
 		expect(A.jar.get('sg_bids_vendor')).toEqual({ value: `${a.invitation.id}.${a.token}`, options: expect.objectContaining({ path: '/v', httpOnly: true, sameSite: 'lax' }) });
+		expect(A.jar.has('sg_bids_vendor_open')).toBe(false);
 
 		const request = await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
 		expect(request.status).toBe(200);
-		expect(request.json.shots.map((x: { id: string }) => x.id)).toEqual(['sh010', 'sh020']);
+		expect(request.json.shots.map((x: { code: string }) => x.code)).toEqual(['SH010', 'SH020']);
+		expect(request.json.vendorName).toBe('Vendor A');
+		const me = request.json.invitationId as string;
+		expect(me).toBe(a.invitation.id);
 
 		expect((await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid')).json).toEqual({ bid: null, versions: [] });
-		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(100_000) });
+		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
 		expect(saved.status).toBe(200);
 		const aBid = saved.json.bid.id as string;
 		await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
-		expect((await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: aBid })).json.bid.status).toBe('submitted');
-		expect((await A.call(withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { bidId: aBid })).json.bid.status).toBe('withdrawn');
-		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', {});
+		expect((await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: aBid })).json.bid.status).toBe('submitted');
+		expect((await A.call(withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { invitationId: me, bidId: aBid })).json.bid.status).toBe('withdrawn');
+		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: aBid });
 		expect(revised.json.bid.version).toBe(2);
 		expect(revised.json.versions).toHaveLength(2);
-		await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(90_000) });
+		const v2 = revised.json.bid.id as string;
+		await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: v2, draft: vd(90_000) });
 
 		// A reaching for B's bids by id, and errors of every kind.
-		expect((await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: b2.id })).status).toBe(404);
-		expect((await A.call(withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { bidId: b1.id })).status).toBe(404);
-		expect((await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', {})).status).toBe(409);
-		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: { nonsense: true } })).status).toBe(400);
-		const smuggled = { draft: { ...draft(1), lines: [{ ...draft(1).lines[0], id: b2.id }] } };
+		expect((await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: b2.id })).status).toBe(404);
+		expect((await A.call(withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { invitationId: me, bidId: b1.id })).status).toBe(404);
+		expect((await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: v2 })).status).toBe(409);
+		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: v2, draft: { nonsense: true } })).status).toBe(400);
+		const smuggled = { invitationId: me, bidId: v2, draft: { ...vd(1), lines: [{ ...vd(1).lines[0], id: b2.id }] } };
 		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', smuggled)).status).toBe(200);
-		const final = await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: revised.json.bid.id });
+		const final = await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: v2 });
 		expect(final.json.bid.status).toBe('submitted');
 
 		// Nothing of B anywhere: names, addresses, ids, amounts, texts, the token and its hash.
@@ -160,16 +197,17 @@ describe('the vendor endpoints', () => {
 		const everything = A.answers.map((x) => `${x.text}\n${[...x.headers].join('\n')}`).join('\n');
 		for (const secret of secrets) expect(everything, secret).not.toContain(secret);
 
-		// No list of vendors, no vendor or request id, no invitation id, no count of anything vendor shaped.
+		// No list of vendors, no vendor or request id, no count of anything vendor shaped. A's own
+		// invitation id goes out once, in the request, for the page to send back.
 		const seen = new Set<string>();
 		for (const answer of A.answers) keys(answer.json, seen);
-		for (const key of ['vendors', 'vendorId', 'vendor', 'invitationId', 'invitation', 'requestId', 'projectRef', 'fpt', 'email', 'tokenHash']) {
+		for (const key of ['vendors', 'vendorId', 'vendor', 'invitation', 'requestId', 'projectRef', 'fpt', 'email', 'tokenHash']) {
 			expect(seen.has(key), key).toBe(false);
 		}
-		expect(everything).not.toContain(a.invitation.id);
+		expect(A.answers.filter((x) => x.text.includes(a.invitation.id))).toEqual([request]);
 
-		// Every answer is uncacheable and sends no referrer.
-		for (const answer of A.answers.slice(1)) {
+		// Every API answer is uncacheable and sends no referrer (the hook adds the same to the link routes).
+		for (const answer of A.answers.slice(2)) {
 			expect(answer.headers.get('cache-control')).toBe('no-store');
 			expect(answer.headers.get('referrer-policy')).toBe('no-referrer');
 		}
@@ -179,43 +217,72 @@ describe('the vendor endpoints', () => {
 		expect(row.status).toBe('draft');
 	});
 
-	it('refuse a browser with no link, a bad link, and a guesser after twenty misses', async () => {
+	it('refuse a browser with no link, a bad link, and a guesser after twenty misses, but not the vendor beside it', async () => {
+		const { a } = await issuedWithTwoVendors();
 		const none = browser('203.0.113.9');
 		expect((await none.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
 
 		const bad = browser('203.0.113.10');
-		const opened = await bad.call(open.GET as Handler, 'GET', '/v/not-a-token', undefined, { token: 'not-a-token' });
+		const opened = await bad.open(open, openPage, 'not-a-token');
 		expect(opened.headers.get('location')).toBe('/v?link=invalid');
 		expect(bad.jar.has('sg_bids_vendor')).toBe(false);
 
-		// A token of the right shape that no invitation holds: no cookie, and it counts as a miss.
-		const guesser = browser('203.0.113.11');
-		const wrong = 'A'.repeat(42) + 'E';
+		// Vendor A works behind the same shared address the guesser will use.
+		const shared = '203.0.113.11';
+		const vendorA = browser(shared);
+		await vendorA.open(open, openPage, a.token);
+		expect((await vendorA.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(200);
+
+		// Tokens of the right shape that no invitation holds: no cookie, and each counts as a miss.
+		const guesser = browser(shared);
+		const wrong = (i: number) => 'A'.repeat(40) + String.fromCharCode(66 + i, 66 + i) + 'E';
 		for (let i = 0; i < 10; i++) {
-			const miss = await guesser.call(open.GET as Handler, 'GET', `/v/${wrong}`, undefined, { token: wrong });
+			const miss = await guesser.open(open, openPage, wrong(i));
 			expect(miss.headers.get('location')).toBe('/v?link=invalid');
 		}
 		expect(guesser.jar.has('sg_bids_vendor')).toBe(false);
-		// A forged cookie misses too.
-		guesser.jar.set('sg_bids_vendor', { value: wrong, options: {} });
-		for (let i = 0; i < 10; i++) expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		// Forged cookies miss too.
+		for (let i = 10; i < 20; i++) {
+			guesser.jar.set('sg_bids_vendor', { value: wrong(i), options: {} });
+			expect((await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		}
+		guesser.jar.set('sg_bids_vendor', { value: wrong(20), options: {} });
 		const blocked = await guesser.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
 		expect(blocked.status).toBe(429);
 		expect(blocked.json).toEqual({ error: 'Too many tries. Wait a few minutes.' });
-		const held = await guesser.call(open.GET as Handler, 'GET', `/v/${wrong}`, undefined, { token: wrong });
+		const held = await guesser.open(open, openPage, wrong(21));
 		expect(held.headers.get('location')).toBe('/v?link=wait');
+
+		// The vendor beside it is not locked out: its link worked here, so it passes.
+		expect((await vendorA.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(200);
+		expect((await vendorA.call(bidRoute.GET as Handler, 'GET', '/v/api/bid')).status).toBe(200);
 
 		// Another address is not held back.
 		expect((await bad.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
 	});
 
+	it('hold back one token tried from many addresses', async () => {
+		const wrong = 'Z'.repeat(42) + 'E';
+		for (let i = 0; i < 20; i++) {
+			const one = browser(`198.51.100.${i + 1}`);
+			one.jar.set('sg_bids_vendor', { value: wrong, options: {} });
+			expect((await one.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(401);
+		}
+		const late = browser('198.51.100.200');
+		late.jar.set('sg_bids_vendor', { value: wrong, options: {} });
+		expect((await late.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).status).toBe(429);
+	});
+
 	it('tell a vendor whose link production replaced, and open its bids with the new link', async () => {
-		const { production, a, b } = await issuedWithTwoVendors();
+		const { production, a, b, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
 		const A = browser('203.0.113.13');
-		await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
-		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(100_000) });
-		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: first.json.bid.id });
-		const second = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(95_000) });
+		await A.open(open, openPage, a.token);
+		const me = a.invitation.id;
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: first.json.bid.id });
+		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: first.json.bid.id });
+		const second = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: revised.json.bid.id, draft: vd(95_000) });
 		expect(second.json.bid.version).toBe(2);
 
 		// Production's "New link", the builder's reissue.
@@ -226,8 +293,8 @@ describe('the vendor endpoints', () => {
 		const calls: [Handler, string, string, unknown][] = [
 			[requestRoute.GET as Handler, 'GET', '/v/api/request', undefined],
 			[bidRoute.GET as Handler, 'GET', '/v/api/bid', undefined],
-			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(1) }],
-			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: second.json.bid.id }]
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: second.json.bid.id, draft: vd(1) }],
+			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: second.json.bid.id }]
 		];
 		for (const [handler, method, path, body] of calls) {
 			const answer = await A.call(handler, method, path, body);
@@ -235,30 +302,37 @@ describe('the vendor endpoints', () => {
 			expect(answer.json).toEqual({ error: replaced });
 		}
 		// The old link itself no longer opens anything.
-		const old = await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
+		const old = await A.open(open, openPage, a.token);
 		expect(old.headers.get('location')).toBe('/v?link=invalid');
 
 		// The new link, in the same browser: the draft and the submitted version are there.
-		const opened = await A.call(open.GET as Handler, 'GET', `/v/${next.token}`, undefined, { token: next.token });
+		const opened = await A.open(open, openPage, next.token);
 		expect(opened.headers.get('location')).toBe('/v');
 		const bid = await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
 		expect(bid.json.bid).toMatchObject({ id: second.json.bid.id, version: 2, status: 'draft' });
 		expect(bid.json.versions.map((v: { status: string }) => v.status)).toEqual(['submitted', 'draft']);
-		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === 'sh010').total.minor).toBe(95_000);
+		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === vd.ids.get('shot:sh010')).total.minor).toBe(95_000);
 
-		// A forged cookie naming another vendor's invitation with a dead token learns nothing of it.
+		// A forged cookie naming another vendor's invitation learns nothing of it, not even that it
+		// exists: "replaced" needs a token that once opened that very invitation.
 		const forger = browser('203.0.113.14');
-		forger.jar.set('sg_bids_vendor', { value: `${b.invitation.id}.${a.token}`, options: {} });
-		const probe = await forger.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
-		expect(probe.status).toBe(410);
-		expect(probe.text).not.toContain(b.invitation.name);
-		expect(probe.text).not.toContain(b.invitation.id);
+		const unknown = (await sql`select gen_random_uuid() as id`)[0].id as string;
+		const answers: string[] = [];
+		for (const value of [`${b.invitation.id}.${a.token}`, `${b.invitation.id}.${'Q'.repeat(42)}E`, `${unknown}.${'Q'.repeat(42)}E`]) {
+			forger.jar.set('sg_bids_vendor', { value, options: {} });
+			const probe = await forger.call(requestRoute.GET as Handler, 'GET', '/v/api/request');
+			expect(probe.status, value).toBe(401);
+			expect(probe.text).not.toContain(b.invitation.name);
+			expect(probe.text).not.toContain(b.invitation.id);
+			answers.push(probe.text);
+		}
+		expect(new Set(answers).size).toBe(1);
 	});
 
 	it('refuse a write that is not JSON', async () => {
 		const { a } = await issuedWithTwoVendors();
 		const A = browser('203.0.113.12');
-		await A.call(open.GET as Handler, 'GET', `/v/${a.token}`, undefined, { token: a.token });
+		await A.open(open, openPage, a.token);
 		const url = new URL('http://localhost:5181/v/api/bid');
 		const event = {
 			request: new Request(url, { method: 'PUT', body: 'draft=1', headers: { 'content-type': 'application/x-www-form-urlencoded' } }),

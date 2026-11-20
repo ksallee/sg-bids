@@ -215,6 +215,31 @@ describe('formToDraft', () => {
 		expect(formToDraft(one, '.').blockers).toEqual([]);
 	});
 
+	it('blocks a submit whose total is not above zero, or whose discount is more than the subtotal', () => {
+		const over = filled((f) => {
+			lineOf(f, 'shot:sh010').price = '100';
+			f.discount = { kind: 'amount', value: '150' };
+		});
+		expect(formToDraft(over, '.').blockers).toEqual(['The discount is more than the subtotal.', 'The total must be above zero.']);
+		const all = filled((f) => {
+			lineOf(f, 'shot:sh010').price = '100';
+			f.discount = { kind: 'percent', value: '100' };
+		});
+		expect(formToDraft(all, '.').blockers).toEqual(['The total must be above zero.']);
+		const zero = filled((f) => (lineOf(f, 'shot:sh010').price = '0'));
+		expect(formToDraft(zero, '.').blockers).toEqual(['The total must be above zero.']);
+	});
+
+	it('names a tax over 100%', () => {
+		const form = filled((f) => {
+			lineOf(f, 'shot:sh010').price = '100';
+			f.tax = { kind: 'percent', value: '120' };
+		});
+		const result = formToDraft(form, '.');
+		expect(result.errors.tax).toBe('A tax is 100% at most.');
+		expect(result.draft.tax).toBeNull();
+	});
+
 	it('warns about items with no price', () => {
 		const one = filled((f) => (lineOf(f, 'shot:sh010').price = '1'));
 		expect(formToDraft(one, '.').warnings).toContain('3 items have no price. They will show as not bid.');

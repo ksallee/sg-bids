@@ -16,6 +16,7 @@ import type { Adjustment, BidLine, BidRequest, Day, DepartmentCost, NonShotCost,
 import { targetKey } from './model';
 import { add, fromDecimal, minorDigits, money, toDecimal, type Money } from './money';
 import { comparePercent, sumPercents } from './percent';
+import { totalProblems } from './bid-limits';
 import { estimateRebate, type RebateEstimate } from './rebate';
 import type { BidDraft } from './rows';
 import { bidTotals, type BidTotals } from './totals';
@@ -291,7 +292,7 @@ export function formToDraft(form: BidForm, mark: DecimalMark): FormResult {
 			const found = amount(value.value, key);
 			return found === undefined ? null : { kind: 'amount', amount: found };
 		}
-		const found = percent(value.value, key, 'Not a percent.', key === 'discount' ? upTo100('A discount is 100% at most.') : undefined);
+		const found = percent(value.value, key, 'Not a percent.', upTo100(key === 'discount' ? 'A discount is 100% at most.' : 'A tax is 100% at most.'));
 		return found === undefined ? null : { kind: 'percent', percent: found };
 	};
 	const discount = adjustment(form.discount, 'discount');
@@ -369,7 +370,22 @@ export function formToDraft(form: BidForm, mark: DecimalMark): FormResult {
 		tax,
 		rebate
 	};
+	if (counts.priced > 0 && wrong === 0) blockers.push(...totalProblems(asBid(draft), currency));
 	return { draft, errors, warnings, blockers, counts };
+}
+
+/** The draft as a bid in its own currency, for the totals. */
+function asBid(draft: BidDraft): VendorBid {
+	return {
+		...draft,
+		id: 'draft',
+		requestId: '',
+		vendorId: '',
+		round: 1,
+		status: 'draft',
+		rate: null,
+		lines: draft.lines.map((l, index) => ({ ...l, id: l.id ?? `line ${index + 1}` }))
+	};
 }
 
 export interface FormTotals {
@@ -380,16 +396,7 @@ export interface FormTotals {
 
 /** The draft's totals in its own currency, and the rebate estimate when it has splits. */
 export function formTotals(draft: BidDraft): FormTotals {
-	const bid: VendorBid = {
-		...draft,
-		id: 'draft',
-		requestId: '',
-		vendorId: '',
-		round: 1,
-		status: 'draft',
-		rate: null,
-		lines: draft.lines.map((l, index) => ({ ...l, id: l.id ?? `line ${index + 1}` }))
-	};
+	const bid = asBid(draft);
 	const totals = bidTotals(bid, bid.currency);
 	let rebate: RebateEstimate | null = null;
 	if (bid.rebate.length > 0) {

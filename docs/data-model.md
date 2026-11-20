@@ -158,6 +158,11 @@ Lines (excluded ones skipped) plus costs make the subtotal. Take off the discoun
 that is the grand total. Each figure is kept in the bid currency and converted once to the base
 currency at the bid's rate, rounded half away from zero. An amount in another currency is an error.
 
+The server holds a bid to these (`src/lib/pure/bid-limits.ts`). At every save: the currency is on
+the ISO 4217 list, a discount or tax percent is 0 to 100, a rebate rate and share 0 to 100 and the
+shares 100 at most. At submit, as well: the discount is not more than the subtotal and the grand
+total is above zero.
+
 ### Rebate splits
 
 | field | what | seen in |

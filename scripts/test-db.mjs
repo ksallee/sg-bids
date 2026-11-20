@@ -2,18 +2,25 @@
 // `pnpm test:db`: start a throwaway Postgres and PostgREST in Docker, run the database tests
 // against them, and remove both, pass or fail.
 //
-// The containers are `sg-bids-test` and `sg-bids-test-rest` on the network `sg-bids-test-net`,
-// each on a free port on 127.0.0.1. Nothing else on the machine is touched: every docker command
-// below names one of these three. Passwords and the JWT secret are random per run.
+// The containers are `sg-bids-test-<run>` and `sg-bids-test-<run>-rest` on the network
+// `sg-bids-test-<run>-net`, each on a free port on 127.0.0.1. `<run>` is `SG_BIDS_TEST_RUN` when set
+// (CI sets the workflow run), else random, so two runs on one machine never share a container.
+// Nothing else on the machine is touched: every docker command below names one of these three.
+// Passwords and the JWT secret are random per run.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const PG = 'sg-bids-test';
-const REST = 'sg-bids-test-rest';
-const NET = 'sg-bids-test-net';
+const RUN = process.env.SG_BIDS_TEST_RUN || randomBytes(4).toString('hex');
+if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(RUN)) {
+	console.error('SG_BIDS_TEST_RUN is lower-case letters, digits and dashes, 40 at most.');
+	process.exit(1);
+}
+const PG = `sg-bids-test-${RUN}`;
+const REST = `${PG}-rest`;
+const NET = `${PG}-net`;
 const PG_IMAGE = 'postgres:17';
 const REST_IMAGE = 'postgrest/postgrest:v12.2.12';
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -42,10 +49,12 @@ async function until(what, check, seconds = 60) {
 	}
 }
 
-process.on('SIGINT', () => {
-	cleanup();
-	process.exit(130);
-});
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+	process.on(signal, () => {
+		cleanup();
+		process.exit(code);
+	});
+}
 
 cleanup();
 let status = 1;

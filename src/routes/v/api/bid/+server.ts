@@ -1,4 +1,4 @@
-// The vendor's own latest bid (GET), and its draft saved (PUT `{draft}`).
+// The vendor's own latest bid (GET), and its draft saved (PUT `{invitationId, bidId, draft}`).
 import { loadBid, saveDraft } from '$lib/server/vendor-api';
 import { vendorEndpoint } from '$lib/server/vendor-http';
 

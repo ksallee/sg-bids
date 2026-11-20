@@ -1,42 +1,65 @@
 import { describe, expect, it } from 'vitest';
 import { asset, bid, line, onShot, request, shot } from './fixtures';
 import { money } from './money';
+import { vendorKeys } from './vendor-keys';
 import { groupItems, groupings, itemMatches, vendorBidView, vendorRequestView } from './vendor-view';
+
+const SHOT = '11111111-1111-4111-8111-111111111111';
+const HERO = '22222222-2222-4222-8222-222222222222';
+const keys = vendorKeys([
+	{ kind: 'shot', key: 'shot-918273645', id: SHOT },
+	{ kind: 'asset', key: 'asset-564738291', id: HERO }
+]);
 
 describe('vendorRequestView', () => {
 	const req = request({
 		id: 'req-uuid',
 		header: { project: 'Show', projectRef: { type: 'Project', id: 70 }, round: 1, baseCurrency: 'USD', assumptions: ['4K'] },
-		shots: [shot('sh010', { fpt: { type: 'Shot', id: 1234 }, sequence: 'SQ1', frames: 96 })],
-		assets: [asset('hero', { fpt: { type: 'Asset', id: 55 } })],
+		shots: [shot('shot-918273645', { code: 'SH010', fpt: { type: 'Shot', id: 918273645 }, sequence: 'SQ1', frames: 96, assetIds: ['asset-564738291', 'asset-1'] })],
+		assets: [asset('asset-564738291', { name: 'hero', fpt: { type: 'Asset', id: 564738291 } })],
 		vendors: [{ id: 'inv-a', name: 'Vendor A', email: 'a@example.com', ndaExecuted: true, fpt: { type: 'Group', id: 7 } }]
 	});
 
-	it('keeps what the vendor bids on, and drops every vendor, id and Flow PT ref', () => {
-		const view = vendorRequestView({ request: req, code: 'BR-1', status: 'issued', issuedAt: '2026-11-20T10:00:00Z', expiresAt: '2027-01-19T10:00:00Z' });
+	it('keeps what the vendor bids on and its own name and invitation, and drops the vendors list, other ids and Flow PT refs', () => {
+		const view = vendorRequestView({
+			invitation: { id: 'inv-own', name: 'Own Vendor' },
+			request: req,
+			code: 'BR-1',
+			status: 'issued',
+			issuedAt: '2026-11-20T10:00:00Z',
+			expiresAt: '2027-01-19T10:00:00Z',
+			keys
+		});
 		expect(view).toEqual({
+			invitationId: 'inv-own',
+			vendorName: 'Own Vendor',
 			code: 'BR-1',
 			status: 'issued',
 			issuedAt: '2026-11-20T10:00:00Z',
 			expiresAt: '2027-01-19T10:00:00Z',
 			header: { project: 'Show', round: 1, baseCurrency: 'USD', assumptions: ['4K'] },
-			shots: [{ id: 'sh010', code: 'SH010', omitted: false, assetIds: [], sequence: 'SQ1', frames: 96 }],
-			assets: [{ id: 'hero', name: 'hero' }]
+			shots: [{ id: SHOT, code: 'SH010', omitted: false, assetIds: [HERO], sequence: 'SQ1', frames: 96 }],
+			assets: [{ id: HERO, name: 'hero' }]
 		});
 		const text = JSON.stringify(view);
-		for (const secret of ['inv-a', 'Vendor A', 'a@example.com', 'req-uuid', '1234', '"vendors"']) expect(text).not.toContain(secret);
+		for (const secret of ['inv-a', 'Vendor A', 'a@example.com', 'own@example.com', 'req-uuid', '918273645', '564738291', 'asset-1', '"vendors"']) {
+			expect(text).not.toContain(secret);
+		}
 	});
 });
 
 describe('vendorBidView', () => {
-	const v1 = bid({ id: 'b1', vendorId: 'inv-a', requestId: 'req-uuid', currency: 'USD', status: 'submitted', lines: [line('l1', onShot('sh010'), money(100, 'USD'))] });
+	const v1 = bid({ id: 'b1', vendorId: 'inv-a', requestId: 'req-uuid', currency: 'USD', status: 'submitted', lines: [line('l1', onShot('shot-918273645'), money(100, 'USD'))] });
 	const v2 = bid({ id: 'b2', vendorId: 'inv-a', requestId: 'req-uuid', currency: 'USD', status: 'draft' });
 
 	it('answers the latest version, with every version listed, and no vendor or request id', () => {
-		const view = vendorBidView([
-			{ bid: v1, version: 1, submittedAt: '2026-11-21T10:00:00Z', withdrawnAt: null },
-			{ bid: v2, version: 2, submittedAt: null, withdrawnAt: null }
-		]);
+		const view = vendorBidView(
+			[
+				{ bid: v1, version: 1, submittedAt: '2026-11-21T10:00:00Z', withdrawnAt: null },
+				{ bid: v2, version: 2, submittedAt: null, withdrawnAt: null }
+			],
+			keys
+		);
 		expect(view.bid?.id).toBe('b2');
 		expect(view.bid?.version).toBe(2);
 		expect(view.versions).toEqual([
@@ -48,8 +71,14 @@ describe('vendorBidView', () => {
 		expect(text).not.toContain('req-uuid');
 	});
 
+	it('names each line by the item’s vendor id, never the stored key', () => {
+		const view = vendorBidView([{ bid: v1, version: 1, submittedAt: '2026-11-21T10:00:00Z', withdrawnAt: null }], keys);
+		expect(view.bid?.lines.map((l) => l.target)).toEqual([{ kind: 'shot', id: SHOT }]);
+		expect(JSON.stringify(view)).not.toContain('918273645');
+	});
+
 	it('answers no bid before the first save', () => {
-		expect(vendorBidView([])).toEqual({ bid: null, versions: [] });
+		expect(vendorBidView([], keys)).toEqual({ bid: null, versions: [] });
 	});
 });
 

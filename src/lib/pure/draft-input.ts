@@ -2,14 +2,19 @@
  * A vendor's draft as it arrives over the wire, read field by field into a `BidDraft`. Nothing the
  * vendor sends is trusted: unknown keys are dropped (ids, status, round: the server owns them),
  * every amount is whole minor units, zero or more, and every list and text has a size cap. The
- * vendor never sends an exchange rate; the rate is always null.
+ * vendor never sends an exchange rate; the rate is always null. The currency is on the ISO 4217
+ * list. A discount or tax percent, a rebate rate and a share of the work or contract is 0 to 100,
+ * and the shares add up to 100 at most (`bid-limits.ts`).
  *
- * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store.
+ * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store. Whether
+ * the total is above zero is checked at submit (`bid-limits.submitProblems`).
  */
 
 import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PaymentMilestone, RebateSplit } from './model';
 import type { Money } from './money';
-import { isPercent } from './percent';
+import { MAX_DISCOUNT_PERCENT, MAX_TAX_PERCENT } from './bid-limits';
+import { isCurrency } from './currencies';
+import { comparePercent, isPercent, sumPercents } from './percent';
 import type { BidDraft } from './rows';
 
 export type DraftInput = { readonly ok: true; readonly draft: BidDraft } | { readonly ok: false; readonly message: string };
@@ -52,8 +57,9 @@ function amount(value: unknown, where: string): Money {
 	return { minor: o.minor as number, currency: o.currency };
 }
 
-function percent(value: unknown, where: string): string {
+function percent(value: unknown, where: string, max?: string): string {
 	if (typeof value !== 'string' || value.length > 40 || !isPercent(value)) throw new Wrong(where);
+	if (max !== undefined && comparePercent(value, max) > 0) throw new Wrong(where);
 	return value;
 }
 
@@ -101,11 +107,11 @@ function line(value: unknown, where: string): BidDraft['lines'][number] {
 	return result;
 }
 
-function adjustment(value: unknown, where: string): Adjustment | null {
+function adjustment(value: unknown, where: string, max: string): Adjustment | null {
 	if (value === null || value === undefined) return null;
 	const o = object(value, where);
 	if (o.kind === 'amount') return { kind: 'amount', amount: amount(o.amount, where) };
-	if (o.kind === 'percent') return { kind: 'percent', percent: percent(o.percent, where) };
+	if (o.kind === 'percent') return { kind: 'percent', percent: percent(o.percent, where, max) };
 	throw new Wrong(where);
 }
 
@@ -114,20 +120,26 @@ function split(value: unknown, where: string): RebateSplit {
 	const base = object(o.base, `${where}.base`);
 	let parsed: RebateSplit['base'];
 	if (base.kind === 'all' || base.kind === 'labour') parsed = { kind: base.kind };
-	else if (base.kind === 'contract') parsed = { kind: 'contract', percent: percent(base.percent, `${where}.base`) };
+	else if (base.kind === 'contract') parsed = { kind: 'contract', percent: percent(base.percent, `${where}.base`, '100') };
 	else throw new Wrong(`${where}.base`);
 	return {
 		jurisdiction: text(o.jurisdiction, `${where}.jurisdiction`, 20),
-		workPercent: percent(o.workPercent, `${where}.workPercent`),
-		rate: percent(o.rate, `${where}.rate`),
+		workPercent: percent(o.workPercent, `${where}.workPercent`, '100'),
+		rate: percent(o.rate, `${where}.rate`, '100'),
 		base: parsed
 	};
+}
+
+function splits(value: unknown): RebateSplit[] {
+	const out = list(value ?? [], 'rebate', 50).map((s, i) => split(s, `rebate[${i}]`));
+	if (out.length > 0 && comparePercent(sumPercents(out.map((s) => s.workPercent)), '100') > 0) throw new Wrong('rebate');
+	return out;
 }
 
 export function readDraft(value: unknown): DraftInput {
 	try {
 		const o = object(value, 'the bid');
-		if (typeof o.currency !== 'string' || !CODE.test(o.currency)) throw new Wrong('currency');
+		if (typeof o.currency !== 'string' || !CODE.test(o.currency) || !isCurrency(o.currency)) throw new Wrong('currency');
 		const draft: BidDraft = defined({
 			number: text(o.number ?? '', 'number', 200),
 			date: text(o.date ?? '', 'date', 10),
@@ -148,9 +160,9 @@ export function readDraft(value: unknown): DraftInput {
 				if (!COST_KINDS.includes(row.kind as NonShotCostKind)) throw new Wrong(`${at}.kind`);
 				return { kind: row.kind as NonShotCostKind, label: text(row.label, `${at}.label`, 500), amount: amount(row.amount, `${at}.amount`), labour: bool(row.labour, `${at}.labour`) };
 			}),
-			discount: adjustment(o.discount, 'discount'),
-			tax: adjustment(o.tax, 'tax'),
-			rebate: list(o.rebate ?? [], 'rebate', 50).map((s, i) => split(s, `rebate[${i}]`))
+			discount: adjustment(o.discount, 'discount', MAX_DISCOUNT_PERCENT),
+			tax: adjustment(o.tax, 'tax', MAX_TAX_PERCENT),
+			rebate: splits(o.rebate)
 		});
 		return { ok: true, draft };
 	} catch (error) {

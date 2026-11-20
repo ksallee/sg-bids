@@ -85,6 +85,30 @@ describe('readDraft', () => {
 		}
 	});
 
+	it('refuses a currency off the ISO list, and percents out of range', () => {
+		const cases: [unknown, string][] = [
+			[{ ...good(), currency: 'XYZ' }, 'currency'],
+			[{ ...good(), currency: 'XAU' }, 'currency'],
+			[{ ...good(), discount: { kind: 'percent', percent: '100.01' } }, 'discount'],
+			[{ ...good(), tax: { kind: 'percent', percent: '101' } }, 'tax'],
+			[{ ...good(), rebate: [{ jurisdiction: 'GB', workPercent: '50', rate: '120', base: { kind: 'all' } }] }, 'rebate[0].rate'],
+			[{ ...good(), rebate: [{ jurisdiction: 'GB', workPercent: '150', rate: '20', base: { kind: 'all' } }] }, 'rebate[0].workPercent'],
+			[{ ...good(), rebate: [{ jurisdiction: 'GB', workPercent: '50', rate: '20', base: { kind: 'contract', percent: '101' } }] }, 'rebate[0].base'],
+			[
+				{
+					...good(),
+					rebate: [
+						{ jurisdiction: 'GB', workPercent: '60', rate: '20', base: { kind: 'all' } },
+						{ jurisdiction: 'CA-QC', workPercent: '41', rate: '20', base: { kind: 'all' } }
+					]
+				},
+				'rebate'
+			]
+		];
+		for (const [input, where] of cases) expect(readDraft(input), where).toEqual({ ok: false, message: `The bid could not be read at ${where}.` });
+		expect(readDraft({ ...good(), currency: 'JPY', discount: { kind: 'percent', percent: '100' }, tax: { kind: 'percent', percent: '100' } }).ok).toBe(true);
+	});
+
 	it('refuses more lines than any request holds', () => {
 		const line = { target: { kind: 'shot', id: 'a' }, total: usd(1), excluded: false };
 		expect(readDraft({ ...good(), lines: Array.from({ length: 10_001 }, () => line) }).ok).toBe(false);

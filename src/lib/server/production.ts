@@ -2,7 +2,8 @@
  * Production's principal, from a Flow PT session the site itself accepted.
  *
  * The browser sends the site, the project and its credential: the approved session token, or a
- * bearer it minted from it. The server calls only an allowlisted site host (probe 129), mints a
+ * bearer it minted from it. The server calls only an allowlisted site host (probe 129), follows no
+ * redirect (a site answers at its own host, 129; a redirect would carry the bearer elsewhere), mints a
  * bearer from a session token as the browser does (`grant_type=session_token`, recipe 012), reads
  * the person from the bearer's `user` claim (027), and reads the Project row with that bearer: a
  * 404 means the person may not see the project (159). Seeing the project is not enough: a Vendor
@@ -62,6 +63,7 @@ async function mint(origin: string, sessionToken: string, fetcher: typeof fetch)
 	try {
 		res = await fetcher(`${origin}/api/v1/auth/access_token`, {
 			method: 'POST',
+			redirect: 'error',
 			headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
 			body: new URLSearchParams({ grant_type: 'session_token', session_token: sessionToken }).toString()
 		});
@@ -77,7 +79,7 @@ async function mint(origin: string, sessionToken: string, fetcher: typeof fetch)
 async function read(url: string, bearer: string, fetcher: typeof fetch): Promise<{ status: number; body: unknown }> {
 	let res: Response;
 	try {
-		res = await fetcher(url, { headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` } });
+		res = await fetcher(url, { redirect: 'error', headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` } });
 	} catch (error) {
 		throw new StoreError(502, 'Flow PT did not answer.', { cause: error });
 	}
@@ -126,6 +128,7 @@ export async function verifyProduction(claim: ProductionClaim, options: VerifyOp
 	let res: Response;
 	try {
 		res = await options.fetch(`${site.origin}/api/v1/entity/projects/${projectId}?fields=name`, {
+			redirect: 'error',
 			headers: { Accept: 'application/json', Authorization: `Bearer ${bearer}` }
 		});
 	} catch (error) {

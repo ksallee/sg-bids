@@ -6,11 +6,15 @@ export class StoreError extends Error {
 	constructor(
 		readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 500 | 502,
 		message: string,
-		options?: { cause?: unknown }
+		options?: { cause?: unknown; reason?: string }
 	) {
 		super(message, options);
 		this.name = 'StoreError';
+		this.reason = options?.reason;
 	}
+
+	/** A word the page can act on, beside the message: `session`, `bid`. */
+	readonly reason: string | undefined;
 }
 
 /** A database error as a StoreError. The guards raise P0001 (refused) and P0002 (not found). */
