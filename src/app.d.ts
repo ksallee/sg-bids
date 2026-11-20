@@ -8,6 +8,9 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+
+	/** `PUBLIC_SITE_URL` at build, or empty (`vite.config.ts`). Read through `$lib/site-url`. */
+	const __SITE_URL__: string;
 }
 
 export {};

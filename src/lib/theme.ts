@@ -3,7 +3,7 @@
  * switches, from the navbar. `system` follows the OS until the person picks one explicitly.
  *
  * The scheme lands as the `.dark` class on `<html>`, which is what the token sheet keys on.
- * `app.html` applies it before the first paint from the same storage key, so there is no flash.
+ * `static/theme.js` applies it before the first paint from the same storage key, so there is no flash.
  */
 import { resolveDark, type Mode } from '$lib/pure/scheme';
 
@@ -43,7 +43,7 @@ export function isDark(current: Mode = mode()): boolean {
 	return resolveDark(current, matchMedia('(prefers-color-scheme: dark)').matches);
 }
 
-/** Put the scheme on the document. The same rule as the inline script in `app.html`. */
+/** Put the scheme on the document. The same rule as `static/theme.js`. */
 export function apply(next: Mode = mode()): void {
 	const root = document.documentElement;
 	root.classList.toggle('dark', isDark(next));

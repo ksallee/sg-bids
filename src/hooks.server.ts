@@ -3,10 +3,15 @@
 // (`vite.config.ts`); this adds the Flow PT site the browser calls, known only at run time. An
 // answer that is not a page gets a policy that loads nothing.
 //
+// No search engine lists anything but the public pages and the crawler files (`$lib/pure/seo`,
+// `indexable`). The public pages are prerendered, so on Vercel they never reach this hook:
+// `vercel.json` sends their headers.
+//
 // The vendor's pages and endpoints, on top: no referrer leaves them, nothing of them is cached,
 // and no search engine lists them (`$lib/server/vendor-http`).
 import type { Handle } from '@sveltejs/kit';
 import { cspSources, NON_PAGE_CSP, securityHeaders, withSources } from '$lib/pure/security-headers';
+import { indexable } from '$lib/pure/seo';
 import { isVendorPath } from '$lib/pure/vendor-path';
 import { browserSiteHosts } from '$lib/server/env';
 import { VENDOR_HEADERS } from '$lib/server/vendor-http';
@@ -16,6 +21,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	for (const [name, value] of Object.entries(securityHeaders({ https: event.url.protocol === 'https:' }))) response.headers.set(name, value);
 	const csp = response.headers.get('content-security-policy');
 	response.headers.set('content-security-policy', csp ? withSources(csp, cspSources(browserSiteHosts())) : NON_PAGE_CSP);
+	if (!indexable(event.url.pathname)) response.headers.set('X-Robots-Tag', 'noindex, nofollow');
 	if (isVendorPath(event.url.pathname)) {
 		for (const [name, value] of Object.entries(VENDOR_HEADERS)) response.headers.set(name, value);
 		// The link question page posts a form. Under no-referrer the browser sends `Origin: null`,

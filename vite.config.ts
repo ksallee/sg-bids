@@ -1,10 +1,14 @@
 import tailwindcss from '@tailwindcss/vite';
+import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-vercel';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { CSP_DIRECTIVES } from './src/lib/pure/security-headers';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+	// The public pages' origin, for canonical URLs, the share image and the sitemap: `PUBLIC_SITE_URL`
+	// from the env or `.env*`, read once at build. `$lib/site-url` falls back to the hosted demo.
+	define: { __SITE_URL__: JSON.stringify(loadEnv(mode, process.cwd(), 'PUBLIC_').PUBLIC_SITE_URL ?? '') },
 	plugins: [
 		tailwindcss(),
 		sveltekit({
@@ -35,4 +39,4 @@ export default defineConfig({
 			}
 		]
 	}
-});
+}));
