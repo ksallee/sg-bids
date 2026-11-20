@@ -56,9 +56,9 @@ const placeList = `${places.slice(0, -1).join(', ')} and ${places.at(-1)}`;
 
 export const HOME = {
 	h1: 'VFX bidding for Flow Production Tracking.',
-	lead: 'sg-bids is a free, open source web app that runs VFX bid rounds for Flow Production Tracking (formerly ShotGrid). Production builds a bid request from its Shots and Assets, vendors answer through a link, and the award is written back to Flow PT.',
+	lead: 'sg-bids is a free, open source web app that runs VFX bid rounds for Flow Production Tracking (formerly ShotGrid). Production builds a bid request from its Shots and Assets, or from a breakdown before they exist, vendors answer through a link, and the award is written back to Flow PT.',
 	steps: [
-		'Build a bid request from your Shots and Assets in Flow PT.',
+		'Build a bid request from your Shots and Assets in Flow PT, or from a breakdown.',
 		'Vendors answer through a link. They need no Flow PT account.',
 		'Compare the bids shot by shot, in one currency.',
 		'Award, and the award is written to Flow PT.'
@@ -69,7 +69,7 @@ export const HOME = {
 			q: 'What is sg-bids?',
 			a: 'A web app for the bid round of a VFX show. Production sends a request built from Flow PT, vendors bid through a link, and production compares the bids and awards them to Flow PT.',
 			list: [
-				'Bid requests from your Shots and Assets, frozen when issued. A change is a new round.',
+				'Bid requests from your Shots and Assets, or from a pasted breakdown, frozen when issued. A change is a new round.',
 				'One link per vendor. The vendor needs no Flow PT account.',
 				'Bids shot by shot, with costs, discount, tax and rebate splits, in versions.',
 				'A comparison in one currency, award scenarios, and CSV exports.',
@@ -112,17 +112,17 @@ export interface Step {
 
 export const HOW = {
 	h1: 'How it works',
-	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is read at the start and written once, at the award, from your own session.',
+	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is read at the start and written at the award, from your own session. A field you create from the mapping is written when you create it.',
 	steps: {
 		id: 'steps',
 		q: 'What are the steps of a bid round?',
-		a: 'Build a request, invite vendors, let them bid, compare, and publish the award. Flow PT is read in the first two steps and written in the last one only.',
+		a: 'Build a request, invite vendors, let them bid, compare, and publish the award. Flow PT is read in the first two steps and written in the last, and when you create a field from the mapping.',
 		items: [
 			{
 				title: 'Build a request',
-				line: 'Pick Shots and Assets in Flow PT. The request keeps a frozen copy of them. Later edits in Flow PT do not change it.',
+				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. The request keeps a frozen copy. Later edits in Flow PT do not change it.',
 				app: 'The request and its frozen copy.',
-				fpt: { kind: 'read', text: 'Reads Shots, Assets and their fields.' }
+				fpt: { kind: 'read', text: 'Reads Shots, Assets and their fields. Creates a field on Shot or Asset only when you ask, from the mapping.' }
 			},
 			{
 				title: 'Invite vendors',
@@ -146,7 +146,7 @@ export const HOW = {
 				title: 'Publish the award',
 				line: 'Check the preview, then publish from your own Flow PT session. Undo it later if you need to.',
 				app: 'The award: who won what, when, by whom, and what was written.',
-				fpt: { kind: 'write', text: 'Writes Bids, Bid Lines, and Groups on the Shots and Assets won.' }
+				fpt: { kind: 'write', text: 'Writes Bids, Bid Lines, and Groups on the Shots and Assets won. Creates the Shots and Assets of a breakdown when you choose to.' }
 			}
 		] satisfies readonly Step[]
 	},
@@ -164,13 +164,15 @@ export const HOW = {
 	written: {
 		id: 'written',
 		q: 'What gets written to Flow PT?',
-		a: 'The award, from your own Flow PT session, after a preview of every write. Before the first award, an Admin creates the fields it needs from the publish page.',
+		a: 'The award, from your own Flow PT session, after a preview of every write. A field you create from the mapping is written when you create it, and an Admin creates the fields the award needs from the publish page.',
 		list: [
 			'One Bid per awarded vendor. With the switch "every line of every bid" on, one Bid per vendor that bid.',
 			'One Bid Line per awarded Shot or Asset. With the switch on, one per line of every bid.',
-			'The vendor’s Group, added to the vendor groups field (sg_vendor_groups) of each Shot and Asset it wins.'
+			'The vendor’s Group, added to the vendor groups field (sg_vendor_groups) of each Shot and Asset it wins.',
+			'For rows from a breakdown, the Shots and Assets you choose to create: the code, the description and the mapped fields that hold a value. Or none, and their Bid Lines carry no Shot or Asset.',
+			'While you build a request, a field on Shot or Asset, when you create one from the mapping.'
 		],
-		note: 'Nothing else on a Shot or an Asset changes. Undo takes back exactly what the app wrote. It removes the Groups it added and deletes the rows it created.'
+		note: 'Nothing else on a Shot or an Asset changes. Undo takes back exactly what the award wrote. It removes the Groups it added and deletes the rows it created, unless a Shot or Asset it created has since gained Tasks, Versions or other links. That one stays, and the app says so. A field created from the mapping stays.'
 	} satisfies Question,
 	stays: {
 		id: 'stays',

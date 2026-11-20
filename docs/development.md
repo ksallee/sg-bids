@@ -103,6 +103,15 @@ nothing left in Flow PT, the rows go, the request is issued again and the rates 
 left, the record keeps it as `undo_partial`. A trigger allows awarded only with award rows, and
 issued again only without them. A vendor is told bidding is closed once the request is awarded.
 
+Breakdowns (`20261123100000_breakdown.sql`). A request item records where it came from in
+`source`: `fpt` for a row picked from Flow PT, `breakdown` for one pasted, imported or typed, with no
+Flow PT row. `sg_link_request_items` gives breakdown rows their Flow PT row, all or none, on a draft
+or an issued request. On an issued request it is the one change the freeze trigger allows: a
+breakdown row with no Flow PT row gets one, once, and nothing else on the row changes with it;
+`fpt_linked_at` says when. Vendors never read `source` or the Flow PT row. At the award, the rows a
+publish creates in Flow PT are in the publication record's `written.items`, so the undo deletes
+exactly those.
+
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
 

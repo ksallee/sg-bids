@@ -13,7 +13,7 @@
 	import Search from '@lucide/svelte/icons/search';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DecimalMark } from '$lib/pure/amount';
-	import type { BidForm } from '$lib/pure/bid-form';
+	import { vendorControlId, type BidForm } from '$lib/pure/bid-form';
 	import { targetKey } from '$lib/pure/model';
 	import { format, sum, type Money } from '$lib/pure/money';
 	import { planPaste, type PastePlan } from '$lib/pure/paste';
@@ -99,6 +99,13 @@
 	function subtotal(keys: readonly string[]): Money | null {
 		const amounts = keys.filter((k) => !form.lines[indexOf.get(k)!].excluded).flatMap((k) => (prices.has(k) ? [prices.get(k)!] : []));
 		return amounts.length === 0 ? null : sum(amounts, form.currency);
+	}
+
+	/** Show a line's row whatever the search and filter, its detail open when asked: a named problem points at it. */
+	export function reveal(key: string, detail: boolean): void {
+		query = '';
+		pick('all');
+		if (detail) open.add(key);
 	}
 
 	/** Focuses the next price cell that takes input, from `at` in `step`. */
@@ -286,6 +293,7 @@
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
 						{:else}
 							<input
+								id={vendorControlId(`line:${key}:price`)}
 								bind:value={form.lines[index].price}
 								data-price={key}
 								inputmode="decimal"

@@ -8,7 +8,7 @@
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { BidForm, SplitForm } from '$lib/pure/bid-form';
+	import { vendorControlId, type BidForm, type SplitForm } from '$lib/pure/bid-form';
 	import { format } from '$lib/pure/money';
 	import type { RebateEstimate } from '$lib/pure/rebate';
 	import { REBATE_DEFAULTS, rebateDefault } from '$lib/pure/rebate-defaults';
@@ -64,7 +64,7 @@
 					{#if readOnly}
 						<span class="text-sm">{known?.label ?? split.jurisdiction}</span>
 					{:else}
-						<select class={select} value={custom(split.jurisdiction) ? 'other' : split.jurisdiction} onchange={(e) => place(split, e.currentTarget.value === 'other' ? ' ' : e.currentTarget.value)} aria-invalid={!!errors[`${at}:jurisdiction`]}>
+						<select id={vendorControlId(`${at}:jurisdiction`)} class={select} value={custom(split.jurisdiction) ? 'other' : split.jurisdiction} onchange={(e) => place(split, e.currentTarget.value === 'other' ? ' ' : e.currentTarget.value)} aria-invalid={!!errors[`${at}:jurisdiction`]}>
 							<option value="" disabled>Pick a place</option>
 							{#each REBATE_DEFAULTS as entry (entry.code)}<option value={entry.code}>{entry.label}</option>{/each}
 							<option value="other">Somewhere else</option>
@@ -79,7 +79,7 @@
 					<span class="text-xs font-medium">Share of work</span>
 					{#if readOnly}<span class="text-sm tabular-nums">{split.workPercent}%</span>{:else}
 						<div class="relative">
-							<Input bind:value={split.workPercent} inputmode="decimal" aria-invalid={!!errors[`${at}:workPercent`]} class="pr-6 text-right tabular-nums" />
+							<Input id={vendorControlId(`${at}:workPercent`)} bind:value={split.workPercent} inputmode="decimal" aria-invalid={!!errors[`${at}:workPercent`]} class="pr-6 text-right tabular-nums" />
 							<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">%</span>
 						</div>
 						{#if errors[`${at}:workPercent`]}<p class="text-destructive text-xs">{errors[`${at}:workPercent`]}</p>{/if}
@@ -89,7 +89,7 @@
 					<span class="text-xs font-medium">Rate</span>
 					{#if readOnly}<span class="text-sm tabular-nums">{split.rate}%</span>{:else}
 						<div class="relative">
-							<Input bind:value={split.rate} inputmode="decimal" aria-invalid={!!errors[`${at}:rate`]} class="pr-6 text-right tabular-nums" />
+							<Input id={vendorControlId(`${at}:rate`)} bind:value={split.rate} inputmode="decimal" aria-invalid={!!errors[`${at}:rate`]} class="pr-6 text-right tabular-nums" />
 							<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">%</span>
 						</div>
 						{#if errors[`${at}:rate`]}<p class="text-destructive text-xs">{errors[`${at}:rate`]}</p>{/if}
@@ -108,7 +108,7 @@
 							</select>
 							{#if split.base === 'contract'}
 								<div class="relative w-20 shrink-0">
-									<Input bind:value={split.contractPercent} inputmode="decimal" aria-label="Share of the contract" aria-invalid={!!errors[`${at}:contractPercent`]} class="pr-6 text-right tabular-nums" />
+									<Input id={vendorControlId(`${at}:contractPercent`)} bind:value={split.contractPercent} inputmode="decimal" aria-label="Share of the contract" aria-invalid={!!errors[`${at}:contractPercent`]} class="pr-6 text-right tabular-nums" />
 									<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">%</span>
 								</div>
 							{/if}

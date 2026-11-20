@@ -22,6 +22,8 @@ The "Seen in" column says:
 - A day is `YYYY-MM-DD`.
 - Ids are opaque strings.
 - A shot, an asset, a project or a vendor may carry its Flow PT entity: `{ type, id }`.
+- A shot or an asset from a breakdown has no Flow PT entity until it is matched, or created at
+  the award. Its `source` says so. A vendor sees neither.
 - Each vendor bids in its own currency. Production compares in the request's base currency.
 
 ## Bid request
@@ -57,7 +59,8 @@ What production sends. One per bid package.
 |---|---|---|
 | id | | sg-bids |
 | code | shot code | 2+ |
-| fpt | the Flow PT Shot | sg-bids |
+| fpt | the Flow PT Shot. Absent for a breakdown row until matched | sg-bids |
+| source | absent when picked from Flow PT; `breakdown` when pasted, imported or typed | sg-bids |
 | description | what happens | 2+ |
 | episode, sequence, scene, page | where it sits | 2+ |
 | type, difficulty | kind of work and how hard | 2+ |
@@ -76,12 +79,29 @@ What production sends. One per bid package.
 |---|---|---|
 | id | | sg-bids |
 | name | asset name | 2+ |
-| fpt | the Flow PT Asset | sg-bids |
+| fpt | the Flow PT Asset. Absent for a breakdown row until matched | sg-bids |
+| source | absent when picked from Flow PT; `breakdown` when pasted, imported or typed | sg-bids |
 | description | what it is | 2+ |
 | type, difficulty | kind of asset and how hard | 2+ |
 | timesUsed | how many shots use it | 2+ |
 | omitted | the asset is out | sg-bids |
 | notes | production's note to the vendors | sg-bids |
+
+### Rows from a breakdown
+
+Early rounds bid from a script or previs breakdown, before the Shots exist in Flow PT. Such a row
+is a shot or asset like any other, with `source: breakdown` and no `fpt`. In storage, the item's
+`source` column says where it came from, and `fpt_type`, `fpt_id` hold the Flow PT row once it has
+one.
+
+- Matched: production finds the Flow PT Shot or Asset with the same code, exact then in another
+  case, never a near code. On a draft it is an ordinary edit. On an issued request it is the one
+  change the freeze allows (`sg_link_request_items`): the row gets its Flow PT row once, nothing
+  else changes, and `fpt_linked_at` says when. A vendor sees no change.
+- Created at the award: production chooses, per kind, to create the missing Shots and Assets from
+  the awarded rows, or to publish their Bid Lines with no item. What a publish creates is in the
+  award record (`written.items`), and Undo award deletes exactly that, unless a created row has
+  since gained links.
 
 ### Invited vendor
 

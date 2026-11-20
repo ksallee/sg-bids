@@ -11,7 +11,8 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CloudOff from '@lucide/svelte/icons/cloud-off';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import type { FormResult, FormTotals } from '$lib/pure/bid-form';
+	import type { FormProblem, FormResult, FormTotals } from '$lib/pure/bid-form';
+	import ProblemList from './problem-list.svelte';
 	import { format, type Money } from '$lib/pure/money';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
@@ -28,6 +29,7 @@
 		onsubmit,
 		onrevise,
 		onwithdraw,
+		onproblem,
 		class: className
 	}: {
 		totals: FormTotals;
@@ -42,6 +44,8 @@
 		onsubmit: () => void;
 		onrevise: () => void;
 		onwithdraw: () => void;
+		/** Take the vendor to the control a problem names. */
+		onproblem: (problem: FormProblem) => void;
 		class?: string;
 	} = $props();
 
@@ -120,8 +124,8 @@
 
 	<div class="flex flex-col gap-2">
 		{#if stage === 'draft'}
-			<Button size="lg" class="w-full" disabled={busy || result.blockers.length > 0} onclick={onsubmit}>Review and submit</Button>
-			{#each result.blockers as blocker (blocker)}<p class="text-muted-foreground text-xs">{blocker}</p>{/each}
+			<Button size="lg" class="w-full" disabled={busy} onclick={onsubmit}>Review and submit</Button>
+			<ProblemList problems={result.problems} onPick={onproblem} />
 		{:else if stage === 'submitted'}
 			<p class="text-sm"><span class="font-medium">Submitted</span>{stamp ? ` ${stamp}` : ''}. Production can see it.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Revise</Button>

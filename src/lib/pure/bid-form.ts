@@ -93,9 +93,70 @@ export interface FormResult {
 	/** Field key to message: `line:shot:sh010:price`, `cost:0:amount`, `discount`, `split:1:rate`. */
 	readonly errors: Readonly<Record<string, string>>;
 	readonly warnings: readonly string[];
-	/** What stops a submit. Empty when it may go. */
+	/** What stops a submit, in words, each field named. Empty when it may go. */
 	readonly blockers: readonly string[];
+	/** The same, each with the control that fixes it, in the order of the form. */
+	readonly problems: readonly FormProblem[];
 	readonly counts: { readonly priced: number; readonly excluded: number; readonly open: number };
+}
+
+/** One thing to fix before a submit: the field by name, what is wrong, and the control's id. */
+export interface FormProblem {
+	/** The error key (`line:shot:sh010:price`), or `priced` and `total` for the bid as a whole. */
+	readonly key: string;
+	readonly label: string;
+	readonly message: string;
+	/** The id of the control that fixes it (`vendorControlId`). */
+	readonly control: string;
+	/** The line it sits on, `shot:sh010`, so its row can be shown and its detail opened. */
+	readonly line?: string;
+}
+
+/** The element id of the control a form error key points at. */
+export function vendorControlId(key: string): string {
+	return `vf-${key}`;
+}
+
+/** Each item's code by its form key, `shot:<id>`, for the names in a problem. */
+export function itemNames(request: { readonly shots: readonly { id: string; code: string }[]; readonly assets: readonly { id: string; name: string }[] }): Map<string, string> {
+	return new Map([...request.shots.map((s) => [targetKey({ kind: 'shot', id: s.id }), s.code] as const), ...request.assets.map((a) => [targetKey({ kind: 'asset', id: a.id }), a.name] as const)]);
+}
+
+const FIXED_LABELS: Readonly<Record<string, string>> = {
+	currency: 'Currency',
+	date: 'Bid date',
+	validUntil: 'Valid until',
+	discount: 'Discount',
+	tax: 'Tax',
+	splits: 'Rebate splits',
+	milestones: 'Payment milestones'
+};
+
+const SPLIT_WORDS: Readonly<Record<string, string>> = { jurisdiction: 'where', workPercent: 'share of the work', rate: 'rate', contractPercent: 'share of the contract' };
+
+/** The words for an error key: which field, on which item or row. */
+function problemOf(key: string, message: string, form: BidForm, names: ReadonlyMap<string, string>): FormProblem {
+	const base = { key, message, control: vendorControlId(key) };
+	if (FIXED_LABELS[key]) return { ...base, label: FIXED_LABELS[key] };
+	const line = /^line:((?:shot|asset):[^:]+):(.+)$/.exec(key);
+	if (line) {
+		const name = names.get(line[1]) ?? (line[1].startsWith('shot') ? 'A shot' : 'An asset');
+		const rest = line[2];
+		const dept = /^dept:(\d+):(\w+)$/.exec(rest);
+		const label =
+			rest === 'price' ? `Price for ${name}` : rest === 'compute' ? `${name}, compute` : dept ? `${name}, department ${Number(dept[1]) + 1}${dept[2] === 'department' ? '' : `, ${dept[2]}`}` : name;
+		return { ...base, label, line: line[1] };
+	}
+	const cost = /^cost:(\d+):(\w+)$/.exec(key);
+	if (cost) {
+		const i = Number(cost[1]);
+		return { ...base, label: cost[2] === 'label' ? `Cost ${i + 1}, name` : form.costs[i]?.label.trim() || `Cost ${i + 1}` };
+	}
+	const split = /^split:(\d+):(\w+)$/.exec(key);
+	if (split) return { ...base, label: `Rebate split ${Number(split[1]) + 1}, ${SPLIT_WORDS[split[2]] ?? split[2]}` };
+	const milestone = /^milestone:(\d+):(\w+)$/.exec(key);
+	if (milestone) return { ...base, label: `Milestone ${Number(milestone[1]) + 1}, ${milestone[2] === 'label' ? 'name' : 'percent'}` };
+	return { ...base, label: key };
 }
 
 export const FIXED_COSTS: readonly { kind: Exclude<NonShotCostKind, 'other'>; label: string }[] = [
@@ -204,7 +265,7 @@ const lines = (text: string) =>
 		.map((l) => l.trim())
 		.filter(Boolean);
 
-export function formToDraft(form: BidForm, mark: DecimalMark): FormResult {
+export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap<string, string> = new Map()): FormResult {
 	const errors: Record<string, string> = {};
 	const warnings: string[] = [];
 	let currency = form.currency;
@@ -349,10 +410,12 @@ export function formToDraft(form: BidForm, mark: DecimalMark): FormResult {
 	if (counts.open > 0) {
 		warnings.push(counts.open === 1 ? '1 item has no price. It will show as not bid.' : `${counts.open} items have no price. They will show as not bid.`);
 	}
-	const blockers: string[] = [];
-	const wrong = Object.keys(errors).length;
-	if (wrong > 0) blockers.push(wrong === 1 ? '1 field needs a fix.' : `${wrong} fields need a fix.`);
-	if (counts.priced === 0) blockers.push('Price at least one shot or asset.');
+	// Every problem named by its field, in the order of the form, never only counted.
+	const problems: FormProblem[] = Object.entries(errors).map(([key, message]) => problemOf(key, message, form, names));
+	const wrong = problems.length;
+	const firstPrice = form.lines.find((l) => !l.excluded) ?? form.lines[0];
+	const priceControl = firstPrice ? { control: vendorControlId(`line:${firstPrice.key}:price`), line: firstPrice.key } : { control: 'items' };
+	if (counts.priced === 0) problems.push({ key: 'priced', label: 'Shots and assets', message: 'Price at least one shot or asset.', ...priceControl });
 
 	const validUntil = form.validUntil !== '' && isDay(form.validUntil) ? form.validUntil : undefined;
 	const draft: BidDraft = {
@@ -370,8 +433,14 @@ export function formToDraft(form: BidForm, mark: DecimalMark): FormResult {
 		tax,
 		rebate
 	};
-	if (counts.priced > 0 && wrong === 0) blockers.push(...totalProblems(asBid(draft), currency));
-	return { draft, errors, warnings, blockers, counts };
+	if (counts.priced > 0 && wrong === 0) {
+		for (const message of totalProblems(asBid(draft), currency)) {
+			const discount = message.startsWith('The discount');
+			problems.push({ key: discount ? 'discount' : 'total', label: discount ? 'Discount' : 'Total', message, ...(discount ? { control: vendorControlId('discount') } : priceControl) });
+		}
+	}
+	const blockers = problems.map((p) => (p.key === 'priced' || p.key === 'total' || (p.key === 'discount' && p.message.startsWith('The discount')) ? p.message : `${p.label}: ${p.message}`));
+	return { draft, errors, warnings, blockers, problems, counts };
 }
 
 /** The draft as a bid in its own currency, for the totals. */
