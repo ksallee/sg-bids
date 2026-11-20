@@ -48,6 +48,8 @@ export interface Refusal {
 	readonly itemId: Id;
 	readonly key: ColumnKey;
 	readonly reason: string;
+	/** True when trying the same write again may land. */
+	readonly retry?: boolean;
 }
 
 export interface EditPlan {
@@ -161,7 +163,7 @@ export function applyLocal<T extends Item>(items: readonly T[], writes: readonly
 	return items.map((item) => {
 		const mine = byItem.get(item.id);
 		if (!mine) return item;
-		const next: Record<string, unknown> = { ...item };
+		const next = { ...item } as Record<string, unknown>;
 		for (const w of mine) {
 			if (w.key === 'code' || w.key === 'sequence') continue;
 			if (w.value === null) delete next[w.key];

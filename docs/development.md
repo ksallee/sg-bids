@@ -153,6 +153,39 @@ The page is `/bids/[id]/compare`. The builder's drafts go through
 `src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
 `reissue`; the vendor pages live under `/v/`.
 
+## A draft's rows, live to Flow PT
+
+A draft shows its Shots and Assets in the registry's EntityTable over a list source of the
+request's own rows (`src/lib/app/builder/request-table.svelte`). Which column a Flow PT field feeds,
+where each cell's edit lands and why a cell is locked: `src/lib/pure/live-columns.ts`. The value a
+field takes, the edit plan, the read back and the undo: `src/lib/pure/row-edit.ts`. The calls:
+`src/lib/io/fpt-write.ts`.
+
+- Opening a draft reads every picked row again, one batched read per kind paged at 5000 (082), and
+  takes each live value. A row Flow PT does not answer for, deleted or out of reach, keeps its last
+  values and is flagged. A breakdown row, linked or not, keeps what it was typed with.
+- An edit to a live cell writes the field as the signed in person: `_batch` in chunks of 100,
+  inside the 200 the response window holds; a refused batch wrote nothing, so its writes go one
+  `PUT` at a time to name each refusal (recipe 002, 028). Then the rows are read back and each write
+  is landed, refused, silent (a 200 that left another value) or gone. Only the value read back is
+  shown. Reads and writes here go through the bare client (`liveWriter`): the context's client keeps
+  reads, and a read back must see Flow PT as it is now.
+- Selected rows change together: an edit in one applies to that column in every selected row, after
+  a confirm that counts the Shots changed in Flow PT and the rows changed in the request.
+- Undo reads each field first and writes the old value only where Flow PT still holds the edit; a
+  value changed since is left and named (024: there is no conditional write).
+- A field the schema marks not editable for the person is locked, and so is one the preflight
+  refused: a rolled back `_batch` of the update at its current value and a sentinel update of Task
+  999999999, once per kind (094, recipe 017).
+- A field just created from the mapping takes what the request showed for its column before its
+  first live read, so nothing typed is lost; it is empty, so nothing in Flow PT is overwritten.
+- Description reads the stock `description` by default only when the site has no `sg_bid_description`.
+  When it does, the mapping and the column header suggest a field of the bid's own.
+- A draft is stored, and kept in the tab, once it has a title or a row.
+
+The table's bulk edit, list source and per-cell lock are sg-widgets PR #382 (with #380's width
+fix). Until sg-widgets-core ships them, `src/lib/components/core-next.ts` carries core's part.
+
 ## The vendor link
 
 A vendor opens `/v/<token>`, the link `vendorLink` writes. That route does no lookup: it moves

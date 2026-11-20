@@ -6,7 +6,8 @@ before they exist in Flow PT, vendors bid through a link with no Flow PT account
 written back to Flow PT. MIT. Demo: https://sg-bids.vercel.app
 
 1. Build a bid request from your Shots and Assets in Flow PT, or paste a breakdown when they are
-   not in Flow PT yet. The request keeps a frozen copy.
+   not in Flow PT yet. A draft shows their live values, and editing a column fed by Flow PT changes
+   Flow PT, one row or many at once, with Undo. Issuing freezes what you see.
 2. Invite vendors. Each gets a link, and may be tied to its Flow PT Group.
 3. Vendors bid through the link, in their own currency. They need no Flow PT account.
 4. Compare the bids shot by shot in one currency. Set the rates, build award scenarios, mark one

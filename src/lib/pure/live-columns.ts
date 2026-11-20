@@ -12,7 +12,7 @@
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
-import type { ItemKind, Mapping } from './field-map';
+import { slotsFor, type ItemKind, type Mapping } from './field-map';
 import { DEFAULT_TIERS } from './request';
 
 export type ColumnKey = 'code' | 'sequence' | 'frames' | 'description' | 'type' | 'difficulty' | 'notes' | 'omitted';
@@ -34,8 +34,8 @@ export interface RequestColumn {
 	readonly width: number;
 }
 
-/** The display name offered for a description of the bid's own (`field-map`'s create spec). */
-export const BID_DESCRIPTION = 'Bid Description';
+/** The display name offered for a description of the bid's own: `field-map`'s create spec. */
+export const BID_DESCRIPTION = slotsFor('shot').find((s) => s.slot === 'description')?.create?.display ?? 'Bid Description';
 
 interface ColumnSpec {
 	readonly key: ColumnKey;
@@ -50,23 +50,24 @@ interface ColumnSpec {
 }
 
 const SHOT_SPECS: readonly ColumnSpec[] = [
-	{ key: 'code', label: 'Shot', width: 200, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
+	{ key: 'code', label: 'Shot', width: 220, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
 	{ key: 'sequence', label: 'Sequence', width: 150, fallback: 'text', field: (m) => m.sequence, fixedLock: 'Move a Shot to another Sequence in Flow PT.' },
-	{ key: 'frames', label: 'Frames', width: 96, fallback: 'number', field: (m) => m.frames },
-	{ key: 'description', label: 'Description', width: 360, fallback: 'text', field: (m) => m.description },
-	{ key: 'type', label: 'Type', width: 130, fallback: 'text', field: (m) => m.type },
-	{ key: 'difficulty', label: 'Difficulty', width: 140, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null },
-	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null }
+	{ key: 'frames', label: 'Frames', width: 120, fallback: 'number', field: (m) => m.frames },
+	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
+	{ key: 'type', label: 'Type', width: 140, fallback: 'text', field: (m) => m.type },
+	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
+	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
+	// Last, so it takes the width the table has left.
+	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
 const ASSET_SPECS: readonly ColumnSpec[] = [
-	{ key: 'code', label: 'Asset', width: 200, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
+	{ key: 'code', label: 'Asset', width: 220, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
 	{ key: 'type', label: 'Type', width: 150, fallback: 'text', field: (m) => m.type },
-	{ key: 'description', label: 'Description', width: 360, fallback: 'text', field: (m) => m.description },
-	{ key: 'difficulty', label: 'Difficulty', width: 140, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null },
-	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null }
+	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
+	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
+	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
+	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
 function plural(kind: ItemKind): string {

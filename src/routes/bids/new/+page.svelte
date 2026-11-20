@@ -4,9 +4,10 @@
 	details. The Shots and Assets table is the work: it takes the full width and the rest of the
 	height, with what the vendor gets and what is left before the issue on its bar. The field mapping
 	opens on demand. Review is the last look before Issue. The URL holds the stored id and the view.
-	The draft is stored as it changes; an issued request opens read only, on its review, with New
-	round. Nothing here writes to Flow PT but a field the person asks to create. The menu beside the
-	actions deletes a stored draft, or discards one not stored yet.
+	The draft is stored as it changes, once it has a title or a row; an issued request opens read
+	only, on its review, with New round. A draft's rows are live: editing a column fed by Flow PT
+	writes Flow PT as the signed in person (`request-table`), and a field the person asks to create
+	is written too. The menu beside the actions deletes a stored draft, or discards one not stored yet.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';

@@ -112,17 +112,17 @@ export interface Step {
 
 export const HOW = {
 	h1: 'How it works',
-	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is read at the start and written at the award, from your own session. A field you create from the mapping is written when you create it.',
+	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is written from your own session: when you edit a row of a draft in a column fed by Flow PT, when you create a field from the mapping, and at the award.',
 	steps: {
 		id: 'steps',
 		q: 'What are the steps of a bid round?',
-		a: 'Build a request, invite vendors, let them bid, compare, and publish the award. Flow PT is read in the first two steps and written in the last, and when you create a field from the mapping.',
+		a: 'Build a request, invite vendors, let them bid, compare, and publish the award. Flow PT is read in the first two steps, and written when you edit a draft’s row in a column fed by Flow PT and at the award.',
 		items: [
 			{
 				title: 'Build a request',
-				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. The request keeps a frozen copy. Later edits in Flow PT do not change it.',
-				app: 'The request and its frozen copy.',
-				fpt: { kind: 'read', text: 'Reads Shots, Assets and their fields. Creates a field on Shot or Asset only when you ask, from the mapping.' }
+				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. A draft shows the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit and breakdown rows stay in the request. Issuing freezes what you see.',
+				app: 'The draft, and the frozen copy once it is issued.',
+				fpt: { kind: 'write', text: 'Reads Shots, Assets and their fields. Writes a field of a Shot or Asset when you edit it in a draft, with Undo. Creates a field only when you ask, from the mapping.' }
 			},
 			{
 				title: 'Invite vendors',
@@ -165,8 +165,9 @@ export const HOW = {
 	written: {
 		id: 'written',
 		q: 'What gets written to Flow PT?',
-		a: 'The award, from your own Flow PT session, after a preview of every write. A field you create from the mapping is written when you create it, and an Admin creates the fields the award needs from the publish page.',
+		a: 'The award, from your own Flow PT session, after a preview of every write, and the fields an Admin creates for it from the publish page. While you build a request, an edit to a row in a column fed by Flow PT, and a field you create from the mapping.',
 		list: [
+			'While you build a request, the field of a Shot or Asset behind a column marked Live in Flow PT, when you edit it. Several selected rows change together after a confirm. Each edit offers Undo, which leaves a value someone changed in Flow PT since.',
 			'One Bid per awarded vendor. With the switch "every line of every bid" on, one Bid per vendor that bid.',
 			'One Bid Line per awarded Shot or Asset. With the switch on, one per line of every bid.',
 			'The vendor’s Group, added to the vendor groups field (sg_vendor_groups) of each Shot and Asset it wins.',

@@ -25,6 +25,11 @@ The "Seen in" column says:
 - A shot or an asset from a breakdown has no Flow PT entity until it is matched, or created at
   the award. Its `source` says so. A vendor sees neither.
 - Each vendor bids in its own currency. Production compares in the request's base currency.
+- A draft's shots and assets picked from Flow PT are live. Each value a mapped field feeds is read
+  from Flow PT when the draft opens and after every write, and an edit to it writes the field. The
+  stored draft holds the values last read, so a reload is safe. The note to vendors, omit, a
+  concept with no mapped field, and every value of a breakdown row are the request's own. Issuing
+  freezes the items as they are; from then on Flow PT edits do not reach them.
 
 ## Bid request
 

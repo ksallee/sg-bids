@@ -65,7 +65,7 @@ export function liveItems<T extends Item>(items: readonly T[], rows: readonly En
 			return item;
 		}
 		const fresh = freeze(row, index + 1) as unknown as Record<string, unknown>;
-		const merged: Record<string, unknown> = { ...item };
+		const merged = { ...item } as Record<string, unknown>;
 		for (const key of keys) {
 			if (fresh[key] === undefined) delete merged[key];
 			else merged[key] = fresh[key];
