@@ -40,7 +40,10 @@ metaphors, no "not X, Y", no filler.
 ## Layout
 
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
-- `src/lib/app/`: the app's own components (shell, banner, page header).
+- `src/lib/app/`: the app's own components (shell, banner, page header), and the request
+  builder's steps and page state under `builder/` and `builder.svelte.ts`.
+- `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.
+- `src/lib/drafts.ts`: the one place a draft request is stored. Storage plugs in there.
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
 - `docs/data-model.md`: the bid request, vendor bid, award and change order, field by field.
 - `src/lib/server/`: the data layer and the production check. Server only.
