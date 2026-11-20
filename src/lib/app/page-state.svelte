@@ -1,7 +1,8 @@
 <!--
-	A whole pane's empty, loading or error state (docs/design.md): an icon in a muted circle, one
-	title, one line, one action. Loading shows its spinner only after 150 ms (sg-widgets rule 4).
-	Inside a widget, use its own StateLine instead.
+	A whole pane's empty, loading or error state: an icon in a ring, one title, one line, and the
+	action that gets the person going. It grows to fill its parent and sits in the middle of it, both
+	ways. Loading shows its spinner only after 150 ms (sg-widgets rule 4). Inside a widget, use its
+	own StateLine instead.
 -->
 <script lang="ts">
 	import type { Component, Snippet } from 'svelte';
@@ -30,19 +31,24 @@
 </script>
 
 <div
-	class={cn('flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center', state === 'loading' && 'page-state-delay', className)}
+	class={cn('flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center', state === 'loading' && 'page-state-delay', className)}
 	role={state === 'error' ? 'alert' : 'status'}
 	data-slot="page-state"
 	data-state={state}
 >
-	<span class={cn('bg-muted flex size-10 items-center justify-center rounded-full', state === 'error' ? 'text-destructive' : 'text-muted-foreground')}>
+	<span
+		class={cn(
+			'flex size-11 items-center justify-center rounded-full border',
+			state === 'error' ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'bg-card text-muted-foreground'
+		)}
+	>
 		<Icon class={cn('size-5', state === 'loading' && 'motion-safe:animate-spin')} aria-hidden="true" />
 	</span>
 	<div class="flex max-w-md flex-col gap-1">
-		<p class="text-sm font-medium">{title}</p>
-		{#if line}<p class={cn('text-sm', state === 'error' ? 'text-destructive' : 'text-muted-foreground')}>{line}</p>{/if}
+		<p class="text-base font-semibold tracking-tight">{title}</p>
+		{#if line}<p class="text-muted-foreground text-sm text-balance">{line}</p>{/if}
 	</div>
-	{#if action}<div class="flex items-center gap-2">{@render action()}</div>{/if}
+	{#if action}<div class="flex flex-wrap items-center justify-center gap-2 pt-1">{@render action()}</div>{/if}
 </div>
 
 <style>

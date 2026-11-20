@@ -16,7 +16,7 @@
 	import WriteLedger from '$lib/app/award/write-ledger.svelte';
 	import { PublishState } from '$lib/app/award/publish.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { currentProject } from '$lib/current-project';
+	import { workingProject } from '$lib/current-project';
 	import { prepareLive } from '$lib/live';
 
 	const id = $derived(page.params.id ?? '');
@@ -26,7 +26,7 @@
 	async function load(): Promise<void> {
 		const live = await prepareLive();
 		if (live.problem) throw new Error(live.problem);
-		const project = currentProject(live.siteUrl);
+		const project = workingProject(live.siteUrl, page.url);
 		if (!project) throw new Error('Pick the project on the requests list first.');
 		siteUrl = live.siteUrl;
 		const next = new PublishState(project.id, id);

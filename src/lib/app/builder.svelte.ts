@@ -8,7 +8,7 @@
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
 import { liveAuth, liveContext, liveState, prepareLive } from '$lib/live';
 import { api, ApiError, type RequestStatus } from '$lib/api';
-import { setCurrentProject, currentProject } from '$lib/current-project';
+import { setCurrentProject, workingProject } from '$lib/current-project';
 import { cushion, drafts } from '$lib/drafts';
 import { isLocalId, localId, savable } from '$lib/pure/persist';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
@@ -103,7 +103,7 @@ export class Builder {
 		this.problem = live.problem;
 		if (live.problem) return;
 		if (requestId) {
-			const project = currentProject(live.siteUrl);
+			const project = workingProject(live.siteUrl, new URL(location.href));
 			if (!project) throw new Error('Open the request from the requests list.');
 			const loaded = await drafts.loadDraft(requestId, project.id);
 			this.state = restoreState(loaded.request);

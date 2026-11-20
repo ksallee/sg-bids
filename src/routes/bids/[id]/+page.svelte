@@ -19,7 +19,7 @@
 	import VendorSheet from '$lib/app/builder/vendor-sheet.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { api, type LoadedRequest } from '$lib/api';
-	import { currentProject } from '$lib/current-project';
+	import { workingProject } from '$lib/current-project';
 	import { prepareLive } from '$lib/live';
 	import { stateLabel, vendorLink } from '$lib/pure/invitations';
 	import { summarize } from '$lib/pure/request';
@@ -38,7 +38,7 @@
 		const live = await prepareLive();
 		if (live.problem) throw new Error(live.problem);
 		siteUrl = live.siteUrl;
-		const project = currentProject(live.siteUrl);
+		const project = workingProject(live.siteUrl, page.url);
 		if (!project) throw new Error('Pick the project on the requests list first.');
 		projectId = project.id;
 		loaded = await api.get(project.id, id);

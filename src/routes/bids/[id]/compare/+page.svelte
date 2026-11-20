@@ -16,7 +16,7 @@
 	import UndoNote from '$lib/app/award/undo-note.svelte';
 	import { CompareState } from '$lib/app/compare/state.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
-	import { currentProject } from '$lib/current-project';
+	import { workingProject } from '$lib/current-project';
 	import { prepareLive } from '$lib/live';
 	import type { Row } from '$lib/pure/compare';
 
@@ -29,7 +29,7 @@
 		const live = await prepareLive();
 		if (live.problem) throw new Error(live.problem);
 		siteUrl = live.siteUrl;
-		const project = currentProject(live.siteUrl);
+		const project = workingProject(live.siteUrl, page.url);
 		if (!project) throw new Error('Pick the project on the requests list first.');
 		const next = new CompareState(project.id, id);
 		await next.load();

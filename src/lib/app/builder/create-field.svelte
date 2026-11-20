@@ -83,14 +83,14 @@
 		</dd>
 	</dl>
 
-	<FormField id="create-display" label="Display name" mark="required" hint="What people see in Flow PT. Plain letters, digits and spaces." problem={shownProblem('display')}>
+	<FormField id="create-display" label="Display name" required hint="What people see in Flow PT. Plain letters, digits and spaces." problem={shownProblem('display')}>
 		{#snippet children({ id, describedBy, invalid })}
 			<Input {id} bind:value={display} aria-invalid={invalid ? 'true' : undefined} aria-describedby={describedBy} autocomplete="off" />
 		{/snippet}
 	</FormField>
 
 	{#if spec?.create?.dataType === 'list'}
-		<FormField id="create-values" label="Values" mark="required" hint="One per line, in the order Flow PT lists them." problem={shownProblem('values')}>
+		<FormField id="create-values" label="Values" required hint="One per line, in the order Flow PT lists them." problem={shownProblem('values')}>
 			{#snippet children({ id, describedBy, invalid })}
 				<Textarea {id} class="min-h-28 font-mono text-sm" bind:value={valuesText} aria-invalid={invalid ? 'true' : undefined} aria-describedby={describedBy} />
 			{/snippet}

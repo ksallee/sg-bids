@@ -1,6 +1,7 @@
 <!--
 	Adding Shots or Assets from Flow PT: the project's rows in the registry's EntityTable, filtered by
-	code, Sequence, Episode, status and type, as sg-task-templates' entities screen. A tick freezes
+	code, Sequence, Episode, status and type, as sg-task-templates' entities screen. The table fills
+	the rest of the page and scrolls on its own. A tick freezes
 	the row into the request at once (`$lib/pure/pick`); "Add all" reads every row the filter
 	matches. Nothing here writes to Flow PT.
 -->
@@ -100,8 +101,8 @@
 {:else if !ready || !fctx}
 	<PageState state="loading" title="Reading the project…" />
 {:else}
-	<div class="flex flex-wrap items-center gap-2" data-slot="pick-filters">
-		<div class="relative w-full sm:w-56">
+	<div class="flex flex-wrap items-center gap-2 px-6 py-2.5" data-slot="pick-filters">
+		<div class="relative w-full sm:w-64">
 			<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
 			<Input class="h-8 pl-8" type="search" placeholder={`Search ${noun} by code`} bind:value={search} aria-label={`Search ${noun} by code`} data-slot="pick-search" data-focus-first />
 		</div>
@@ -170,12 +171,14 @@
 			</Button>
 		</div>
 	</div>
-	{#if selectError}<Notice tone="destructive" title="Could not add them.">{' '}{selectError}</Notice>{/if}
+	{#if selectError}<div class="px-6 pb-2.5"><Notice tone="destructive" title="Could not add them.">{' '}{selectError}</Notice></div>{/if}
 
 	{#if result?.kind === 'none'}
-		<Notice tone="info">No Sequence is in both the Sequence and the Episode picked. Change one of them.</Notice>
+		<div class="px-6"><Notice tone="info">No Sequence is in both the Sequence and the Episode picked. Change one of them.</Notice></div>
 	{:else if source}
+		<div class="min-h-0 flex-1 px-6 pb-4" data-slot="pick-fill">
 		<EntityTable
+			class="h-full"
 			{source}
 			bind:columns
 			{context}
@@ -185,9 +188,10 @@
 			{selection}
 			onSelectionChange={onSelection}
 			paging="scroll"
-			maxHeight="max(20rem, calc(100dvh - 21rem))"
+			maxHeight="100%"
 			density="compact"
 			emptyLabel={isFiltered(filter) ? `No ${noun} match these filters.` : `This project has no ${noun}.`}
 		/>
+		</div>
 	{/if}
 {/if}

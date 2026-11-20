@@ -1,8 +1,9 @@
 <!--
-	The main work: the Shots and the Assets of the request. A tab per kind, with its count. In each,
-	two views of one list: what is in the request, edited in place, and the project's rows to add
-	from. A kind with nothing in it opens on adding. The section carries `f-items`, the id the
-	readiness list points at for "nothing picked".
+	The main work: the Shots and the Assets of the request, filling the rest of the page. One bar: a
+	tab per kind with its count, the two views of one list (what is in the request, edited in place,
+	and the project's rows to add from), then what the vendor gets and what is left before the issue.
+	A kind with nothing in it opens on adding. The section carries `f-items`, the id the readiness
+	list points at for "nothing picked".
 -->
 <script lang="ts" module>
 	export type ItemsView = 'picked' | 'add';
@@ -12,25 +13,28 @@
 	import Segmented from '$lib/app/segmented.svelte';
 	import PickTable from './pick-table.svelte';
 	import PickedList from './picked-list.svelte';
+	import SummaryBar from './summary-bar.svelte';
 	import BreakdownDialog from './breakdown-dialog.svelte';
 	import MatchLine from './match-line.svelte';
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
 	import type { ItemKind } from '$lib/pure/field-map';
-	import { controlId } from '$lib/pure/readiness';
+	import { controlId, type Target } from '$lib/pure/readiness';
 	import type { Builder } from '$lib/app/builder.svelte';
 
 	let {
 		builder,
 		kind = $bindable('shot'),
 		views = $bindable({ shot: 'picked', asset: 'picked' }),
-		onFields
+		onFields,
+		onFocus
 	}: {
 		builder: Builder;
 		kind?: ItemKind;
 		views?: Record<ItemKind, ItemsView>;
 		onFields: () => void;
+		onFocus: (target: Target) => void;
 	} = $props();
 
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
@@ -46,9 +50,9 @@
 	}
 </script>
 
-<section id={controlId('items')} class="flex min-w-0 flex-col gap-3 outline-none" aria-label="Shots and assets" tabindex="-1" data-slot="items-panel">
-	<div class="border-border flex flex-wrap items-end gap-x-4 gap-y-2 border-b">
-		<div class="-mb-px flex items-end gap-4" role="tablist" aria-label="Kind">
+<section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Shots and assets" tabindex="-1" data-slot="items-panel">
+	<div class="border-border flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-6">
+		<div class="-mb-px flex items-end gap-5 self-stretch" role="tablist" aria-label="Kind">
 			{#each [['shot', 'Shots'], ['asset', 'Assets']] as [k, label] (k)}
 				{@const on = kind === k}
 				<button
@@ -59,7 +63,7 @@
 					aria-controls="items-tabpanel"
 					tabindex={on ? 0 : -1}
 					class={cn(
-						'focus-visible:ring-ring/50 flex h-9 items-center gap-2 border-b-2 px-0.5 text-sm outline-none focus-visible:ring-[3px]',
+						'focus-visible:ring-ring/50 flex h-11 items-center gap-2 border-b-2 px-0.5 text-sm outline-none focus-visible:ring-[3px]',
 						on ? 'border-primary text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground border-transparent'
 					)}
 					onclick={() => (kind = k as ItemKind)}
@@ -71,7 +75,6 @@
 			{/each}
 		</div>
 		<Segmented
-			class="mb-1.5 ml-auto"
 			label="Show"
 			value={view}
 			options={[
@@ -80,10 +83,11 @@
 			]}
 			onChange={(v) => setView(v as ItemsView)}
 		/>
-		<Button size="sm" variant="outline" class="mb-1.5" onclick={() => (breakdownOpen = true)} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+		<Button size="sm" variant="ghost" onclick={() => (breakdownOpen = true)} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+		<div class="ml-auto flex min-w-0 items-center py-2"><SummaryBar {builder} {onFocus} /></div>
 	</div>
 	<MatchLine {builder} />
-	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-w-0 flex-col gap-3">
+	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-h-0 min-w-0 flex-1 flex-col">
 		{#key kind}
 			{#if view === 'add'}
 				<PickTable {builder} {kind} />
