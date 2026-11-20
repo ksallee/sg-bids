@@ -27,7 +27,7 @@
 	import PageState from '$lib/app/page-state.svelte';
 	import FieldsDialog from '$lib/app/builder/fields-dialog.svelte';
 	import HeaderPanel from '$lib/app/builder/header-panel.svelte';
-	import ItemsPanel, { type ItemsView } from '$lib/app/builder/items-panel.svelte';
+	import ItemsPanel from '$lib/app/builder/items-panel.svelte';
 	import ProjectGate from '$lib/app/builder/project-gate.svelte';
 	import ReviewView from '$lib/app/builder/review-view.svelte';
 	import SaveLine from '$lib/app/builder/save-line.svelte';
@@ -58,7 +58,8 @@
 	const view = $derived(parseView(page.url.searchParams, builder.readOnly));
 	let folds = $state({ delivery: false, assumptions: false });
 	let kind = $state<ItemKind>('shot');
-	let views = $state<Record<ItemKind, ItemsView>>({ shot: 'picked', asset: 'picked' });
+	/** The kind the Flow PT picker is open for, over the items area. */
+	let adding = $state<ItemKind | null>(null);
 	let revealed = $state<ReadonlySet<string>>(new Set());
 	let fieldsOpen = $state(false);
 	let projectOpen = $state(false);
@@ -83,7 +84,7 @@
 		if (target === 'items') {
 			const k: ItemKind = builder.state.shots.length === 0 && builder.state.assets.length > 0 ? 'asset' : 'shot';
 			kind = k;
-			if (builder.state.shots.length + builder.state.assets.length === 0) views = { ...views, [k]: 'add' };
+			if (builder.state.shots.length + builder.state.assets.length === 0) adding = k;
 		}
 		if (target === 'project') projectOpen = true;
 		else await focusControl(target);
@@ -205,7 +206,7 @@
 			{#if builder.data.state === 'error'}
 				<div class="px-6 pt-3"><Notice tone="destructive" title="Could not read the project.">{' '}{builder.data.message}</Notice></div>
 			{/if}
-			<ItemsPanel {builder} bind:kind bind:views onFields={() => (fieldsOpen = true)} onFocus={(t) => void focusOn(t)} />
+			<ItemsPanel {builder} bind:kind bind:adding onFields={() => (fieldsOpen = true)} onFocus={(t) => void focusOn(t)} />
 			<FieldsDialog {builder} bind:open={fieldsOpen} />
 		{/if}
 		{#if !builder.readOnly}

@@ -8,7 +8,7 @@
 	hundred rows light.
 -->
 <script lang="ts">
-	import { tick } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import X from '@lucide/svelte/icons/x';
 	import Search from '@lucide/svelte/icons/search';
 	import MessageSquare from '@lucide/svelte/icons/message-square';
@@ -21,7 +21,29 @@
 	import type { ItemKind } from '$lib/pure/field-map';
 	import type { Builder } from '$lib/app/builder.svelte';
 
-	let { builder, kind, onAdd, onBreakdown, onFields }: { builder: Builder; kind: ItemKind; onAdd: () => void; onBreakdown: () => void; onFields: () => void } = $props();
+	let {
+		builder,
+		kind,
+		fresh = new Set(),
+		onAdd,
+		onBreakdown,
+		onFields
+	}: {
+		builder: Builder;
+		kind: ItemKind;
+		/** Rows just added from Flow PT: marked, and the first scrolled into view. */
+		fresh?: ReadonlySet<string>;
+		onAdd: () => void;
+		onBreakdown: () => void;
+		onFields: () => void;
+	} = $props();
+
+	$effect(() => {
+		const marked = fresh;
+		const first = untrack(() => builder.state[kind === 'shot' ? 'shots' : 'assets'].find((row) => marked.has(row.id)));
+		if (!first) return;
+		void tick().then(() => document.querySelector(`[data-row="${CSS.escape(first.id)}"]`)?.scrollIntoView({ block: 'nearest' }));
+	});
 
 	const noun = $derived(kind === 'shot' ? 'shot' : 'asset');
 	const tiers = $derived(builder.tiers(kind));
@@ -146,7 +168,12 @@
 			</thead>
 			<tbody>
 				{#each shown as row (row.id)}
-					<tr class={cn('group hover:bg-muted/60 focus-within:bg-muted/60', row.omitted && 'bg-muted/40')} data-omitted={row.omitted} data-row={row.id}>
+					<tr
+						class={cn('group hover:bg-muted/60 focus-within:bg-muted/60', row.omitted && 'bg-muted/40', fresh.has(row.id) && 'bg-info/10')}
+						data-omitted={row.omitted}
+						data-row={row.id}
+						data-fresh={fresh.has(row.id) || undefined}
+					>
 						<td class={cn(TD, 'pl-6')}>
 							<span class="flex min-w-0 items-center gap-2">
 								<span class={cn('truncate font-mono text-xs font-medium', row.omitted && 'text-muted-foreground line-through')} title={row.name}>{row.name}</span>
