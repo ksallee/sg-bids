@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyHeaderForm, headerForm, isDay, splitAssumptions, toHeader, validateHeader, type HeaderForm } from './header';
+import { OPTIONAL_GROUPS, REQUIRED, checkHeader, emptyHeaderForm, headerForm, isDay, splitAssumptions, suggestCode, toHeader, type HeaderForm, type Stage } from './header';
 
 const TODAY = '2026-11-20';
 const project = { id: 85, name: 'Demo Show' };
@@ -30,53 +30,87 @@ describe('emptyHeaderForm', () => {
 	});
 });
 
-describe('validateHeader', () => {
+describe('checkHeader', () => {
+	const at = (f: HeaderForm, stage: Stage = 'draft') => Object.fromEntries(checkHeader(f, TODAY, stage).map((p) => [p.field, p]));
+
 	it('passes a complete form', () => {
-		const errors = validateHeader(
-			form({ dueDate: '2026-12-01', turnoverDate: '2026-12-05', deliveryDate: '2027-03-01', materialLink: 'https://example.com/cut' }),
-			TODAY
-		);
-		expect(errors).toEqual({});
+		const f = form({ dueDate: '2026-12-01', turnoverDate: '2026-12-05', deliveryDate: '2027-03-01', materialLink: 'https://example.com/cut' });
+		expect(checkHeader(f, TODAY, 'draft')).toEqual([]);
+		expect(checkHeader(f, TODAY, 'issue')).toEqual([]);
 	});
 
-	it('needs a code, a title and a base currency', () => {
-		const errors = validateHeader(form({ code: '  ', title: '', baseCurrency: '' }), TODAY);
-		expect(errors.code).toBe('Give the request a code.');
-		expect(errors.title).toBe('Give the request a title.');
-		expect(errors.baseCurrency).toBe('Pick a base currency.');
+	it('needs a title, a code, a round and a base currency, each named in words', () => {
+		const p = at(form({ code: '  ', title: '', baseCurrency: '', round: '' }));
+		expect(p.title).toEqual({ field: 'title', label: 'Title', tone: 'error', missing: true, short: 'missing', message: 'Give the request a title.' });
+		expect(p.code.message).toBe('Give the request a code. Vendors quote it back.');
+		expect(p.round.message).toBe('The round is a whole number from 1.');
+		expect(p.baseCurrency.message).toBe('Pick a base currency.');
+	});
+
+	it('lists problems in the order of the form', () => {
+		const order = checkHeader(form({ title: '', code: '', materialLink: 'x', dueDate: 'soon' }), TODAY, 'draft').map((p) => p.field);
+		expect(order).toEqual(['title', 'code', 'dueDate', 'materialLink']);
 	});
 
 	it('refuses a currency off the list', () => {
-		expect(validateHeader(form({ baseCurrency: 'XAU' }), TODAY).baseCurrency).toBe('XAU is not a currency on the list.');
+		expect(at(form({ baseCurrency: 'XAU' })).baseCurrency.message).toBe('XAU is not a currency on the list. Pick a base currency.');
 	});
 
 	it('needs a whole round from 1', () => {
-		for (const round of ['0', '-1', '1.5', 'one', '']) expect(validateHeader(form({ round }), TODAY).round).toBe('The round is a whole number from 1.');
-		expect(validateHeader(form({ round: ' 2 ' }), TODAY).round).toBeUndefined();
+		for (const round of ['0', '-1', '1.5', 'one', '']) expect(at(form({ round })).round.message).toBe('The round is a whole number from 1.');
+		expect(at(form({ round: ' 2 ' })).round).toBeUndefined();
 	});
 
-	it('checks each date is a real day', () => {
-		const errors = validateHeader(form({ dueDate: '2026-02-30', turnoverDate: '12/01/2026', deliveryDate: 'soon' }), TODAY);
-		expect(errors.dueDate).toBe('Write the day as YYYY-MM-DD.');
-		expect(errors.turnoverDate).toBe('Write the day as YYYY-MM-DD.');
-		expect(errors.deliveryDate).toBe('Write the day as YYYY-MM-DD.');
+	it('names each date that is not a real day', () => {
+		const p = at(form({ dueDate: '2026-02-30', turnoverDate: '12/01/2026', deliveryDate: 'soon' }));
+		expect(p.dueDate.message).toBe('Write the bids due day as YYYY-MM-DD.');
+		expect(p.turnoverDate.message).toBe('Write the turnover day as YYYY-MM-DD.');
+		expect(p.deliveryDate.message).toBe('Write the delivery day as YYYY-MM-DD.');
 	});
 
-	it('refuses a due date in the past, takes today', () => {
-		expect(validateHeader(form({ dueDate: '2026-11-19' }), TODAY).dueDate).toBe('The due date has passed.');
-		expect(validateHeader(form({ dueDate: TODAY }), TODAY).dueDate).toBeUndefined();
+	it('warns on a due date in the past while drafting, refuses it at issue, takes today', () => {
+		expect(at(form({ dueDate: '2026-11-19' })).dueDate).toEqual({
+			field: 'dueDate',
+			label: 'Bids due',
+			tone: 'warning',
+			missing: false,
+			short: 'the day has passed',
+			message: 'The bids due day has passed. Move it before you issue.'
+		});
+		expect(at(form({ dueDate: '2026-11-19' }), 'issue').dueDate.tone).toBe('error');
+		expect(at(form({ dueDate: TODAY }), 'issue').dueDate).toBeUndefined();
 	});
 
 	it('wants delivery after turnover', () => {
-		const errors = validateHeader(form({ turnoverDate: '2027-01-10', deliveryDate: '2027-01-09' }), TODAY);
-		expect(errors.deliveryDate).toBe('Delivery comes before turnover.');
-		expect(validateHeader(form({ turnoverDate: '2027-01-10', deliveryDate: '2027-01-10' }), TODAY).deliveryDate).toBeUndefined();
+		expect(at(form({ turnoverDate: '2027-01-10', deliveryDate: '2027-01-09' })).deliveryDate.message).toBe('Delivery comes before turnover. Move one of them.');
+		expect(at(form({ turnoverDate: '2027-01-10', deliveryDate: '2027-01-10' })).deliveryDate).toBeUndefined();
 	});
 
 	it('wants the material link to be a web address', () => {
-		expect(validateHeader(form({ materialLink: 'ftp://x' }), TODAY).materialLink).toBe('The link starts with https:// or http://.');
-		expect(validateHeader(form({ materialLink: 'not a link' }), TODAY).materialLink).toBe('The link starts with https:// or http://.');
-		expect(validateHeader(form({ materialLink: 'http://intra/cut' }), TODAY).materialLink).toBeUndefined();
+		expect(at(form({ materialLink: 'ftp://x' })).materialLink.message).toBe('The bid material link starts with https:// or http://.');
+		expect(at(form({ materialLink: 'http://intra/cut' })).materialLink).toBeUndefined();
+	});
+
+	it('marks only what cannot be blank as required', () => {
+		expect(REQUIRED).toEqual(['title', 'code', 'round', 'baseCurrency']);
+		expect(OPTIONAL_GROUPS).toEqual({ delivery: ['turnoverDate', 'deliveryDate', 'deliveryFormat', 'materialLink'], assumptions: ['assumptions'] });
+	});
+});
+
+describe('suggestCode', () => {
+	it('makes the code from the project name and the first free number', () => {
+		expect(suggestCode('Big Buck Bunny', [])).toBe('BIG_BUCK_BUNNY-01');
+		expect(suggestCode('Big Buck Bunny', ['BIG_BUCK_BUNNY-01', 'BIG_BUCK_BUNNY-02', 'OTHER'])).toBe('BIG_BUCK_BUNNY-03');
+	});
+
+	it('keeps it short, cut at a word', () => {
+		expect(suggestCode('sg-comfyui Sandbox', [])).toBe('SG_COMFYUI-01');
+		expect(suggestCode('Supercalifragilisticexpialidocious', [])).toBe('SUPERCALIFRAGILI-01');
+	});
+
+	it('drops accents and anything outside plain letters and digits', () => {
+		expect(suggestCode('Élan Vital 2', [])).toBe('ELAN_VITAL_2-01');
+		expect(suggestCode('日本', [])).toBe('BID-01');
 	});
 });
 

@@ -1,8 +1,8 @@
 <!--
-	Steps 4 and 5, Shots and Assets: the project's rows in the registry's EntityTable, filtered by
-	code, Sequence, Episode, status and type, as sg-task-templates' entities screen. A pick is
-	frozen into the draft at once (`$lib/pure/pick`); Select all reads every row the filter matches.
-	Nothing here writes.
+	Adding Shots or Assets from Flow PT: the project's rows in the registry's EntityTable, filtered by
+	code, Sequence, Episode, status and type, as sg-task-templates' entities screen. A tick freezes
+	the row into the request at once (`$lib/pure/pick`); "Add all" reads every row the filter
+	matches. Nothing here writes to Flow PT.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -100,10 +100,10 @@
 {:else if !ready || !fctx}
 	<PageState state="loading" title="Reading the project…" />
 {:else}
-	<div class="border-border flex shrink-0 flex-wrap items-center gap-2 border-b px-6 py-3" data-slot="pick-filters">
+	<div class="flex flex-wrap items-center gap-2" data-slot="pick-filters">
 		<div class="relative w-full sm:w-56">
 			<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
-			<Input class="h-8 pl-8" type="search" placeholder="Search the code" bind:value={search} aria-label="Search the code" />
+			<Input class="h-8 pl-8" type="search" placeholder={`Search ${noun} by code`} bind:value={search} aria-label={`Search ${noun} by code`} data-slot="pick-search" data-focus-first />
 		</div>
 		{#if fctx.sequenceField}
 			<ListMultiPicker
@@ -164,39 +164,30 @@
 		{#if isFiltered(filter) || search}
 			<Button size="sm" variant="ghost" onclick={() => ((filter = { ...EMPTY_FILTER }), (search = ''))}>Clear filters</Button>
 		{/if}
+		<div class="ml-auto flex items-center gap-2">
+			<Button size="sm" variant="outline" onclick={() => void selectAll()} disabled={selectingAll || !filters} data-slot="add-all">
+				{selectingAll ? 'Adding…' : isFiltered(filter) ? `Add all filtered ${noun}` : `Add all ${noun}`}
+			</Button>
+		</div>
 	</div>
+	{#if selectError}<Notice tone="destructive" title="Could not add them.">{' '}{selectError}</Notice>{/if}
 
-	<div class="border-border bg-muted flex shrink-0 flex-wrap items-center gap-2 border-b px-6 py-2" data-slot="selection-bar">
-		<span class="text-sm" data-slot="selected-count">
-			<span class="font-semibold tabular-nums">{items.length}</span>
-			<span class="text-muted-foreground">{items.length === 1 ? noun.slice(0, -1) : noun} picked</span>
-		</span>
-		<Button size="sm" variant="outline" onclick={() => void selectAll()} disabled={selectingAll || !filters}>
-			{selectingAll ? 'Picking…' : isFiltered(filter) ? `Pick all filtered ${noun}` : `Pick all ${noun}`}
-		</Button>
-		<Button size="sm" variant="ghost" onclick={() => builder.clear(kind)} disabled={items.length === 0}>Clear</Button>
-		{#if selectError}<span class="text-destructive text-sm">{selectError}</span>{/if}
-	</div>
-
-	<div class="flex min-h-0 flex-1 flex-col px-6 py-4">
-		{#if result?.kind === 'none'}
-			<Notice tone="info">No Sequence is in both the Sequence and the Episode picked. Change one of them.</Notice>
-		{:else if source}
-			<EntityTable
-				{source}
-				bind:columns
-				{context}
-				projectId={builder.state.project?.id}
-				{filters}
-				selectable
-				{selection}
-				onSelectionChange={onSelection}
-				paging="scroll"
-				maxHeight="100%"
-				density="compact"
-				emptyLabel={isFiltered(filter) ? `No ${noun} match these filters.` : `This project has no ${noun}.`}
-				class="min-h-0 flex-1"
-			/>
-		{/if}
-	</div>
+	{#if result?.kind === 'none'}
+		<Notice tone="info">No Sequence is in both the Sequence and the Episode picked. Change one of them.</Notice>
+	{:else if source}
+		<EntityTable
+			{source}
+			bind:columns
+			{context}
+			projectId={builder.state.project?.id}
+			{filters}
+			selectable
+			{selection}
+			onSelectionChange={onSelection}
+			paging="scroll"
+			maxHeight="max(20rem, calc(100dvh - 21rem))"
+			density="compact"
+			emptyLabel={isFiltered(filter) ? `No ${noun} match these filters.` : `This project has no ${noun}.`}
+		/>
+	{/if}
 {/if}

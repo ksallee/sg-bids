@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { invitationState, requestCounts, stateLabel, validateVendor, vendorLink, type BidFacts, type InvitationFacts } from './invitations';
+import { VENDOR_REQUIRED, invitationState, requestCounts, stateLabel, validateVendor, vendorLink, type BidFacts, type InvitationFacts } from './invitations';
 
 const NOW = new Date('2026-11-20T12:00:00Z');
 
@@ -59,10 +59,15 @@ describe('requestCounts', () => {
 });
 
 describe('validateVendor', () => {
-	it('needs a name and an email the database takes', () => {
-		expect(validateVendor({ name: ' ', email: 'x' })).toEqual({ name: 'Name the vendor.', email: 'Write an email address.' });
+	it('needs a name and an email the database takes, each message naming its field', () => {
+		expect(validateVendor({ name: ' ', email: '' })).toEqual({ name: 'Name the vendor.', email: 'Write the contact email.' });
 		expect(validateVendor({ name: 'Vendor A', email: 'bids@vendor-a.test' })).toEqual({});
-		expect(validateVendor({ name: 'A', email: 'a b@c.d' }).email).toBe('Write an email address.');
+		expect(validateVendor({ name: 'A', email: 'a b@c.d' }).email).toBe('The contact email is not an address. Write it as name@studio.com.');
+		expect(validateVendor({ name: 'A', email: 'x' }).email).toBe('The contact email is not an address. Write it as name@studio.com.');
+	});
+
+	it('lists the vendor form’s required fields', () => {
+		expect(VENDOR_REQUIRED).toEqual(['name', 'email']);
 	});
 });
 

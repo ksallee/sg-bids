@@ -53,7 +53,7 @@
 
 	const dayFormat = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
 	const day = (value: string | null) => (value ? dayFormat.format(new Date(`${value}T00:00:00Z`)) : '');
-	const href = (row: RequestOverview) => (row.status === 'draft' ? `/bids/new?id=${row.id}&step=review` : `/bids/${row.id}`);
+	const href = (row: RequestOverview) => (row.status === 'draft' ? `/bids/new?id=${row.id}` : `/bids/${row.id}`);
 </script>
 
 <svelte:head><title>Bid requests · SG Bids</title></svelte:head>

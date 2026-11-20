@@ -74,7 +74,7 @@
 	async function newRound(): Promise<void> {
 		await act('round', async () => {
 			const { request } = await api.newRound(projectId!, id);
-			await goto(`/bids/new?id=${request.id}&step=details`);
+			await goto(`/bids/new?id=${request.id}`);
 		});
 	}
 
@@ -110,7 +110,7 @@
 			{#snippet actions()}
 				<Button variant="outline" href="/bids">Requests</Button>
 				{#if loaded!.status === 'draft'}
-					<Button href={`/bids/new?id=${r.id}&step=review`}>Edit the draft</Button>
+					<Button href={`/bids/new?id=${r.id}`}>Edit the draft</Button>
 				{:else}
 					<Button onclick={() => void newRound()} disabled={busy === 'round'}>{busy === 'round' ? 'Starting…' : 'New round'}</Button>
 				{/if}
