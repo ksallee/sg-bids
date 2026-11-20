@@ -1,12 +1,12 @@
 <!--
 	A request's page: who is invited and where each stands, inviting a vendor (the link shows once),
-	revoking and making a new link, then the request as vendors get it. The comparison has a marked
-	place and comes later. Vendor names and Groups live on the invitations, never in the request.
+	revoking and making a new link, the way to the comparison, then the request as vendors get it.
+	Vendor names and Groups live on the invitations, never in the request.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import FileText from '@lucide/svelte/icons/file-text';
+	import Columns3 from '@lucide/svelte/icons/columns-3';
 	import Notice from '$lib/app/notice.svelte';
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
@@ -95,6 +95,7 @@
 	{#if loaded}
 		{@const r = loaded.request}
 		{@const counts = summarize(r)}
+		{@const submitted = loaded.invitations.filter((inv) => inv.state.kind === 'submitted').length}
 		<PageHeader title={r.header.title ?? 'Untitled request'}>
 			{#snippet context()}
 				<StatusChip status={loaded!.status} />
@@ -178,10 +179,18 @@
 					{/if}
 				</Section>
 
-				<Section title="Comparison" data-slot="comparison-placeholder">
-					<div class="border-border text-muted-foreground flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center text-sm">
-						<FileText class="size-5" aria-hidden="true" />
-						<p>The bids side by side come in a later version. This space is kept for them.</p>
+				<Section title="Comparison" meta={`${submitted} of ${loaded.invitations.length} bids in`} data-slot="comparison">
+					<div class="bg-card flex flex-wrap items-center gap-4 rounded-lg border p-4">
+						<Columns3 class="text-muted-foreground size-5 shrink-0" aria-hidden="true" />
+						<div class="flex min-w-0 flex-1 flex-col gap-0.5">
+							<p class="text-sm font-medium">{submitted === 0 ? 'No bid in yet' : 'The bids side by side'}</p>
+							<p class="text-muted-foreground text-xs">
+								{submitted === 0
+									? 'Once a vendor submits, its prices show here shot by shot. Drafts stay theirs.'
+									: 'Shot by shot in your base currency, with the rates you set, the totals and rebate estimates, and award scenarios.'}
+							</p>
+						</div>
+						<Button href={`/bids/${r.id}/compare`} variant={submitted === 0 ? 'outline' : 'default'} disabled={loaded.status === 'draft'}>Open the comparison</Button>
 					</div>
 				</Section>
 

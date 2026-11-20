@@ -6,7 +6,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { TABLES, type Table } from '$lib/pure/access';
-import { draft, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
+import { createComparison } from '$lib/server/comparison';
+import { draft, draftIn, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
 
 const sql = superuser();
 const PUBLIC_ROLES: Role[] = ['anon', 'authenticated'];
@@ -20,7 +21,8 @@ const SAMPLE: Record<Table, Record<string, unknown>> = {
 	bid_lines: { bid_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', total_minor: 1 },
 	award_scenarios: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, name: 'S' },
 	award_scenario_items: { scenario_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
-	awards: { request_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_line_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' }
+	awards: { request_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_line_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
+	bid_rates: { bid_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, rate: '1.2', rate_date: '2026-11-20' }
 };
 
 async function snapshot(): Promise<Record<string, string>> {
@@ -42,6 +44,11 @@ beforeAll(async () => {
 	const [line] = await sql`select id from public.bid_lines where bid_id = ${bidA.id} and item_key = 'sh010'`;
 	await sql`insert into public.awards (request_id, site_host, project_id, item_kind, item_key, bid_line_id, share_percent)
 		values (${request.id}, ${production.siteHost}, ${production.projectId}, 'shot', 'sh010', ${line.id}, '100')`;
+	// A rate, on another request: an award locks the rates of its own.
+	const other = await issuedWithTwoVendors();
+	const pounds = await other.s.saveDraftBid(other.a.token, draftIn('GBP', 80_000));
+	await other.s.submitBid(other.a.token, pounds.id);
+	await createComparison(rest('service_role')).setRate(other.production, other.request.id, pounds.id, { rate: '1.27', date: '2026-11-20' });
 });
 
 afterAll(async () => {
@@ -111,7 +118,25 @@ describe.each(PUBLIC_ROLES)('through PostgREST as %s', (role) => {
 				p_scenario_id: null,
 				p_name: 'x',
 				p_items: []
-			})
+			}),
+			client.rpc('sg_set_bid_rate', {
+				p_request_id: '00000000-0000-0000-0000-000000000000',
+				p_site_host: 'x',
+				p_project_id: 1,
+				p_bid_id: '00000000-0000-0000-0000-000000000000',
+				p_rate: '1',
+				p_rate_date: '2026-11-20'
+			}),
+			client.rpc('sg_save_award_scenario', {
+				p_request_id: '00000000-0000-0000-0000-000000000000',
+				p_site_host: 'x',
+				p_project_id: 1,
+				p_scenario_id: null,
+				p_name: 'x',
+				p_items: [],
+				p_costs_left_out: []
+			}),
+			client.rpc('sg_choose_scenario', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_scenario_id: null })
 		];
 		for (const call of await Promise.all(calls)) expect(call.error).not.toBeNull();
 		expect(await snapshot()).toEqual(before);

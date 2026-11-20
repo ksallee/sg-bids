@@ -115,8 +115,12 @@ What a vendor answers. One per vendor per round. Every amount in it is in its cu
 | exclusions | what the bid leaves out | 2+ |
 | milestones | payment milestones: label, percent, when | 2+ |
 
-The rate is null when the bid is in the base currency, and required when it is not. NIM converts
-at the bid date. vfx_bidding_assist keeps amounts in both currencies.
+The rate is null when the bid is in the base currency. The vendor gives none: production sets it
+after submission, per bid, with its date, in its own table (`bid_rates`), because a submitted bid
+is frozen. Per bid and not per currency: each bid has its own date, and a second version may come
+weeks after the first. Production may change it until the award; the database locks it then. Until
+a bid has a rate, its base figures are unknown and the comparison says "needs a rate", never zero.
+NIM converts at the bid date. vfx_bidding_assist keeps amounts in both currencies.
 
 ### Line, per shot or asset
 
@@ -208,9 +212,13 @@ A named pick of vendors per shot, to compare splits before awarding. From vfx_bi
 | name | the scenario's name | vfx_bidding_assist |
 | picks | per shot or asset, the bids picked | vfx_bidding_assist |
 | picks, shares | a percent per bid, 100 in all | sg-bids |
+| chosen | the one scenario production means to award, one per request at most | sg-bids |
+| costs left out | the bids whose non-shot costs the scenario does not count | sg-bids |
 
-The scenario's cost is the picked lines in the base currency, each times its share. Non-shot
-costs, discount and tax are left out. They stay in each bid's grand total.
+The scenario's cost is the picked lines in the base currency, each times its share, plus the
+non-shot costs of each vendor that has a row in it, unless the user leaves them out. By default
+they count: a vendor brought in brings its overhead and supervision. Discount and tax are left out.
+They stay in each bid's grand total. Omitted shots and assets are never picked.
 
 ## Change order
 
