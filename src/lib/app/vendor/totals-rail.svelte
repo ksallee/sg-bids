@@ -29,6 +29,8 @@
 		onsubmit,
 		onrevise,
 		onwithdraw,
+		ondiscard,
+		canDiscard = false,
 		onproblem,
 		class: className
 	}: {
@@ -44,6 +46,10 @@
 		onsubmit: () => void;
 		onrevise: () => void;
 		onwithdraw: () => void;
+		/** Discard the open draft: back to empty, or to the last submitted version. */
+		ondiscard?: () => void;
+		/** A draft is saved, so there is one to discard. */
+		canDiscard?: boolean;
 		/** Take the vendor to the control a problem names. */
 		onproblem: (problem: FormProblem) => void;
 		class?: string;
@@ -126,11 +132,14 @@
 		{#if stage === 'draft'}
 			<Button size="lg" class="w-full" disabled={busy} onclick={onsubmit}>Review and submit</Button>
 			<ProblemList problems={result.problems} onPick={onproblem} />
+			{#if canDiscard && ondiscard}
+				<Button variant="ghost" size="sm" class="text-muted-foreground hover:text-destructive w-full" disabled={busy} onclick={ondiscard} data-slot="discard-draft">Discard this draft</Button>
+			{/if}
 		{:else if stage === 'submitted'}
 			<p class="text-sm"><span class="font-medium">Submitted</span>{stamp ? ` ${stamp}` : ''}. Production can see it.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Revise</Button>
-			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw}>Withdraw</Button>
-			<p class="text-muted-foreground text-xs">Revise opens a copy to change. Production sees this one until you submit the next.</p>
+			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw} data-slot="withdraw">Withdraw the bid</Button>
+			<p class="text-muted-foreground text-xs">Revise opens a copy to change. Production sees this one until you submit the next. Withdraw if you no longer stand by it.</p>
 		{:else if stage === 'withdrawn'}
 			<p class="text-sm"><span class="font-medium">Withdrawn</span>{stamp ? ` ${stamp}` : ''}. Production sees it as withdrawn.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Start a new version</Button>

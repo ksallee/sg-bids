@@ -87,6 +87,7 @@ export class Builder {
 	onStored: ((id: string) => void) | null = null;
 
 	private timer: ReturnType<typeof setTimeout> | null = null;
+	private discarded = false;
 	private inFlight: Promise<void> | null = null;
 	private again = false;
 
@@ -124,7 +125,7 @@ export class Builder {
 
 	/** Keep the cushion now and store the draft once the changes settle. */
 	private save(): void {
-		if (this.readOnly) return;
+		if (this.readOnly || this.discarded) return;
 		void cushion.keep(buildRequest(this.state));
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = setTimeout(() => void this.flush(), SAVE_DELAY_MS);
@@ -134,6 +135,7 @@ export class Builder {
 	async flush(): Promise<void> {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = null;
+		if (this.discarded) return;
 		if (this.inFlight) {
 			this.again = true;
 			return this.inFlight;
@@ -440,8 +442,14 @@ export class Builder {
 		return tiersFor(field ? this.schemaOf(kind)[field] : undefined);
 	}
 
-	/** Leave this draft as stored and start another: the tab's cushion is cleared. */
+	/**
+	 * Leave this draft: the tab's cushion is cleared and nothing is saved from here on, so a change
+	 * waiting to save cannot bring a discarded or deleted draft back.
+	 */
 	async discard(): Promise<void> {
+		this.discarded = true;
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
 		await cushion.clear();
 	}
 }

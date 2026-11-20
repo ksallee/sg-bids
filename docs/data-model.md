@@ -211,6 +211,19 @@ Default rates are in `src/lib/pure/rebate-defaults.ts`: rate, base, who usually 
 the date checked. Stacked rates are kept as parts. Whether they stack on the same base was not
 checked. A user edits the rate per bid.
 
+## Deleting
+
+A request is deleted whole: its items, invitations, every bid and line, the rates and the
+scenarios. A draft goes after one confirm. An issued, undone or closed request asks for its code.
+While an award is in Flow PT the delete is refused: undo the award first, or its Bids and Groups
+would stay in Flow PT with nothing here to take them back. Deleting writes nothing to Flow PT. The
+hashes of the request's link tokens are kept alone, so a vendor who opens a dead link is told the
+production withdrew the request.
+
+A vendor discards its own open draft. A first draft goes and the form is empty again. A new
+version goes and the last submitted or withdrawn one is the latest again. A submitted bid is never
+deleted. The vendor withdraws it.
+
 ## Award
 
 One per shot or asset per vendor. A split shot has two.

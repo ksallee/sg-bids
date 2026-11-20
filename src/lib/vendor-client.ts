@@ -11,7 +11,10 @@ export class VendorError extends Error {
 	constructor(
 		readonly status: number,
 		message: string,
-		/** `session`: the browser now holds another vendor's link. `bid`: another tab moved the bid on. */
+		/**
+		 * `session`: the browser now holds another vendor's link. `bid`: another tab moved the bid on.
+		 * `withdrawn`: production deleted the request.
+		 */
 		readonly reason?: string
 	) {
 		super(message);
@@ -48,5 +51,6 @@ export const vendorApi = {
 	save: (loaded: Loaded, draft: BidDraft, keepalive = false) => call<VendorBidView>('PUT', '/v/api/bid', { ...loaded, draft }, keepalive),
 	submit: (loaded: Loaded) => call<VendorBidView>('POST', '/v/api/bid/submit', loaded),
 	withdraw: (loaded: Loaded) => call<VendorBidView>('POST', '/v/api/bid/withdraw', loaded),
-	revise: (loaded: Loaded) => call<VendorBidView>('POST', '/v/api/bid/revise', loaded)
+	revise: (loaded: Loaded) => call<VendorBidView>('POST', '/v/api/bid/revise', loaded),
+	discard: (loaded: Loaded) => call<VendorBidView>('POST', '/v/api/bid/discard', loaded)
 };
