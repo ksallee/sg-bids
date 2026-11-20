@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { add, convert, format, fromDecimal, minorDigits, money, rate, toDecimal } from './money';
+import { add, convert, format, fromDecimal, minorDigits, money, rate, subtract, sum, toDecimal } from './money';
 
 /** Intl puts a no-break or narrow no-break space between number and symbol in some locales. */
 const plain = (text: string): string => text.replace(/\s/g, ' ');
@@ -158,5 +158,28 @@ describe('format', () => {
 
 	it('keeps a large amount exact', () => {
 		expect(format(money(Number.MAX_SAFE_INTEGER, 'USD'), 'en-US')).toBe('$90,071,992,547,409.91');
+	});
+});
+
+describe('subtract', () => {
+	it('subtracts in one currency', () => {
+		expect(subtract(money(1000, 'USD'), money(250, 'USD'))).toEqual(money(750, 'USD'));
+		expect(subtract(money(5, 'JPY'), money(8, 'JPY'))).toEqual(money(-3, 'JPY'));
+	});
+
+	it('refuses two currencies', () => {
+		expect(() => subtract(money(1, 'USD'), money(1, 'EUR'))).toThrow();
+	});
+});
+
+describe('sum', () => {
+	it('adds a list in one currency, zero when empty', () => {
+		expect(sum([money(1, 'KWD'), money(2, 'KWD')], 'KWD')).toEqual(money(3, 'KWD'));
+		expect(sum([], 'JPY')).toEqual(money(0, 'JPY'));
+	});
+
+	it('refuses an amount in another currency than the one named', () => {
+		expect(() => sum([money(1, 'USD'), money(1, 'EUR')], 'USD')).toThrow();
+		expect(() => sum([money(1, 'EUR')], 'USD')).toThrow();
 	});
 });
