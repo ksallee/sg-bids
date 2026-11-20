@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { SHOT_1001, SHOT_1002, sequenceRow } from './fixtures/rows';
 import { shot } from './fixtures';
-import { EPISODE_FROM_SEQUENCE } from './field-map';
+import { normalizeFields } from 'sg-widgets-core';
+import { SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
+import { EPISODE_FROM_SEQUENCE, detectMapping } from './field-map';
 import { sequenceIndex } from './freeze';
-import { EMPTY_FILTER, addPicked, isFiltered, mergePicked, pickFilters, selectionRefs, type FilterContext } from './pick';
+import { EMPTY_FILTER, addPicked, filterContext, isFiltered, mergePicked, pickColumns, pickFilters, selectionRefs, sequenceOptions, typeOptions, type FilterContext } from './pick';
 
 const project = { type: 'Project', id: 85 };
 const sequences = sequenceIndex(
@@ -96,6 +98,30 @@ describe('pickFilters', () => {
 	});
 });
 
+describe('filterContext', () => {
+	const shotA = normalizeFields(SHOT_FIELDS_A);
+	const shotB = normalizeFields(SHOT_FIELDS_B);
+
+	it('reads the stock site: status, Sequence, the Episode through the Sequence, no type', () => {
+		const mapping = detectMapping('shot', shotA, { episodes: true, sequenceEpisodeField: 'episode' });
+		expect(filterContext('shot', 85, mapping, shotA, sequences)).toEqual(shotContext);
+	});
+
+	it('filters type only on a list field, and the Episode on the shot when it has one', () => {
+		const mapping = detectMapping('shot', shotB, { episodes: true, sequenceEpisodeField: 'episode' });
+		const context = filterContext('shot', 85, mapping, shotB, sequences);
+		expect(context.typeField).toBe('sg_shot_type');
+		expect(context.episodeField).toBe('sg_episode');
+		expect(filterContext('shot', 85, { ...mapping, type: 'sg_brief' }, shotB, sequences).typeField).toBeNull();
+	});
+
+	it('has no Sequence or Episode filter on assets', () => {
+		const context = filterContext('asset', 85, { sequence: 'sg_sequence', episode: EPISODE_FROM_SEQUENCE }, shotA, sequences);
+		expect(context.sequenceField).toBeNull();
+		expect(context.episodeField).toBeNull();
+	});
+});
+
 describe('isFiltered', () => {
 	it('says when anything narrows the list', () => {
 		expect(isFiltered(EMPTY_FILTER)).toBe(false);
@@ -128,6 +154,63 @@ describe('addPicked', () => {
 		const items = addPicked([kept], [SHOT_1001, SHOT_1002], freeze);
 		expect(items.map((i) => i.id)).toEqual(['shot-1001', 'shot-1002']);
 		expect(items[0].notes).toBe('mine');
+	});
+});
+
+describe('pickColumns', () => {
+	const shotA = normalizeFields(SHOT_FIELDS_A);
+	const shotB = normalizeFields(SHOT_FIELDS_B);
+
+	it('shows the thumbnail, code, sequence, status and the mapped fields the stock site has', () => {
+		const mapping = detectMapping('shot', shotA, { episodes: true, sequenceEpisodeField: 'episode' });
+		expect(pickColumns('shot', mapping, shotA).map((c) => c.path)).toEqual(['image', 'code', 'sg_sequence', 'sg_status_list', 'sg_cut_duration', 'description']);
+	});
+
+	it("adds the shot's own episode, type and difficulty when mapped", () => {
+		const mapping = detectMapping('shot', shotB, { episodes: true, sequenceEpisodeField: 'episode' });
+		expect(pickColumns('shot', mapping, shotB).map((c) => c.path)).toEqual([
+			'code',
+			'sg_sequence',
+			'sg_episode',
+			'sg_status_list',
+			'sg_shot_type',
+			'sg_complexity',
+			'sg_frame_count',
+			'sg_brief'
+		]);
+	});
+
+	it('never lets a cell be edited', () => {
+		expect(pickColumns('asset', { description: 'description' }, shotA).every((c) => c.editable === false)).toBe(true);
+	});
+
+	it('shows each field once when two slots name it', () => {
+		expect(pickColumns('asset', { description: 'code', type: 'code' }, shotA).map((c) => c.path)).toEqual(['image', 'code', 'sg_status_list']);
+	});
+});
+
+describe('sequenceOptions', () => {
+	it('lists the Sequences and the Episodes they link, by name', () => {
+		expect(sequenceOptions(sequences)).toEqual({
+			sequences: [
+				{ code: '31', label: 'sh010' },
+				{ code: '32', label: 'sh020' },
+				{ code: '33', label: 'sh030' },
+				{ code: '34', label: 'sh040' }
+			],
+			episodes: [
+				{ code: '4', label: 'ep104' },
+				{ code: '5', label: 'ep105' }
+			]
+		});
+	});
+});
+
+describe('typeOptions', () => {
+	it("offers a list field's values, nothing for a text field", () => {
+		expect(typeOptions(normalizeFields(SHOT_FIELDS_B).sg_shot_type).map((o) => o.code)).toEqual(['2D', '3D', 'FX']);
+		expect(typeOptions(normalizeFields(SHOT_FIELDS_A).description)).toEqual([]);
+		expect(typeOptions(undefined)).toEqual([]);
 	});
 });
 

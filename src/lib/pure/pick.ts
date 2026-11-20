@@ -8,8 +8,14 @@
  * list of that Episode's Sequences, so no dotted path ending on a link is needed.
  */
 
-import type { EntityRef, EntityRow, WireCondition, WireGroup } from 'sg-widgets-core';
-import { EPISODE_FROM_SEQUENCE } from './field-map';
+import type { ColumnSpec, EntityRef, EntityRow, FieldSchema, WireCondition, WireGroup } from 'sg-widgets-core';
+import { EPISODE_FROM_SEQUENCE, type ItemKind, type Mapping } from './field-map';
+
+/** One choice in a list filter. */
+export interface ListOption {
+	readonly code: string;
+	readonly label: string;
+}
 import type { SequenceIndex } from './freeze';
 
 export interface PickFilter {
@@ -35,6 +41,19 @@ export interface FilterContext {
 	/** A Shot field linking an Episode, or `EPISODE_FROM_SEQUENCE`. */
 	readonly episodeField: string | null;
 	readonly sequences: SequenceIndex;
+}
+
+/** The fields each filter reads for this kind, from the mapping and what the schema holds. */
+export function filterContext(kind: ItemKind, projectId: number, mapping: Mapping, schema: Record<string, FieldSchema>, sequences: SequenceIndex): FilterContext {
+	const has = (name: string | null | undefined): name is string => typeof name === 'string' && name in schema;
+	return {
+		projectId,
+		statusField: has('sg_status_list') ? 'sg_status_list' : null,
+		typeField: has(mapping.type) && schema[mapping.type].dataType === 'list' ? mapping.type : null,
+		sequenceField: kind === 'shot' && has(mapping.sequence) ? mapping.sequence : null,
+		episodeField: kind !== 'shot' ? null : mapping.episode === EPISODE_FROM_SEQUENCE ? EPISODE_FROM_SEQUENCE : has(mapping.episode) ? mapping.episode : null,
+		sequences
+	};
 }
 
 export type FilterResult = { readonly kind: 'filters'; readonly filters: WireGroup } | { readonly kind: 'none' };
@@ -109,6 +128,44 @@ export function mergePicked<T extends Picked>(
 export function addPicked<T extends Picked>(current: readonly T[], rows: readonly EntityRow[], freeze: (row: EntityRow) => T): T[] {
 	const have = new Set(current.map((item) => item.fpt?.id));
 	return [...current, ...rows.filter((row) => !have.has(row.id)).map(freeze)];
+}
+
+/**
+ * The table's columns: the thumbnail (081, free on the same read), the code, where it sits, the
+ * status, then the mapped fields, each only when the schema has it. Nothing is editable here.
+ */
+export function pickColumns(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>): ColumnSpec[] {
+	const wanted: ColumnSpec[] = [
+		{ path: 'image', width: 96, sortable: false },
+		{ path: 'code', width: 200 },
+		...(kind === 'shot' ? [{ path: mapping.sequence ?? '', width: 130 }] : []),
+		...(kind === 'shot' && mapping.episode !== EPISODE_FROM_SEQUENCE ? [{ path: mapping.episode ?? '', width: 120 }] : []),
+		{ path: 'sg_status_list', width: 150 },
+		{ path: mapping.type ?? '', width: 130 },
+		{ path: mapping.difficulty ?? '', width: 120 },
+		...(kind === 'shot' ? [{ path: mapping.frames ?? '', width: 100, align: 'right' as const }] : []),
+		{ path: mapping.description ?? '', width: 340 }
+	];
+	const seen = new Set<string>();
+	return wanted
+		.filter((spec) => spec.path in schema && !seen.has(spec.path) && seen.add(spec.path))
+		.map((spec) => ({ ...spec, editable: false }));
+}
+
+/** Filter options from the project's Sequences: each Sequence, and each Episode they link. */
+export function sequenceOptions(sequences: SequenceIndex): { sequences: ListOption[]; episodes: ListOption[] } {
+	const all = [...sequences.values()].sort((a, b) => a.code.localeCompare(b.code));
+	const episodes = new Map<number, string>();
+	for (const s of all) if (s.episode) episodes.set(s.episode.id, s.episode.name);
+	return {
+		sequences: all.map((s) => ({ code: String(s.id), label: s.code })),
+		episodes: [...episodes].map(([id, name]) => ({ code: String(id), label: name })).sort((a, b) => a.label.localeCompare(b.label))
+	};
+}
+
+/** The type filter's options: a list field's values. A text field gets none, so no filter. */
+export function typeOptions(field: FieldSchema | undefined): ListOption[] {
+	return field?.dataType === 'list' ? (field.validValues ?? []).map((value) => ({ code: value, label: value })) : [];
 }
 
 /** The picked items as the table's selection. */

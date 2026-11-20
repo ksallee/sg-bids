@@ -29,6 +29,11 @@ describe('slotOptions', () => {
 		expect(slotOptions('shot', 'assets', shotA, NO_EPISODE).map((o) => o.code)).toEqual(['assets']);
 	});
 
+	it('never offers a read only link, such as image_source_entity, which links every type', () => {
+		expect(slotOptions('shot', 'episode', shotA, EPISODES_ON_SEQUENCE).map((o) => o.code)).toEqual([EPISODE_FROM_SEQUENCE]);
+		expect(slotOptions('shot', 'sequence', shotA, NO_EPISODE).map((o) => o.code)).toEqual(['sg_sequence']);
+	});
+
 	it('never offers a status, a pivot column or a read only date', () => {
 		const all = slotsFor('shot').flatMap((s) => slotOptions('shot', s.slot, shotA, EPISODES_ON_SEQUENCE).map((o) => o.code));
 		expect(all).not.toContain('sg_status_list');
@@ -77,6 +82,16 @@ describe('detectMapping', () => {
 			assets: 'assets'
 		});
 		expect(detectMapping('asset', assetB, NO_EPISODE)).toEqual({ description: 'sg_brief', type: 'sg_asset_type', difficulty: 'sg_difficulty' });
+	});
+
+	it('takes a lone link to the type whatever its name, but not one that links several types', () => {
+		const withLink = (validTypes: string[]) => ({
+			...shotA,
+			sg_show_part: { ...shotA.sg_sequence, name: 'sg_show_part', displayName: 'Part', validTypes }
+		});
+		expect(detectMapping('shot', withLink(['Episode']), NO_EPISODE).episode).toBe('sg_show_part');
+		expect(detectMapping('shot', withLink(['Episode', 'Scene']), NO_EPISODE).episode).toBeNull();
+		expect(slotOptions('shot', 'episode', withLink(['Episode', 'Scene']), NO_EPISODE).map((o) => o.code)).toEqual(['sg_show_part']);
 	});
 
 	it('never maps the code as the description', () => {

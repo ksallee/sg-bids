@@ -114,7 +114,9 @@ function specOf(kind: ItemKind, slot: Slot): SlotSpec {
 
 function fits(spec: SlotSpec, field: FieldSchema): boolean {
 	if (!spec.dataTypes.includes(field.dataType)) return false;
-	if (spec.linksTo) return field.validTypes?.includes(spec.linksTo) ?? false;
+	// A read only link is no hierarchy: `image_source_entity` lists every type on the site and
+	// `created_by` is the author (entity_types/Shot). Only an editable link is offered.
+	if (spec.linksTo) return field.editable && (field.validTypes?.includes(spec.linksTo) ?? false);
 	return true;
 }
 
@@ -141,7 +143,7 @@ function guess(kind: ItemKind, spec: SlotSpec, schema: Record<string, FieldSchem
 	if (byName) return byName;
 	// A link field is the right kind by its target alone; a text field is not.
 	const direct = offered.filter((code) => code !== EPISODE_FROM_SEQUENCE);
-	if (spec.linksTo && direct.length === 1) return direct[0];
+	if (spec.linksTo && direct.length === 1 && schema[direct[0]]?.validTypes?.length === 1) return direct[0];
 	if (offered.includes(EPISODE_FROM_SEQUENCE)) return EPISODE_FROM_SEQUENCE;
 	return null;
 }
@@ -169,7 +171,7 @@ export function cleanMapping(kind: ItemKind, saved: Mapping, schema: Record<stri
 
 /** Sequence's field linking an Episode: `episode` when the site has it, else the one entity field to Episode, else none. */
 export function sequenceEpisodeField(sequenceSchema: Record<string, FieldSchema>): string | null {
-	const links = Object.values(sequenceSchema).filter((field) => field.dataType === 'entity' && field.validTypes?.includes('Episode'));
+	const links = Object.values(sequenceSchema).filter((field) => field.dataType === 'entity' && field.editable && field.validTypes?.includes('Episode'));
 	return links.find((field) => field.name === 'episode')?.name ?? (links.length === 1 ? links[0].name : null);
 }
 

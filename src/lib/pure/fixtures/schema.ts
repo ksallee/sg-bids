@@ -15,7 +15,7 @@ import type { RawFieldSchema, RawFieldsResponse } from 'sg-widgets-core';
 type Props = Record<string, unknown>;
 
 function field(entityType: string, name: string, displayName: string, dataType: string, props: Props = {}, editable = true): [string, RawFieldSchema] {
-	const wrap = (value: unknown) => ({ value, editable: false });
+	const wrap = <T>(value: T) => ({ value, editable: false });
 	return [
 		name,
 		{
@@ -57,6 +57,9 @@ export const SHOT_FIELDS_A = response([
 	shotA('sg_cut_duration', 'Cut Duration', 'number'),
 	shotA('step_0', 'ALL TASKS', 'pivot_column', {}, false),
 	shotA('project', 'Project', 'entity', { valid_types: ['Project'] }),
+	// Read only, and it lists every type on the site, Episode and Sequence among them (entity_types/Shot).
+	shotA('image_source_entity', 'Image Source Entity', 'entity', { valid_types: ['Asset', 'Episode', 'Sequence', 'Shot', 'Version'] }, false),
+	shotA('created_by', 'Created by', 'entity', { valid_types: ['HumanUser', 'ApiUser'] }, false),
 	shotA('created_at', 'Date Created', 'date_time', {}, false)
 ]);
 
