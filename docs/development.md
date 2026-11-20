@@ -86,8 +86,21 @@ Frozen in the database, by triggers: an issued request's items, code, round, cur
 (a change is a new round), and a submitted bid with its lines (a change is a new version; it may
 only be withdrawn). Writes that must land whole are SQL functions: `sg_save_request_items`,
 `sg_save_bid_draft`, `sg_save_scenario`, `sg_save_award_scenario`, `sg_set_bid_rate`,
-`sg_choose_scenario`. Production's rate per bid lives in `bid_rates`; a trigger refuses it on a
-draft or a base currency bid and locks it once the request has an award or is closed.
+`sg_choose_scenario`, `sg_record_award`, `sg_clear_award`. Production's rate per bid lives in
+`bid_rates`; a trigger refuses it on a draft or a base currency bid and locks it once the request
+has an award or is closed.
+
+The award (`20261122100000_award.sql`). The browser writes the chosen scenario to Flow PT from
+production's own session and reads it back (`src/lib/io/fpt-award.ts`). Then `sg_record_award`
+writes, in one transaction: the `awards` rows (built on the server from the stored chosen scenario,
+never from the body, with the Flow PT Bid and Bid Line ids), the `award_publications` row (what
+was written to Flow PT, merged over every run, enough to undo it, who published, and the choice to
+publish while the Vendor role could read Bid or Bid Line), and the request goes from issued to
+awarded. An award row locks the rates. A run that stopped part way is recorded as `partial` and
+changes no award row. Published again, the rows are replaced. `sg_clear_award` runs after the undo:
+nothing left in Flow PT, the rows go, the request is issued again and the rates unlock; something
+left, the record keeps it as `undo_partial`. A trigger allows awarded only with award rows, and
+issued again only without them. A vendor is told bidding is closed once the request is awarded.
 
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
@@ -102,7 +115,9 @@ through only the model's header and item fields. The comparison has its own: `co
 request, every submitted and withdrawn bid, the latest submitted version per vendor shown unless
 `bids` names others, the rates, the scenarios), `rate`, `scenarios`, `scenario-save`,
 `scenario-rename`, `scenario-delete`, `scenario-choose`, over `src/lib/server/comparison.ts` with
-bodies checked by `src/lib/pure/compare-wire.ts`. Long reads page past PostgREST's 1000 row cap.
+bodies checked by `src/lib/pure/compare-wire.ts`. The award has `award-record` and `award-undo`,
+over `src/lib/server/awards.ts`, bodies checked by `src/lib/pure/award-wire.ts`. The publish page
+is `/bids/[id]/publish`; what blocks it is `src/lib/pure/award-gate.ts`. Long reads page past PostgREST's 1000 row cap.
 The page is `/bids/[id]/compare`. The builder's drafts go through
 `src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
 `reissue`; the vendor pages live under `/v/`.
@@ -204,9 +219,27 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
   tenant reaches none of another's (`comparison.db.test.ts`);
 - a vendor link opened where another vendor's bid is open asks first, switches only on a
   same-origin post, and a tab left on the other bid writes nothing (`vendor-session.db.test.ts`);
+- the award records its rows from the stored chosen scenario, marks the request awarded and locks
+  the rates; published again it replaces the rows; a partial run changes no row; the undo clears
+  it or keeps what is left; a vendor is told bidding is closed (`award.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
+
+## The live drive
+
+    E2E_SANDBOX_PROJECT="<project name>" E2E_GROUP_A=<id> E2E_GROUP_B=<id> pnpm e2e:live
+
+`scripts/e2e-live.mjs` drives the whole product in headless Chromium against the real Flow PT site
+of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. It writes only to
+the one project named, by exact name: it builds a request from 12 of its Shots and 2 Assets (making
+`zzsgbids_*` fixtures when it has fewer), issues it, invites two vendors linked to the two Groups,
+bids as each in its own browser context (one in GBP), sets the rate, builds a scenario with one
+split row, publishes, reads Flow PT back, undoes from the request page, and reads Flow PT back
+again. Then it deletes the fixtures and the request's rows, also on a failure part way. It takes
+port 5182, or uses the app already there. Screenshots go to `shots/e2e-live/` (gitignored); it
+prints ids and counts, never a key or the site's address. The award migration must be in that
+database. `E2E_STOP_AFTER=build|invite|bids|scenario` stops early, then cleans up.
 
 ## Security headers
 
