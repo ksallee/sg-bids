@@ -71,13 +71,20 @@ function parseHeader(value: unknown): RequestHeader | null {
 const SHOT_TEXT = ['description', 'episode', 'sequence', 'scene', 'page', 'type', 'difficulty', 'directorNotes', 'notes'] as const;
 const ASSET_TEXT = ['description', 'type', 'difficulty', 'notes'] as const;
 
+/** Absent, or `breakdown`: a row with no Flow PT row until it is matched. Null for anything else. */
+function source(value: unknown): { source?: 'breakdown' } | null {
+	if (value === undefined) return {};
+	return value === 'breakdown' ? { source: 'breakdown' } : null;
+}
+
 function parseShot(value: unknown): RequestShot | null {
 	if (!isObject(value) || !isText(value.id) || value.id === '' || !isText(value.code)) return null;
 	const text = texts(value, SHOT_TEXT);
 	const fpt = ref(value.fpt, 'Shot');
-	if (!text || fpt === null || typeof value.omitted !== 'boolean') return null;
+	const from = source(value.source);
+	if (!text || fpt === null || from === null || typeof value.omitted !== 'boolean') return null;
 	if (!Array.isArray(value.assetIds) || !value.assetIds.every(isText)) return null;
-	const out: Json = { id: value.id, code: value.code, ...text, omitted: value.omitted, assetIds: [...value.assetIds] };
+	const out: Json = { id: value.id, code: value.code, ...from, ...text, omitted: value.omitted, assetIds: [...value.assetIds] };
 	if (fpt) out.fpt = fpt;
 	for (const name of ['frames', 'cutCount'] as const) {
 		if (value[name] === undefined) continue;
@@ -91,9 +98,10 @@ function parseAsset(value: unknown): RequestAsset | null {
 	if (!isObject(value) || !isText(value.id) || value.id === '' || !isText(value.name)) return null;
 	const text = texts(value, ASSET_TEXT);
 	const fpt = ref(value.fpt, 'Asset');
-	if (!text || fpt === null) return null;
+	const from = source(value.source);
+	if (!text || fpt === null || from === null) return null;
 	if (value.omitted !== undefined && typeof value.omitted !== 'boolean') return null;
-	const out: Json = { id: value.id, name: value.name, ...text };
+	const out: Json = { id: value.id, name: value.name, ...from, ...text };
 	if (fpt) out.fpt = fpt;
 	if (value.omitted !== undefined) out.omitted = value.omitted;
 	return out as unknown as RequestAsset;
@@ -120,6 +128,37 @@ export function parseSave(body: unknown): Parsed<SaveInput> {
 	const assets = items.assets.map(parseAsset);
 	if (shots.includes(null) || assets.includes(null)) return { ok: false, message: 'An item does not fit a request.' };
 	return { ok: true, value: { id, code: body.code.trim(), header, items: { shots: shots as RequestShot[], assets: assets as RequestAsset[] } } };
+}
+
+/** A breakdown row and the Flow PT row it gets. */
+export interface ItemLink {
+	readonly kind: 'shot' | 'asset';
+	readonly key: string;
+	readonly fpt: EntityRef;
+}
+
+/** Most rows one link call may carry. Far above a real request. */
+export const MAX_LINKS = 5000;
+
+export function parseLinks(body: unknown): Parsed<{ requestId: string; links: ItemLink[] }> {
+	if (!isObject(body)) return { ok: false, message: 'Name the request and the rows.' };
+	const requestId = parseId(body.requestId);
+	if (!requestId) return { ok: false, message: 'That is not a request id.' };
+	if (!Array.isArray(body.links) || body.links.length === 0 || body.links.length > MAX_LINKS) return { ok: false, message: 'Name the rows to link.' };
+	const seen = new Set<string>();
+	const links: ItemLink[] = [];
+	for (const value of body.links) {
+		if (!isObject(value) || (value.kind !== 'shot' && value.kind !== 'asset') || !isText(value.key) || value.key === '' || value.key.length > 200) {
+			return { ok: false, message: 'A row to link is not a shot or an asset of the request.' };
+		}
+		const fpt = ref(value.fpt, value.kind === 'shot' ? 'Shot' : 'Asset');
+		if (!fpt) return { ok: false, message: `${value.key} links only to a Flow PT ${value.kind === 'shot' ? 'Shot' : 'Asset'}.` };
+		const name = `${value.kind}:${value.key}`;
+		if (seen.has(name)) return { ok: false, message: `${value.key} is named twice.` };
+		seen.add(name);
+		links.push({ kind: value.kind, key: value.key, fpt });
+	}
+	return { ok: true, value: { requestId, links } };
 }
 
 export function parseVendor(body: unknown): Parsed<Omit<InvitedVendor, 'id'>> {

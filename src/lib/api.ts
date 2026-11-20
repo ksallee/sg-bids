@@ -79,5 +79,8 @@ export const api = {
 	newRound: (projectId: number, id: string) => call<{ request: BidRequest }>('new-round', projectId, { id }),
 	invite: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null }) => call<Invited>('invite', projectId, { requestId, vendor }),
 	revoke: (projectId: number, invitationId: string) => call<{ ok: true }>('revoke', projectId, { invitationId }),
-	reissue: (projectId: number, invitationId: string) => call<{ token: string; expiresAt: string }>('reissue', projectId, { invitationId })
+	reissue: (projectId: number, invitationId: string) => call<{ token: string; expiresAt: string }>('reissue', projectId, { invitationId }),
+	/** Breakdown rows matched to Flow PT. Only the Flow PT row changes; vendors see nothing new. */
+	linkItems: (projectId: number, requestId: string, links: { kind: 'shot' | 'asset'; key: string; fpt: { type: string; id: number } }[]) =>
+		call<{ request: BidRequest }>('link-items', projectId, { requestId, links })
 };

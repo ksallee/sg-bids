@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseId, parseSave, parseVendor } from './wire';
+import { parseId, parseLinks, parseSave, parseVendor } from './wire';
 
 const header = { code: 'DS_R1', title: 'Main', project: 'Demo', round: 1, baseCurrency: 'EUR', assumptions: ['A'], dueDate: '2026-12-01' };
 const shot = { id: 'shot-1', code: 'sh010', fpt: { type: 'Shot', id: 1 }, omitted: false, assetIds: ['asset-9'], frames: 96, description: 'd', notes: 'n' };
@@ -31,6 +31,16 @@ describe('parseSave', () => {
 		expect('group' in out.value.items.assets[0]).toBe(false);
 	});
 
+	it('takes a breakdown row, with no Flow PT row, and no other source', () => {
+		const row = { id: 'shot-bd-1', code: 'sh900', source: 'breakdown', omitted: false, assetIds: [], frames: 48 };
+		const one = { id: 'asset-bd-2', name: 'prop', source: 'breakdown' };
+		const out = parseSave({ code: 'X', header, items: { shots: [row], assets: [one] } });
+		expect(out.ok && out.value.items.shots).toEqual([row]);
+		expect(out.ok && out.value.items.assets).toEqual([one]);
+		expect(parseSave({ code: 'X', header, items: { shots: [{ ...row, source: 'fpt' }], assets: [] } }).ok).toBe(false);
+		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [{ ...one, source: 7 }] } }).ok).toBe(false);
+	});
+
 	it('refuses what is not a draft', () => {
 		expect(parseSave(null).ok).toBe(false);
 		expect(parseSave({ code: '', header, items: { shots: [], assets: [] } })).toEqual({ ok: false, message: 'Give the request a code.' });
@@ -50,6 +60,33 @@ describe('parseSave', () => {
 		// Blank is no link.
 		const blank = save('');
 		expect(blank.ok && 'materialLink' in blank.value.header).toBe(false);
+	});
+});
+
+describe('parseLinks', () => {
+	const id = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
+	it('takes a request id and each row with the Flow PT row of its kind', () => {
+		const out = parseLinks({ requestId: id, links: [{ kind: 'shot', key: 'shot-bd-1', fpt: { type: 'Shot', id: 5 } }, { kind: 'asset', key: 'asset-bd-2', fpt: { type: 'Asset', id: 6 } }] });
+		expect(out).toEqual({
+			ok: true,
+			value: {
+				requestId: id,
+				links: [
+					{ kind: 'shot', key: 'shot-bd-1', fpt: { type: 'Shot', id: 5 } },
+					{ kind: 'asset', key: 'asset-bd-2', fpt: { type: 'Asset', id: 6 } }
+				]
+			}
+		});
+	});
+
+	it('refuses a link to the wrong type, a bad id, none, or the same row twice', () => {
+		const one = { kind: 'shot', key: 'shot-bd-1', fpt: { type: 'Shot', id: 5 } };
+		expect(parseLinks({ requestId: 'x', links: [one] }).ok).toBe(false);
+		expect(parseLinks({ requestId: id, links: [] }).ok).toBe(false);
+		expect(parseLinks({ requestId: id, links: [{ ...one, fpt: { type: 'Asset', id: 5 } }] }).ok).toBe(false);
+		expect(parseLinks({ requestId: id, links: [{ ...one, fpt: { type: 'Shot', id: -1 } }] }).ok).toBe(false);
+		expect(parseLinks({ requestId: id, links: [{ ...one, key: '' }] }).ok).toBe(false);
+		expect(parseLinks({ requestId: id, links: [one, one] }).ok).toBe(false);
 	});
 });
 

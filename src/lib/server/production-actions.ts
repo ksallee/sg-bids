@@ -5,7 +5,7 @@
  */
 
 import { nextRound } from '$lib/pure/persist';
-import { parseId, parseSave, parseVendor } from '$lib/pure/wire';
+import { parseId, parseLinks, parseSave, parseVendor } from '$lib/pure/wire';
 import { loadPublication } from './award-actions';
 import { database, serverStore } from './env';
 import { StoreError } from './errors';
@@ -59,6 +59,13 @@ export async function saveRequest(production: VerifiedProduction, body: Body) {
 		requestId ? serverStore().updateDraftRequest(production, requestId, { code, header, items }) : serverStore().createDraftRequest(production, { code, header, items })
 	);
 	return { request };
+}
+
+/** Breakdown rows matched to Flow PT: on a draft, and on an issued request (the freeze allows it). */
+export async function linkItems(production: VerifiedProduction, body: Body) {
+	const parsed = parseLinks(body);
+	if (!parsed.ok) throw new StoreError(422, parsed.message);
+	return { request: await serverStore().linkItems(production, parsed.value.requestId, parsed.value.links) };
 }
 
 export async function issueRequest(production: VerifiedProduction, body: Body) {

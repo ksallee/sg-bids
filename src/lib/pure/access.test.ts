@@ -20,6 +20,8 @@ describe('production', () => {
 		expect(scope(production, 'bid_requests', 'insert').eq).toEqual(tenant);
 		expect(scope(production, 'bid_requests', 'update').eq).toEqual(tenant);
 		expect(scope(production, 'request_items', 'insert').eq).toEqual(tenant);
+		// A breakdown row gets its Flow PT row: the freeze in the database says when.
+		expect(scope(production, 'request_items', 'update').eq).toEqual(tenant);
 		expect(scope(production, 'invitations', 'insert').eq).toEqual(tenant);
 		expect(scope(production, 'invitations', 'update').eq).toEqual(tenant);
 		expect(scope(production, 'award_scenarios', 'update').eq).toEqual(tenant);

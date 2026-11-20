@@ -37,6 +37,7 @@ import {
 } from '$lib/pure/rows';
 import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/pure/token';
 import type { ItemKey } from '$lib/pure/vendor-keys';
+import type { ItemLink } from '$lib/pure/wire';
 import type { VendorBidRecord } from '$lib/pure/vendor-view';
 import { fromDatabase, StoreError } from './errors';
 
@@ -211,6 +212,23 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 			if (!row) throw new StoreError(404, 'No such draft request.');
 		}
 		if (input.items) await saveItems(principal, requestId, input.items);
+		return getRequest(principal, requestId);
+	}
+
+	/**
+	 * Give breakdown rows their Flow PT row, all or none: on a draft, and on an issued request, where
+	 * it is the one change the freeze allows (`sg_link_request_items`). Answers the request.
+	 */
+	async function linkItems(principal: ProductionPrincipal, requestId: string, links: readonly ItemLink[]): Promise<BidRequest> {
+		const tenant = scope(principal, 'request_items', 'update').eq;
+		await run(
+			db.rpc('sg_link_request_items', {
+				p_request_id: requestId,
+				p_site_host: tenant.site_host,
+				p_project_id: tenant.project_id,
+				p_links: links.map((l) => ({ kind: l.kind, key: l.key, fpt_type: l.fpt.type, fpt_id: l.fpt.id }))
+			})
+		);
 		return getRequest(principal, requestId);
 	}
 
@@ -463,6 +481,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	return {
 		createDraftRequest,
 		updateDraftRequest,
+		linkItems,
 		issueRequest,
 		getRequest,
 		listRequests,

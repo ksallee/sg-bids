@@ -98,6 +98,23 @@ describe('items', () => {
 	it('refuses two items with one key', () => {
 		expect(() => itemsToRows([shot('a'), shot('a')], [])).toThrow();
 	});
+
+	it('writes where a row came from as its own column, fpt by default, and reads it back', () => {
+		const rows = itemsToRows([shot('sh010', { fpt: { type: 'Shot', id: 1 } }), shot('bd-1', { source: 'breakdown', frames: 48 })], [asset('bd-2', { source: 'breakdown' })]);
+		expect(rows.map((r) => r.source)).toEqual(['fpt', 'breakdown', 'breakdown']);
+		for (const row of rows) expect(row.fields).not.toHaveProperty('source');
+		expect(rows[1]).toMatchObject({ fpt_type: null, fpt_id: null });
+		const back = itemsFromRows(rows);
+		expect(back.shots[0]).not.toHaveProperty('source');
+		expect(back.shots[1]).toEqual(shot('bd-1', { source: 'breakdown', frames: 48 }));
+		expect(back.assets[0]).toEqual(asset('bd-2', { source: 'breakdown' }));
+	});
+
+	it('reads a breakdown row linked later with its Flow PT row', () => {
+		const [row] = itemsToRows([shot('bd-1', { source: 'breakdown' })], []);
+		const back = itemsFromRows([{ ...row, fpt_type: 'Shot', fpt_id: 77 }]);
+		expect(back.shots[0]).toEqual(shot('bd-1', { source: 'breakdown', fpt: { type: 'Shot', id: 77 } }));
+	});
 });
 
 describe('request', () => {

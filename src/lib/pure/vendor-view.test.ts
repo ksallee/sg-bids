@@ -48,6 +48,27 @@ describe('vendorRequestView', () => {
 	});
 });
 
+describe('vendorRequestView of a breakdown row', () => {
+	it('shows it as any other row: no source, no Flow PT row', () => {
+		const req = request({
+			id: 'req-uuid',
+			header: { project: 'Show', round: 1, baseCurrency: 'USD', assumptions: [] },
+			shots: [shot('shot-bd-1', { code: 'SH900', source: 'breakdown', fpt: { type: 'Shot', id: 4242 }, frames: 48 })],
+			assets: [asset('asset-bd-2', { name: 'prop', source: 'breakdown' })],
+			vendors: []
+		});
+		const own = vendorKeys([
+			{ kind: 'shot', key: 'shot-bd-1', id: SHOT },
+			{ kind: 'asset', key: 'asset-bd-2', id: HERO }
+		]);
+		const view = vendorRequestView({ invitation: { id: 'inv-own', name: 'Own' }, request: req, code: 'BR-1', status: 'issued', issuedAt: null, expiresAt: '2027-01-19T10:00:00Z', keys: own });
+		expect(view.shots).toEqual([{ id: SHOT, code: 'SH900', omitted: false, assetIds: [], frames: 48 }]);
+		expect(view.assets).toEqual([{ id: HERO, name: 'prop' }]);
+		const text = JSON.stringify(view);
+		for (const secret of ['breakdown', 'source', '4242', 'shot-bd-1']) expect(text).not.toContain(secret);
+	});
+});
+
 describe('vendorBidView', () => {
 	const v1 = bid({ id: 'b1', vendorId: 'inv-a', requestId: 'req-uuid', currency: 'USD', status: 'submitted', lines: [line('l1', onShot('shot-918273645'), money(100, 'USD'))] });
 	const v2 = bid({ id: 'b2', vendorId: 'inv-a', requestId: 'req-uuid', currency: 'USD', status: 'draft' });

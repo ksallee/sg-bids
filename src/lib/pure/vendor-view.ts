@@ -24,8 +24,8 @@ export interface VendorRequestView {
 	/** When the link stops working. */
 	readonly expiresAt: string;
 	readonly header: Omit<RequestHeader, 'projectRef'>;
-	readonly shots: readonly Omit<RequestShot, 'fpt'>[];
-	readonly assets: readonly Omit<RequestAsset, 'fpt'>[];
+	readonly shots: readonly Omit<RequestShot, 'fpt' | 'source'>[];
+	readonly assets: readonly Omit<RequestAsset, 'fpt' | 'source'>[];
 }
 
 export interface VendorBidRecord {
@@ -75,12 +75,13 @@ export function vendorRequestView(input: {
 		issuedAt: input.issuedAt,
 		expiresAt: input.expiresAt,
 		header,
-		shots: input.request.shots.flatMap(({ fpt, ...rest }) => {
+		// Where a row came from is production's: a vendor sees no difference.
+		shots: input.request.shots.flatMap(({ fpt, source, ...rest }) => {
 			const own = id('shot', rest.id);
 			if (own === null) return [];
 			return [{ ...rest, id: own, assetIds: rest.assetIds.map((a) => id('asset', a)).filter((a): a is string => a !== null) }];
 		}),
-		assets: input.request.assets.flatMap(({ fpt, ...rest }) => {
+		assets: input.request.assets.flatMap(({ fpt, source, ...rest }) => {
 			const own = id('asset', rest.id);
 			return own === null ? [] : [{ ...rest, id: own }];
 		})
