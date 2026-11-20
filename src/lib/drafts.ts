@@ -1,38 +1,70 @@
 /**
  * THE STORAGE SEAM for bid request drafts.
  *
- * The request builder hands its draft to `saveDraft(request)` and reads it back with
- * `loadDraft()`. Nothing else in the app knows where a draft lives. Today the only implementation
- * keeps one draft in this tab's `sessionStorage`, so a reload does not lose work and closing the
- * tab does. When the backend lands, write a `DraftStore` that talks to it and assign it to
- * `drafts` below: the builder does not change.
+ * The builder hands its draft to `drafts.saveDraft(request)` and reads one back with
+ * `drafts.loadDraft(id, projectId)`. Both go to this app's server (`src/routes/api/production/`),
+ * which verifies the Flow PT session and writes through `src/lib/server/store.ts`.
+ *
+ * `cushion` keeps the last draft in this tab's sessionStorage too: a draft not yet stored (no code
+ * yet) or a save that failed (offline) survives a reload. The server's copy wins once there is one.
  */
 
+import { api, type LoadedRequest } from '$lib/api';
 import type { BidRequest } from '$lib/pure/model';
+import { isLocalId } from '$lib/pure/persist';
 
 export interface DraftStore {
-	saveDraft(request: BidRequest): Promise<void>;
-	/** The draft in progress, or null when there is none. */
-	loadDraft(): Promise<BidRequest | null>;
-	clearDraft(): Promise<void>;
+	/** Stores the draft: a new one when its id is local, else the stored one. Answers it as stored. */
+	saveDraft(request: BidRequest): Promise<BidRequest>;
+	loadDraft(id: string, projectId: number): Promise<LoadedRequest>;
 }
 
-/** The part of `Storage` a store uses. */
+/** What the server store calls. `$lib/api` in the app; a fake in the tests. */
+export type DraftApi = Pick<typeof api, 'save' | 'get'>;
+
+export function serverDraftStore(remote: DraftApi): DraftStore {
+	return {
+		async saveDraft(request) {
+			const projectId = request.header.projectRef?.id;
+			const code = request.header.code?.trim();
+			if (!projectId) throw new Error('Pick a project to save the draft.');
+			if (!code) throw new Error('Give the request a code to save it.');
+			const { request: stored } = await remote.save(projectId, {
+				id: isLocalId(request.id) ? null : request.id,
+				code,
+				header: request.header,
+				items: { shots: request.shots, assets: request.assets }
+			});
+			return stored;
+		},
+		loadDraft(id, projectId) {
+			return remote.get(projectId, id);
+		}
+	};
+}
+
+/** The part of `Storage` the cushion uses. */
 export type KeyValue = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+export interface Cushion {
+	keep(request: BidRequest): Promise<void>;
+	read(): Promise<BidRequest | null>;
+	clear(): Promise<void>;
+}
 
 const KEY = 'sg-bids:draft';
 
 /** One draft in a key-value store. Blocked or missing storage holds nothing and never throws. */
-export function keyValueDraftStore(storage: KeyValue | null): DraftStore {
+export function keyValueCushion(storage: KeyValue | null): Cushion {
 	return {
-		async saveDraft(request) {
+		async keep(request) {
 			try {
 				storage?.setItem(KEY, JSON.stringify(request));
 			} catch {
 				/* Full or blocked: the draft stays in the page. */
 			}
 		},
-		async loadDraft() {
+		async read() {
 			try {
 				const raw = storage?.getItem(KEY);
 				if (!raw) return null;
@@ -42,7 +74,7 @@ export function keyValueDraftStore(storage: KeyValue | null): DraftStore {
 				return null;
 			}
 		},
-		async clearDraft() {
+		async clear() {
 			try {
 				storage?.removeItem(KEY);
 			} catch {
@@ -61,8 +93,5 @@ function tabStorage(): KeyValue | null {
 }
 
 /** Storage plugs in here. */
-export const drafts: DraftStore = keyValueDraftStore(tabStorage());
-
-export function saveDraft(request: BidRequest): Promise<void> {
-	return drafts.saveDraft(request);
-}
+export const drafts: DraftStore = serverDraftStore(api);
+export const cushion: Cushion = keyValueCushion(tabStorage());

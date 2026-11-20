@@ -137,6 +137,7 @@ function devTokenAuth(first: DevToken): () => Promise<string> {
 let state: LiveState = { siteUrl: '', session: null, devToken: false, problem: null };
 let context: SgContext | null = null;
 let writer: RestClient | null = null;
+let devBearer: (() => Promise<string>) | null = null;
 let ready: Promise<LiveState> | null = null;
 
 async function resolve(): Promise<LiveState> {
@@ -150,6 +151,7 @@ async function resolve(): Promise<LiveState> {
 	let token: (() => Promise<string>) | null = null;
 	if (stored && stored.siteUrl === site) token = createSessionTokenAuth({ siteUrl: site, sessionToken: stored.token });
 	else if (devToken) token = devTokenAuth(devToken);
+	devBearer = stored && stored.siteUrl === site ? null : token;
 
 	// Never silently answer with nothing: with no site or no login every read fails,
 	// and the widgets show the error state they show for any refusal.
@@ -183,6 +185,27 @@ export function liveContext(): SgContext {
 export function liveWriter(): RestClient {
 	if (!writer) throw new Error('Not connected to Flow PT. Await prepareLive() first.');
 	return writer;
+}
+
+/** What this app's own server is shown to verify production (`src/lib/server/production.ts`). */
+export interface ProductionClaim {
+	siteUrl: string;
+	projectId: number;
+	sessionToken?: string;
+	bearer?: string;
+}
+
+/**
+ * The claim for a project: the person's approved session token, which the server turns into its
+ * own bearer, or in `vite dev` with nobody signed in, the dev key's bearer. The server checks
+ * either with the site before it reads or writes a row.
+ */
+export async function productionClaim(projectId: number): Promise<ProductionClaim> {
+	await prepareLive();
+	if (state.problem) throw new Error(state.problem);
+	if (state.session && state.session.siteUrl === state.siteUrl) return { siteUrl: state.siteUrl, projectId, sessionToken: state.session.token };
+	if (devBearer) return { siteUrl: state.siteUrl, projectId, bearer: await devBearer() };
+	throw new Error('Sign in to Flow PT.');
 }
 
 /** The person behind the session: their HumanUser row, by login, read once. */

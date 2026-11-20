@@ -1,12 +1,16 @@
 /**
  * The request builder's page state: the draft, the project's schema and Sequences, the mapping.
  * It holds no rule of its own: each change goes through a pure module, then the draft goes to the
- * storage seam (`$lib/drafts`). One instance per page load.
+ * storage seam (`$lib/drafts`), debounced, with the tab's cushion kept on every change. One
+ * instance per page load. An issued request opens read only.
  */
 
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
 import { liveContext, liveState, prepareLive } from '$lib/live';
-import { drafts, saveDraft } from '$lib/drafts';
+import { api, type RequestStatus } from '$lib/api';
+import { setCurrentProject, currentProject } from '$lib/current-project';
+import { cushion, drafts } from '$lib/drafts';
+import { isLocalId, localId, savable } from '$lib/pure/persist';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { loadSequences, loadShape, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import { cleanMapping, detectMapping, readFields, type ItemKind, type Mapping } from '$lib/pure/field-map';
@@ -29,8 +33,19 @@ function message(error: unknown): string {
 }
 
 function newId(): string {
-	return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `draft-${Date.now()}`;
+	return localId(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()));
 }
+
+/** Where the draft stands against storage, for the header line. */
+export type SaveState =
+	| { kind: 'idle' }
+	| { kind: 'waiting'; reason: string }
+	| { kind: 'saving' }
+	| { kind: 'saved'; at: Date }
+	| { kind: 'error'; message: string };
+
+/** How long the builder waits after the last change before it saves. */
+const SAVE_DELAY_MS = 800;
 
 export class Builder {
 	state = $state<BuilderState>({ id: newId(), project: null, form: emptyHeaderForm(), shots: [], assets: [] });
@@ -41,28 +56,109 @@ export class Builder {
 	restored = $state(false);
 	/** Picked items read with an older mapping than the one shown. */
 	stale = $state(false);
+	status = $state<RequestStatus>('draft');
+	saving = $state<SaveState>({ kind: 'idle' });
 
 	readonly ready: Promise<void>;
+	/** Called once a new draft has its stored id, so the page can put it in the URL. */
+	onStored: ((id: string) => void) | null = null;
 
-	constructor() {
-		this.ready = this.start();
+	private timer: ReturnType<typeof setTimeout> | null = null;
+	private inFlight: Promise<void> | null = null;
+	private again = false;
+
+	constructor(requestId: string | null) {
+		this.ready = this.start(requestId);
 	}
 
-	private async start(): Promise<void> {
+	get readOnly(): boolean {
+		return this.status !== 'draft';
+	}
+
+	private async start(requestId: string | null): Promise<void> {
 		const live = await prepareLive();
 		this.problem = live.problem;
-		const stored = await drafts.loadDraft();
-		if (stored) this.state = restoreState(stored);
+		if (live.problem) return;
+		if (requestId) {
+			const project = currentProject(live.siteUrl);
+			if (!project) throw new Error('Open the request from the requests list.');
+			const loaded = await drafts.loadDraft(requestId, project.id);
+			this.state = restoreState(loaded.request);
+			this.status = loaded.status;
+			if (this.state.project) this.state = { ...this.state, project: { ...this.state.project, name: this.state.project.name || project.name } };
+			this.saving = { kind: 'saved', at: new Date() };
+		} else {
+			const kept = await cushion.read();
+			if (kept && isLocalId(kept.id)) this.state = restoreState(kept);
+		}
 		this.restored = true;
-		if (!live.problem && this.state.project) await this.loadProject(this.state.project);
+		if (this.state.project) await this.loadProject(this.state.project);
 	}
 
 	request() {
 		return buildRequest(this.state);
 	}
 
+	/** Keep the cushion now and store the draft once the changes settle. */
 	private save(): void {
-		void saveDraft(buildRequest(this.state));
+		if (this.readOnly) return;
+		void cushion.keep(buildRequest(this.state));
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = setTimeout(() => void this.flush(), SAVE_DELAY_MS);
+	}
+
+	/** Store the draft now. One save at a time; a change during a save saves again after it. */
+	async flush(): Promise<void> {
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
+		if (this.inFlight) {
+			this.again = true;
+			return this.inFlight;
+		}
+		const ready = savable(this.state);
+		if (!ready.ok) {
+			this.saving = { kind: 'waiting', reason: ready.reason };
+			return;
+		}
+		this.saving = { kind: 'saving' };
+		const wasLocal = isLocalId(this.state.id);
+		this.inFlight = drafts
+			.saveDraft({ id: this.state.id, header: ready.header, shots: [...ready.items.shots], assets: [...ready.items.assets], vendors: [] })
+			.then((stored) => {
+				if (wasLocal) {
+					this.state = { ...this.state, id: stored.id };
+					void cushion.clear();
+					this.onStored?.(stored.id);
+				}
+				this.saving = { kind: 'saved', at: new Date() };
+			})
+			.catch((error) => {
+				this.saving = { kind: 'error', message: message(error) };
+			})
+			.finally(() => {
+				this.inFlight = null;
+				if (this.again) {
+					this.again = false;
+					void this.flush();
+				}
+			});
+		return this.inFlight;
+	}
+
+	/** Issue the stored draft: its items freeze, and the builder turns read only. */
+	async issue(): Promise<void> {
+		await this.flush();
+		if (this.inFlight) await this.inFlight;
+		if (isLocalId(this.state.id) || !this.state.project) throw new Error('The draft is not saved yet.');
+		await api.issue(this.state.project.id, this.state.id);
+		this.status = 'issued';
+	}
+
+	/** A new draft for the next round of this issued request. Answers its id. */
+	async newRound(): Promise<string> {
+		if (!this.state.project) throw new Error('No project.');
+		const { request } = await api.newRound(this.state.project.id, this.state.id);
+		return request.id;
 	}
 
 	private async loadProject(project: ProjectPick): Promise<void> {
@@ -84,7 +180,8 @@ export class Builder {
 
 	/** One project per request: a new one starts the picks over. */
 	async setProject(project: ProjectPick | null): Promise<void> {
-		if (project?.id === this.state.project?.id) return;
+		if (this.readOnly || project?.id === this.state.project?.id) return;
+		setCurrentProject(liveState().siteUrl, project);
 		this.state = { ...this.state, project, shots: [], assets: [] };
 		this.mapping = null;
 		this.stale = false;
@@ -94,6 +191,7 @@ export class Builder {
 	}
 
 	setForm(form: HeaderForm): void {
+		if (this.readOnly) return;
 		this.state = { ...this.state, form };
 		this.save();
 	}
@@ -145,6 +243,7 @@ export class Builder {
 	}
 
 	private setItems(kind: ItemKind, items: RequestShot[] | RequestAsset[]): void {
+		if (this.readOnly) return;
 		this.state = kind === 'shot' ? { ...this.state, shots: items as RequestShot[] } : { ...this.state, assets: items as RequestAsset[] };
 		this.save();
 	}
@@ -180,12 +279,8 @@ export class Builder {
 		return tiersFor(field ? this.schemaOf(kind)[field] : undefined);
 	}
 
-	/** Start a new request: the stored draft is cleared. */
+	/** Leave this draft as stored and start another: the tab's cushion is cleared. */
 	async discard(): Promise<void> {
-		await drafts.clearDraft();
-		this.state = { id: newId(), project: null, form: emptyHeaderForm(), shots: [], assets: [] };
-		this.mapping = null;
-		this.data = { state: 'idle' };
-		this.stale = false;
+		await cushion.clear();
 	}
 }
