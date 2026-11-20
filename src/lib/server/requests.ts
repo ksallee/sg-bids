@@ -9,6 +9,7 @@ import { scope, siteScope, type ProductionPrincipal, type SitePrincipal, type Ta
 import { invitationState, requestCounts, type BidFacts, type InvitationFacts, type InvitationState } from '$lib/pure/invitations';
 import type { InvitedVendor, RequestHeader } from '$lib/pure/model';
 import { vendorFromRow, type RequestRow, type VendorColumns } from '$lib/pure/rows';
+import type { AwardState, DeletionFacts } from '$lib/pure/request-delete';
 import { encodeToken, hashToken, TOKEN_BYTES } from '$lib/pure/token';
 import { fromDatabase, StoreError } from './errors';
 import { DEFAULT_INVITATION_DAYS } from './store';
@@ -156,7 +157,53 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 		return { status: row.status, issuedAt: row.issued_at };
 	}
 
-	return { listOverview, listAcross, listInvitations, reissueInvitation, requestMeta };
+	/** How many rows of `table` the request has, in the principal's tenant. */
+	async function count(principal: ProductionPrincipal, table: Table, requestId: string, extra: Record<string, string> = {}): Promise<number> {
+		const given = scope(principal, table, 'read');
+		let query: Query = db.from(table).select('id', { count: 'exact', head: true }).match(given.eq).match(extra).eq('request_id', requestId);
+		for (const [column, values] of Object.entries(given.in ?? {})) query = query.in(column, [...values]);
+		const { count: n, error } = await query;
+		if (error) throw fromDatabase(error);
+		return n ?? 0;
+	}
+
+	/**
+	 * What deleting the request would take with it, for the confirm (`$lib/pure/request-delete`):
+	 * its items, invitations, the submitted and withdrawn bids and their vendors, scenarios, rates,
+	 * and the award record while one is in Flow PT. A vendor's draft is not read: it is the vendor's.
+	 */
+	async function deletionFacts(principal: ProductionPrincipal, requestId: string): Promise<DeletionFacts> {
+		const row = await run<RequestRow | null>(read(principal, 'bid_requests', '*').eq('id', requestId).maybeSingle());
+		if (!row) throw new StoreError(404, 'No such request.');
+		const [shots, assets, scenarios, rates, invitations, bids, publication] = await Promise.all([
+			count(principal, 'request_items', requestId, { kind: 'shot' }),
+			count(principal, 'request_items', requestId, { kind: 'asset' }),
+			count(principal, 'award_scenarios', requestId),
+			count(principal, 'bid_rates', requestId),
+			run<{ id: string; vendor_name: string }[]>(read(principal, 'invitations', 'id, vendor_name').eq('request_id', requestId).order('created_at')),
+			run<{ invitation_id: string }[]>(read(principal, 'bids', 'invitation_id').eq('request_id', requestId)),
+			run<{ state: AwardState } | null>(read(principal, 'award_publications', 'state').eq('request_id', requestId).maybeSingle())
+		]);
+		const bidding = new Set(bids.map((b) => b.invitation_id));
+		const header = row.header as Partial<RequestHeader>;
+		return {
+			id: row.id,
+			code: row.code,
+			title: typeof header.title === 'string' ? header.title : null,
+			round: row.round,
+			status: row.status,
+			shots,
+			assets,
+			invitations: invitations.length,
+			bids: bids.length,
+			vendors: invitations.filter((i) => bidding.has(i.id)).map((i) => i.vendor_name),
+			scenarios,
+			rates,
+			award: publication?.state ?? null
+		};
+	}
+
+	return { listOverview, listAcross, listInvitations, reissueInvitation, requestMeta, deletionFacts };
 }
 
 export type Requests = ReturnType<typeof createRequests>;

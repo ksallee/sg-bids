@@ -2,7 +2,8 @@
 // link in the browser, or the same one, or one that no longer works, the link becomes the vendor
 // cookie and the page goes to `/v`: one click from the invitation to the bid. When the browser holds
 // another vendor's live link, the page asks first, naming both, and only a post from this site
-// switches (`$lib/server/vendor-http`).
+// switches (`$lib/server/vendor-http`). A link whose request production deleted lands on
+// `/v?link=withdrawn`, any other unknown link on `/v?link=invalid`.
 import { error, redirect, type Cookies, type RequestEvent } from '@sveltejs/kit';
 import { hashToken } from '$lib/pure/token';
 import { serverStore } from '$lib/server/env';
@@ -32,7 +33,7 @@ async function opening(event: Pick<RequestEvent, 'cookies' | 'getClientAddress'>
 		lookups.fail(who, hash, now);
 		clearOpeningCookie(event.cookies);
 		clearVendorCookie(event.cookies);
-		redirect(303, '/v?link=invalid');
+		redirect(303, (await serverStore().wasWithdrawn(token).catch(() => false)) ? '/v?link=withdrawn' : '/v?link=invalid');
 	}
 	lookups.pass(hash);
 	return { token, invitation };

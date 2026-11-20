@@ -95,3 +95,17 @@ export async function revoke(production: VerifiedProduction, body: Body) {
 export function reissue(production: VerifiedProduction, body: Body) {
 	return serverRequests().reissueInvitation(production, id(body.invitationId, 'invitation'));
 }
+
+/** What deleting the request would take with it, or why it is refused: for the confirm. */
+export async function deletionFacts(production: VerifiedProduction, body: Body) {
+	return { facts: await serverRequests().deletionFacts(production, id(body.id)) };
+}
+
+/**
+ * Deletes the request and everything under it: `{id, code}`, the code typed by the person. Refused
+ * while an award is in Flow PT. Answers what went. Writes nothing to Flow PT.
+ */
+export async function deleteRequest(production: VerifiedProduction, body: Body) {
+	if (typeof body.code !== 'string') throw new StoreError(422, "Type the request's code to delete it.");
+	return { deleted: await serverStore().deleteRequest(production, id(body.id), body.code) };
+}

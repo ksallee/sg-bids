@@ -38,8 +38,8 @@ describe('production', () => {
 		}
 	});
 
-	it('never deletes a request or an invitation', () => {
-		expect(allowed(production, 'bid_requests', 'delete')).toBe(false);
+	it('deletes a request only in its tenant, and never an invitation alone', () => {
+		expect(scope(production, 'bid_requests', 'delete').eq).toEqual(tenant);
 		expect(allowed(production, 'invitations', 'delete')).toBe(false);
 	});
 
@@ -71,7 +71,8 @@ describe('vendor', () => {
 				expect(scope(vendor, table, action).eq).toEqual({ invitation_id: 'inv-a' });
 			}
 		}
-		expect(allowed(vendor, 'bids', 'delete')).toBe(false);
+		// A discarded draft, under its own invitation. The database refuses a submitted bid.
+		expect(scope(vendor, 'bids', 'delete').eq).toEqual({ invitation_id: 'inv-a' });
 	});
 
 	it('never reaches scenarios, awards or rates', () => {

@@ -3,7 +3,7 @@
  * themselves without an error or a change.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { TABLES } from '$lib/pure/access';
+import { ALL_TABLES } from '$lib/pure/access';
 import { migrations, superuser } from './helpers';
 
 const sql = superuser();
@@ -26,6 +26,6 @@ describe('the migrations', () => {
 		const before = await tables();
 		for (const { sql: text } of migrations()) await sql.unsafe(text).simple();
 		expect(await tables()).toEqual(before);
-		expect(before).toEqual([...TABLES].sort());
+		expect(before).toEqual([...ALL_TABLES].sort());
 	});
 });

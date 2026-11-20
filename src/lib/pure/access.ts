@@ -52,6 +52,15 @@ export const TABLES = [
 ] as const;
 
 export type Table = (typeof TABLES)[number];
+
+/**
+ * Tables no principal reads: `withdrawn_links` holds the hashes of the link tokens of deleted
+ * requests, looked up by a token's own hash alone, so a dead link says the request was withdrawn.
+ */
+export const LINK_TABLES = ['withdrawn_links'] as const;
+
+/** Every table in `public`. */
+export const ALL_TABLES = [...TABLES, ...LINK_TABLES] as const;
 export type Action = 'read' | 'insert' | 'update' | 'delete';
 
 export interface Scope {
@@ -64,7 +73,8 @@ export interface Scope {
 type Grants = Readonly<Partial<Record<Table, readonly Action[]>>>;
 
 const PRODUCTION: Grants = {
-	bid_requests: ['read', 'insert', 'update'],
+	// Delete is whole, through `sg_delete_request`: the request and everything under it.
+	bid_requests: ['read', 'insert', 'update', 'delete'],
 	request_items: ['read', 'insert', 'update', 'delete'],
 	invitations: ['read', 'insert', 'update'],
 	bids: ['read'],
@@ -83,7 +93,8 @@ const VENDOR: Grants = {
 	request_items: ['read'],
 	// Update is the opened stamp only; the store writes no other column.
 	invitations: ['read', 'update'],
-	bids: ['read', 'insert', 'update'],
+	// Delete is the vendor's own draft, discarded. The database refuses a submitted bid.
+	bids: ['read', 'insert', 'update', 'delete'],
 	bid_lines: ['read', 'insert', 'update', 'delete']
 };
 

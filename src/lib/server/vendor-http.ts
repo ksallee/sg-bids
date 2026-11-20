@@ -12,7 +12,9 @@
  *
  * The cookie holds `<invitation id>.<token>`. When production gives the vendor a new link, the
  * old token stops working and its hash joins the invitation's former tokens, so that cookie is
- * told the link was replaced (410). Any other token that fails is 401, whatever id the cookie
+ * told the link was replaced (410). When production deleted the request, the hashes of its links
+ * are kept alone (`withdrawn_links`), so that cookie is told the request was withdrawn (410,
+ * `reason` `withdrawn`), with nothing of the request. Any other token that fails is 401, whatever id the cookie
  * names: the answer never tells whether an invitation exists.
  *
  * Only lookups that fail count, per client address and per token, in this instance only
@@ -85,6 +87,9 @@ export function readVendorCookie(value: string | undefined): { invitationId: str
 
 export const REPLACED = 'This link was replaced. Open the newest link production sent you. Your bid is kept.';
 
+/** A link whose request production deleted. Nothing of the request is left to say. */
+export const WITHDRAWN = 'This request was withdrawn by the production.';
+
 export function address(event: Pick<RequestEvent, 'getClientAddress'>): string {
 	try {
 		return event.getClientAddress();
@@ -121,6 +126,9 @@ export function vendorEndpoint(action: Action): RequestHandler {
 					lookups.fail(who, hash, now);
 					if (cookie.invitationId && (await serverStore().wasReplaced(cookie.invitationId, cookie.token).catch(() => false))) {
 						return json({ error: REPLACED }, { status: 410, headers: VENDOR_HEADERS });
+					}
+					if (await serverStore().wasWithdrawn(cookie.token).catch(() => false)) {
+						return json({ error: WITHDRAWN, reason: 'withdrawn' }, { status: 410, headers: VENDOR_HEADERS });
 					}
 				} else lookups.pass(hash);
 				return json(error.reason ? { error: error.message, reason: error.reason } : { error: error.message }, { status: error.status, headers: VENDOR_HEADERS });

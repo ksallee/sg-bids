@@ -39,6 +39,7 @@ import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/
 import type { ItemKey } from '$lib/pure/vendor-keys';
 import type { ItemLink } from '$lib/pure/wire';
 import type { VendorBidRecord } from '$lib/pure/vendor-view';
+import { codeMatches, type Deleted } from '$lib/pure/request-delete';
 import { fromDatabase, StoreError } from './errors';
 
 /** An invitation lives this long unless production says otherwise. */
@@ -241,6 +242,19 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return getRequest(principal, requestId);
 	}
 
+	/**
+	 * Deletes the request and everything under it, in one transaction (`sg_delete_request`): the one
+	 * way past the freezes. `typedCode` must be the request's code. Refused while an award is in Flow
+	 * PT. Another tenant's request and a missing one answer the same 404. Writes nothing to Flow PT.
+	 */
+	async function deleteRequest(principal: ProductionPrincipal, requestId: string, typedCode: string): Promise<Deleted> {
+		const row = await requestRow(principal, requestId);
+		if (!codeMatches(typedCode, row.code)) throw new StoreError(422, `Type ${row.code} to delete the request.`);
+		const tenant = scope(principal, 'bid_requests', 'delete').eq;
+		const gone = await run<Deleted>(db.rpc('sg_delete_request', { p_request_id: requestId, p_site_host: tenant.site_host, p_project_id: tenant.project_id }));
+		return { ...gone, round: Number(gone.round) };
+	}
+
 	async function listRequests(principal: ProductionPrincipal): Promise<RequestSummary[]> {
 		const rows = await run<RequestRow[]>(from(principal, 'bid_requests', 'read').order('created_at', { ascending: false }));
 		return rows.map((row) => ({ id: row.id, code: row.code, status: row.status, issuedAt: row.issued_at, header: requestFromRows(row, [], []).header }));
@@ -368,6 +382,17 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return row !== null;
 	}
 
+	/**
+	 * Whether this token belonged to an invitation of a request production deleted. Only the token
+	 * itself finds it, by its hash: a guess learns nothing.
+	 */
+	async function wasWithdrawn(token: unknown): Promise<boolean> {
+		const parsed = parseToken(token);
+		if (!parsed) return false;
+		const row = await run<{ token_hash: string } | null>(db.from('withdrawn_links').select('token_hash').eq('token_hash', hashToken(parsed)).maybeSingle());
+		return row !== null;
+	}
+
 	async function vendorRequest(principal: VendorPrincipal): Promise<RequestRow> {
 		const row = await run<RequestRow | null>(from(principal, 'bid_requests', 'read').maybeSingle());
 		if (!row) throw new StoreError(403, 'The request is not open yet.');
@@ -478,8 +503,24 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return vendorBid(principal, request, bidId);
 	}
 
+	/**
+	 * Discards the vendor's draft: a first draft goes, and the vendor starts from empty; a revision
+	 * goes, and the last submitted or withdrawn version is the latest again. A submitted bid is never
+	 * deleted: the database refuses it, and this deletes drafts only.
+	 */
+	async function discardDraftBid(token: unknown, bidId: string): Promise<void> {
+		const { principal } = await resolveToken(token);
+		const request = await vendorRequest(principal);
+		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
+		const row = await run<{ id: string } | null>(
+			filtered(db.from('bids').delete(), scope(principal, 'bids', 'delete')).eq('id', bidId).eq('status', 'draft').select('id').maybeSingle()
+		);
+		if (!row) throw new StoreError(404, 'No such draft bid.');
+	}
+
 	return {
 		createDraftRequest,
+		deleteRequest,
 		updateDraftRequest,
 		linkItems,
 		issueRequest,
@@ -492,11 +533,13 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		openInvitation,
 		linkInvitation,
 		wasReplaced,
+		wasWithdrawn,
 		vendorBidRecords,
 		vendorState,
 		saveDraftBid,
 		submitBid,
-		withdrawBid
+		withdrawBid,
+		discardDraftBid
 	};
 }
 
