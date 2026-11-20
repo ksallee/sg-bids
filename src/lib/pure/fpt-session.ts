@@ -11,6 +11,12 @@
  * - A bearer the site refuses is 401 code 102 (133).
  * - `GET /entity/projects/<id>` answers the row to a person who may see the project, and 404 to one
  *   who may not (159).
+ * - A person's permission group: `GET /schema/permission_groups?permission_rule_set_entity_type=HumanUser`
+ *   lists each group's `code`. A person without `set_permissions` sees only their own group (an
+ *   Artist and a Vendor, 132 and 162); an Admin sees every group. `GET /entity/human_users/<id>`
+ *   read with the person's own bearer answers `permission_rule_set` as `{id, name, type}`, no code
+ *   (052, the HumanUser card). The link's `name` is the group's `display_name` (027: `API Admin`
+ *   both ways). Whether the group's `id` is the rule set's id is not measured, so either matches.
  */
 
 export interface FptUser {
@@ -93,4 +99,59 @@ export function projectAnswer(status: number, body: unknown, projectId: number):
 	if (status === 404) return 'hidden';
 	if (status === 401 && errorCode(body) === 102) return 'bearer';
 	return 'site';
+}
+
+/** The permission group codes that may run bids as production, when the env names none. */
+export const DEFAULT_PRODUCTION_ROLES: readonly string[] = ['admin', 'manager'];
+
+/** The group codes allowed as production: a comma list, else admin and manager. */
+export function productionRoles(list: string | undefined): string[] {
+	const named = (list ?? '')
+		.split(',')
+		.map((code) => code.trim().toLowerCase())
+		.filter(Boolean);
+	return named.length > 0 ? named : [...DEFAULT_PRODUCTION_ROLES];
+}
+
+export interface RuleSetLink {
+	readonly id: number;
+	readonly name: string;
+}
+
+/** The `permission_rule_set` link off the person's own HumanUser row, or null. */
+export function ruleSetAnswer(status: number, body: unknown, userId: number): RuleSetLink | null {
+	if (status !== 200) return null;
+	const data = (body as { data?: { type?: unknown; id?: unknown; relationships?: Record<string, unknown> } } | null)?.data;
+	if (data?.type !== 'HumanUser' || data.id !== userId) return null;
+	const raw = data.relationships?.permission_rule_set as { data?: unknown } | null | undefined;
+	const link = (raw && typeof raw === 'object' && 'data' in raw ? raw.data : raw) as { type?: unknown; id?: unknown; name?: unknown } | null | undefined;
+	if (link?.type !== 'PermissionRuleSet' || !Number.isSafeInteger(link.id) || typeof link.name !== 'string') return null;
+	return { id: link.id as number, name: link.name };
+}
+
+export interface PermissionGroup {
+	readonly id: string;
+	readonly code: string;
+	readonly displayName: string;
+}
+
+/** The groups `GET /schema/permission_groups` listed, or null when it did not answer a list. */
+export function groupsAnswer(status: number, body: unknown): PermissionGroup[] | null {
+	const data = (body as { data?: unknown } | null)?.data;
+	if (status !== 200 || !Array.isArray(data)) return null;
+	return data.flatMap((entry: { id?: unknown; code?: unknown; display_name?: unknown } | null) =>
+		typeof entry?.code === 'string' && entry.code !== ''
+			? [{ id: String(entry.id ?? ''), code: entry.code, displayName: typeof entry.display_name === 'string' ? entry.display_name : '' }]
+			: []
+	);
+}
+
+/**
+ * The person's own group code, or null when the answers do not settle it. With their row read, the
+ * group must match it by id or by name, once. Without it, only a list of one group settles it.
+ */
+export function ownGroupCode(groups: readonly PermissionGroup[], ruleSet: RuleSetLink | null): string | null {
+	if (ruleSet === null) return groups.length === 1 ? groups[0].code : null;
+	const matches = groups.filter((group) => group.id === String(ruleSet.id) || group.displayName === ruleSet.name);
+	return matches.length === 1 ? matches[0].code : null;
 }

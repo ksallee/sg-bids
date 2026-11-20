@@ -14,7 +14,8 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"test": "vitest --run",
-		"test:db": "node scripts/test-db.mjs"
+		"test:db": "node scripts/test-db.mjs",
+		"seed:dev": "node scripts/seed-dev.mjs"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.4",

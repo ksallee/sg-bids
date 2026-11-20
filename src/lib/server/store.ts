@@ -35,6 +35,7 @@ import {
 	type ScenarioRow
 } from '$lib/pure/rows';
 import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/pure/token';
+import type { VendorBidRecord } from '$lib/pure/vendor-view';
 import { bidTotals } from '$lib/pure/totals';
 import { fromDatabase, StoreError } from './errors';
 
@@ -63,6 +64,11 @@ export interface Invited {
 
 export interface VendorView {
 	readonly invitation: InvitedVendor;
+	readonly code: string;
+	readonly status: 'issued' | 'closed';
+	readonly issuedAt: string | null;
+	/** When the link stops working. */
+	readonly expiresAt: string;
 	/** The frozen request. Its vendors list holds this vendor alone. */
 	readonly request: BidRequest;
 	/** This vendor's bids, oldest version first. */
@@ -306,6 +312,24 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return { principal: { kind: 'vendor', invitationId: row.id, requestId: row.request_id }, row };
 	}
 
+	/**
+	 * The invitation a link token names, whatever its state, or null for a token no invitation
+	 * holds. The link route keeps the id beside the token, to tell a replaced link apart later.
+	 */
+	async function peekInvitation(token: unknown): Promise<string | null> {
+		const parsed = parseToken(token);
+		if (!parsed) return null;
+		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('token_hash', hashToken(parsed)).maybeSingle());
+		return row?.id ?? null;
+	}
+
+	/** Whether an invitation still exists, by id: its link was replaced when its token no longer opens it. */
+	async function invitationExists(invitationId: string): Promise<boolean> {
+		if (!/^[0-9a-f-]{36}$/i.test(invitationId)) return false;
+		const row = await run<{ id: string } | null>(db.from('invitations').select('id').eq('id', invitationId).maybeSingle());
+		return row !== null;
+	}
+
 	async function vendorRequest(principal: VendorPrincipal): Promise<RequestRow> {
 		const row = await run<RequestRow | null>(from(principal, 'bid_requests', 'read').maybeSingle());
 		if (!row) throw new StoreError(403, 'The request is not open yet.');
@@ -313,8 +337,13 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	}
 
 	async function vendorBids(principal: VendorPrincipal, request: RequestRow): Promise<VendorBid[]> {
+		return (await vendorRecords(principal, request)).map((record) => record.bid);
+	}
+
+	async function vendorRecords(principal: VendorPrincipal, request: RequestRow): Promise<VendorBidRecord[]> {
 		const rows = await run<BidRow[]>(from(principal, 'bids', 'read').order('version'));
-		return bidsWithLines(principal, rows, request);
+		const bids = await bidsWithLines(principal, rows, request);
+		return rows.map((row, index) => ({ bid: bids[index], version: row.version, submittedAt: row.submitted_at, withdrawnAt: row.withdrawn_at }));
 	}
 
 	async function openInvitation(token: unknown): Promise<VendorView> {
@@ -323,7 +352,22 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		await run(update(principal, 'invitations', { last_opened_at: now().toISOString() }));
 		const vendor = vendorFromRow(row);
 		const items = await itemRows(principal, request.id);
-		return { invitation: vendor, request: requestFromRows(request, items, [vendor]), bids: await vendorBids(principal, request) };
+		return {
+			invitation: vendor,
+			code: request.code,
+			status: request.status === 'closed' ? 'closed' : 'issued',
+			issuedAt: request.issued_at,
+			expiresAt: row.expires_at,
+			request: requestFromRows(request, items, [vendor]),
+			bids: await vendorBids(principal, request)
+		};
+	}
+
+	/** The vendor's own bids, oldest version first, with their version and stamps. */
+	async function vendorBidRecords(token: unknown): Promise<VendorBidRecord[]> {
+		const { principal } = await resolveToken(token);
+		const request = await vendorRequest(principal);
+		return vendorRecords(principal, request);
 	}
 
 	async function vendorBid(principal: VendorPrincipal, request: RequestRow, bidId: string): Promise<VendorBid> {
@@ -333,14 +377,17 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return bid;
 	}
 
-	/** Writes the vendor's draft: the open one, or the next version after a submitted one. */
+	/**
+	 * Writes the vendor's draft: the open one, or the next version after a submitted one. The vendor
+	 * gives no exchange rate: one sent is dropped, and the amounts are checked in the bid's currency.
+	 */
 	async function saveDraftBid(token: unknown, draft: BidDraft): Promise<VendorBid> {
 		const { principal } = await resolveToken(token);
 		const request = await vendorRequest(principal);
 		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
 		let rows: ReturnType<typeof bidToRows>;
 		try {
-			rows = bidToRows(draft, request.base_currency);
+			rows = bidToRows({ ...draft, rate: null }, draft.currency);
 		} catch (error) {
 			throw new StoreError(422, error instanceof Error ? error.message : String(error));
 		}
@@ -356,7 +403,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		const bid = await vendorBid(principal, request, bidId);
 		if (bid.status !== 'draft') throw new StoreError(409, 'That bid is already submitted. A change is a new version.');
 		try {
-			bidTotals(bid, request.base_currency);
+			bidTotals(bid, bid.currency);
 		} catch (error) {
 			throw new StoreError(422, error instanceof Error ? error.message : String(error));
 		}
@@ -364,6 +411,18 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		if (splits.length > 0) throw new StoreError(422, splits.join(' '));
 		const row = await run<BidRow | null>(update(principal, 'bids', { status: 'submitted' }).eq('id', bidId).eq('status', 'draft').select().maybeSingle());
 		if (!row) throw new StoreError(404, 'No such draft bid.');
+		return vendorBid(principal, request, bidId);
+	}
+
+	/** Withdraws the vendor's submitted bid. Production then sees it as withdrawn. */
+	async function withdrawBid(token: unknown, bidId: string): Promise<VendorBid> {
+		const { principal } = await resolveToken(token);
+		const request = await vendorRequest(principal);
+		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
+		const bid = await vendorBid(principal, request, bidId);
+		if (bid.status !== 'submitted') throw new StoreError(409, 'Only a submitted bid can be withdrawn.');
+		const row = await run<BidRow | null>(update(principal, 'bids', { status: 'withdrawn' }).eq('id', bidId).eq('status', 'submitted').select().maybeSingle());
+		if (!row) throw new StoreError(409, 'Only a submitted bid can be withdrawn.');
 		return vendorBid(principal, request, bidId);
 	}
 
@@ -378,8 +437,12 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		listBids,
 		saveScenario,
 		openInvitation,
+		peekInvitation,
+		invitationExists,
+		vendorBidRecords,
 		saveDraftBid,
-		submitBid
+		submitBid,
+		withdrawBid
 	};
 }
 

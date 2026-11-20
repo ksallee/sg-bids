@@ -1,7 +1,8 @@
 <!--
 	The frame of every screen: a h-12 header as sg-task-templates' (wordmark, the site and who reads
 	it, the scheme switch), the demo banner, then the page. The header holds who and where; the page
-	holds what this screen is about.
+	holds what this screen is about. On the vendor's side (`vendor`) there is no site and no person:
+	the vendor has no Flow PT sign-in, so the header holds the wordmark and the scheme switch only.
 -->
 <script lang="ts">
 	import type { Snippet } from 'svelte';
@@ -14,10 +15,11 @@
 	import DemoBanner from './demo-banner.svelte';
 	import Wordmark from './wordmark.svelte';
 
-	let { children }: { children: Snippet } = $props();
+	let { children, vendor = false }: { children: Snippet; vendor?: boolean } = $props();
 
 	let live = $state<LiveState | null>(null);
-	void prepareLive().then((value) => (live = value));
+	// svelte-ignore state_referenced_locally
+	if (!vendor) void prepareLive().then((value) => (live = value));
 
 	let dark = $state(isDark());
 
@@ -40,9 +42,13 @@
 
 <div class="bg-background text-foreground flex h-dvh flex-col">
 	<header class="border-border bg-background flex h-12 shrink-0 items-center gap-3 border-b px-3 sm:gap-5 sm:px-4" data-slot="app-header">
-		<a href="/" class="focus-visible:ring-ring shrink-0 rounded-md text-sm outline-none focus-visible:ring-2" aria-label="SG Bids, home">
-			<Wordmark />
-		</a>
+		{#if vendor}
+			<span class="shrink-0 text-sm"><Wordmark /></span>
+		{:else}
+			<a href="/" class="focus-visible:ring-ring shrink-0 rounded-md text-sm outline-none focus-visible:ring-2" aria-label="SG Bids, home">
+				<Wordmark />
+			</a>
+		{/if}
 
 		<div class="flex-1"></div>
 

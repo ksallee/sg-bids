@@ -36,6 +36,7 @@ Copy `.env.example` to `.env.local` (gitignored). Every line is optional.
 | `SUPABASE_URL` | the Supabase project, server only |
 | `SUPABASE_SECRET_KEY` | its secret (service role) key, server only |
 | `FPT_SITE_HOSTS` | the Flow PT hosts the server may call, comma separated. Unset: the host of `PUBLIC_FPT_SITE_URL` |
+| `FPT_PRODUCTION_ROLES` | the permission group codes that may act as production, comma separated. Unset: `admin,manager` |
 
 With the three `FPT_API_*` lines set, `POST /live/dev-token` mints a 600 s bearer from the script
 key under `vite dev` only, and the page reads without a sign-in. Signing in through the launcher
@@ -64,13 +65,19 @@ Who may touch what:
 - **Production** sends its Flow PT session (the session token, or a bearer minted from it), the
   site and the project. `src/lib/server/production.ts` calls only a host in `FPT_SITE_HOSTS`,
   mints a bearer, checks it is a person's, and reads the Project row with it: a 404 is a refusal.
+  Seeing the project is not enough, since a Vendor person sees a project they are assigned to. The
+  person's permission group code must be in `FPT_PRODUCTION_ROLES`. It is read with their own
+  bearer: `GET /schema/permission_groups` lists only their own group unless they are an Admin,
+  and their HumanUser row names their group, which picks it out of an Admin's list. When the two
+  answers do not settle the group, the person is refused. The dev key skips this check.
   The tenant is that site host plus that project id. Every row carries it, and every query
   filters on it (`src/lib/pure/access.ts`). A child row's tenant is held to its parent's by a
   composite foreign key.
 - **A vendor** has a link token: 32 random bytes, base64url, shown once. Only its SHA-256 hash is
   stored, on the invitation, with an expiry and a revoked stamp. The token reaches its own
   invitation, the request once issued, and its own bids. A vendor's draft stays private until it
-  submits.
+  submits. The vendor gives no exchange rate: the store drops one and checks the amounts in the
+  bid's own currency. Production locks a rate.
 
 Frozen in the database, by triggers: an issued request's items, code, round, currency and header
 (a change is a new round), and a submitted bid with its lines (a change is a new version; it may
@@ -90,6 +97,52 @@ through only the model's header and item fields. The builder's drafts go through
 `src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
 `reissue`; the vendor pages live under `/v/`.
 
+## The vendor link
+
+A vendor opens `/v/<token>`, the link `vendorLink` writes. That route finds the token's
+invitation and puts `<invitation id>.<token>` in a cookie, `sg_bids_vendor`: HttpOnly, Secure
+(SvelteKit drops Secure on http://localhost only), SameSite=Lax, path `/v`. Then it redirects to
+`/v`, so the token does not stay in the address bar, the history or a referrer. A link no
+invitation holds clears the cookie and lands on `/v?link=invalid`.
+
+When production gives a vendor a new link, the old token stops working and the vendor keeps its
+bids. A vendor still holding the old cookie gets 410 and a page saying the link was replaced; the
+new link opens its draft or submitted bid as it was.
+
+The page at `/v` calls these, each authorised by the cookie alone (`src/lib/server/vendor-api.ts`):
+
+| call | what |
+|---|---|
+| `GET /v/api/request` | the request as frozen, with no vendors list and no Flow PT ids |
+| `GET /v/api/bid` | the vendor's latest bid, draft or submitted, and its versions |
+| `PUT /v/api/bid` | `{draft}`: save the draft, or open the next version after a submit |
+| `POST /v/api/bid/submit` | `{bidId}`: submit the draft |
+| `POST /v/api/bid/withdraw` | `{bidId}`: withdraw the submitted bid |
+| `POST /v/api/bid/revise` | open the next version as a copy of the latest |
+
+Every answer under `/v` says `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and
+`X-Robots-Tag: noindex, nofollow` (`src/hooks.server.ts`). No answer carries another vendor:
+`src/lib/pure/vendor-view.ts` shapes each one, and `tests/db/vendor-endpoints.db.test.ts` walks
+every endpoint as one vendor of two and finds nothing of the other.
+
+Failed lookups are counted per client address: twenty in ten minutes, then 429 for the rest of the
+window (`src/lib/pure/rate-limit.ts`). The count lives in one server instance. On Vercel each
+instance keeps its own, so it slows a guesser and caps one instance's database calls; it is not a
+global limit. The token's 32 random bytes are the real guard.
+
+### A dev request to bid on
+
+    pnpm seed:dev
+    pnpm seed:dev --clean
+
+`scripts/seed-dev.mjs` writes one issued request, 40 shots and 6 assets, and two invitations,
+through `src/lib/server/store.ts`, to the Supabase project in `.env.local`, and prints the two
+vendor links. Its tenant is `dev-seed.sg-bids.local`, project 1, a host no Flow PT site has. A
+run removes the last seed first. `--clean` only removes. Frozen rows cannot be deleted through the
+data layer, so removal uses `POSTGRES_URL_NON_POOLING` with triggers off for one transaction, and
+deletes rows of the dev tenant only. `--port 5182` writes links for another dev port, `--shots 400`
+seeds a bigger request.
+
 ### Database tests
 
     pnpm test:db
@@ -107,6 +160,10 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
   reaches none of vendor B's invitation or bids; expired, revoked, malformed and unknown tokens are
   refused; only token hashes are stored (`access.db.test.ts`);
 - a submitted bid and an issued request's items cannot be updated or deleted (`freeze.db.test.ts`);
+- a vendor bids in its own currency with no rate, withdraws, and lists its own versions
+  (`vendor.db.test.ts`);
+- every vendor endpoint answers one vendor nothing of the other, refuses a missing or bad link,
+  and holds back a guesser (`vendor-endpoints.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
@@ -119,7 +176,8 @@ builds a preview. `src/lib/deploy.test.ts` holds it to that. The page is a clien
 (`ssr = false`) and the routes under `/live/` are serverless functions.
 
 Set in the Vercel project, value never in the repo: `PUBLIC_FPT_SITE_URL`, `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, and `FPT_SITE_HOSTS` when the site list differs from the default. Never set
+`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default, and
+`FPT_PRODUCTION_ROLES` when production is not `admin,manager`. Never set
 the `FPT_API_*` lines on Vercel.
 
 Deploying your own copy: `docs/deploy.md`.

@@ -129,6 +129,7 @@ at the bid date. vfx_bidding_assist keeps amounts in both currencies.
 | markup | markup, inside the total | 2+ |
 | notes | vendor notes | 2+ |
 | methodology | how the vendor will do it | BidCraft |
+| assumptions | what the price takes for granted for this line | sg-bids |
 | elementsNeeded | elements the vendor needs | 2+ |
 | startWeek | start week | 2+ |
 | excluded | the vendor will not do it | 2+ |

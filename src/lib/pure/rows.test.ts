@@ -152,7 +152,8 @@ describe('bid', () => {
 			line('ignored-1', onShot('sh010'), money(1_000_000, 'EUR'), {
 				departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }],
 				compute: money(100_000, 'EUR'),
-				notes: 'two layers'
+				notes: 'two layers',
+				assumptions: 'clean plate given'
 			}),
 			line('ignored-2', onAsset('hero'), money(0, 'EUR'), { excluded: true })
 		],
@@ -202,7 +203,7 @@ describe('bid', () => {
 			item_key: 'sh010',
 			total_minor: 1_000_000,
 			excluded: false,
-			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers' }
+			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers', assumptions: 'clean plate given' }
 		});
 		expect(lines[1]).toMatchObject({ item_kind: 'asset', item_key: 'hero', total_minor: 0, excluded: true });
 	});

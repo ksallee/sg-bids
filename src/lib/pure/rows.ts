@@ -278,12 +278,12 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 			non_shot_costs: [...bid.costs],
 			rebate_splits: [...bid.rebate]
 		},
-		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, elementsNeeded, startWeek }) => ({
+		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek }) => ({
 			item_kind: target.kind,
 			item_key: target.id,
 			total_minor: total.minor,
 			excluded,
-			detail: defined({ departments, compute, markup, notes, methodology, elementsNeeded, startWeek })
+			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek })
 		}))
 	};
 }

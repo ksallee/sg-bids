@@ -1,7 +1,9 @@
 <script lang="ts">
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import { page } from '$app/state';
 	import AppShell from '$lib/app/app-shell.svelte';
+	import { isVendorPath } from '$lib/pure/vendor-path';
 	import { apply, mode } from '$lib/theme';
 
 	let { children } = $props();
@@ -19,4 +21,4 @@
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-<AppShell>{@render children()}</AppShell>
+<AppShell vendor={isVendorPath(page.url.pathname)}>{@render children()}</AppShell>

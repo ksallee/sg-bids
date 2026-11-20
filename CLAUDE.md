@@ -61,4 +61,4 @@ metaphors, no "not X, Y", no filler.
 
 ## Commands
 
-    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build / pnpm test:db
+    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build / pnpm test:db / pnpm seed:dev
