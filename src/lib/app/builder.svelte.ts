@@ -1,0 +1,191 @@
+/**
+ * The request builder's page state: the draft, the project's schema and Sequences, the mapping.
+ * It holds no rule of its own: each change goes through a pure module, then the draft goes to the
+ * storage seam (`$lib/drafts`). One instance per page load.
+ */
+
+import type { EntityRow, FieldSchema } from 'sg-widgets-core';
+import { liveContext, liveState, prepareLive } from '$lib/live';
+import { drafts, saveDraft } from '$lib/drafts';
+import { loadMapping, storeMapping } from '$lib/app/mapping-store';
+import { loadSequences, loadShape, rowsByIds, type ProjectShape } from '$lib/io/reads';
+import { cleanMapping, detectMapping, readFields, type ItemKind, type Mapping } from '$lib/pure/field-map';
+import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
+import { emptyHeaderForm, type HeaderForm, type ProjectPick } from '$lib/pure/header';
+import { addPicked, mergePicked } from '$lib/pure/pick';
+import { buildRequest, editItem, restoreState, tiersFor, type BuilderState } from '$lib/pure/request';
+import type { RequestAsset, RequestShot } from '$lib/pure/model';
+
+type Load<T> = { state: 'idle' } | { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string };
+
+export interface ProjectData {
+	readonly shape: ProjectShape;
+	readonly sequences: SequenceIndex;
+	readonly sequenceRows: EntityRow[];
+}
+
+function message(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function newId(): string {
+	return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `draft-${Date.now()}`;
+}
+
+export class Builder {
+	state = $state<BuilderState>({ id: newId(), project: null, form: emptyHeaderForm(), shots: [], assets: [] });
+	problem = $state<string | null>(null);
+	data = $state.raw<Load<ProjectData>>({ state: 'idle' });
+	mapping = $state<{ shot: Mapping; asset: Mapping } | null>(null);
+	/** True once the draft has been read back from storage. */
+	restored = $state(false);
+	/** Picked items read with an older mapping than the one shown. */
+	stale = $state(false);
+
+	readonly ready: Promise<void>;
+
+	constructor() {
+		this.ready = this.start();
+	}
+
+	private async start(): Promise<void> {
+		const live = await prepareLive();
+		this.problem = live.problem;
+		const stored = await drafts.loadDraft();
+		if (stored) this.state = restoreState(stored);
+		this.restored = true;
+		if (!live.problem && this.state.project) await this.loadProject(this.state.project);
+	}
+
+	request() {
+		return buildRequest(this.state);
+	}
+
+	private save(): void {
+		void saveDraft(buildRequest(this.state));
+	}
+
+	private async loadProject(project: ProjectPick): Promise<void> {
+		this.data = { state: 'loading' };
+		try {
+			const context = liveContext();
+			const shape = await loadShape(context);
+			const rows = await loadSequences(context.client, project.id, shape.site.sequenceEpisodeField);
+			const saved = loadMapping(liveState().siteUrl, project.id);
+			this.mapping = {
+				shot: saved ? cleanMapping('shot', saved.shot, shape.shot, shape.site) : detectMapping('shot', shape.shot, shape.site),
+				asset: saved ? cleanMapping('asset', saved.asset, shape.asset, shape.site) : detectMapping('asset', shape.asset, shape.site)
+			};
+			this.data = { state: 'ready', value: { shape, sequenceRows: rows, sequences: sequenceIndex(rows, shape.site.sequenceEpisodeField) } };
+		} catch (error) {
+			this.data = { state: 'error', message: message(error) };
+		}
+	}
+
+	/** One project per request: a new one starts the picks over. */
+	async setProject(project: ProjectPick | null): Promise<void> {
+		if (project?.id === this.state.project?.id) return;
+		this.state = { ...this.state, project, shots: [], assets: [] };
+		this.mapping = null;
+		this.stale = false;
+		this.data = { state: 'idle' };
+		this.save();
+		if (project) await this.loadProject(project);
+	}
+
+	setForm(form: HeaderForm): void {
+		this.state = { ...this.state, form };
+		this.save();
+	}
+
+	schemaOf(kind: ItemKind): Record<string, FieldSchema> {
+		if (this.data.state !== 'ready') return {};
+		return kind === 'shot' ? this.data.value.shape.shot : this.data.value.shape.asset;
+	}
+
+	setMapping(kind: ItemKind, slot: string, field: string | null): void {
+		if (!this.mapping || !this.state.project) return;
+		this.mapping = { ...this.mapping, [kind]: { ...this.mapping[kind], [slot]: field } };
+		storeMapping(liveState().siteUrl, this.state.project.id, this.mapping);
+		if (this.state.shots.length + this.state.assets.length > 0) this.stale = true;
+	}
+
+	fieldsFor(kind: ItemKind): string[] {
+		return this.mapping ? readFields(kind, this.mapping[kind], this.schemaOf(kind)) : ['code'];
+	}
+
+	private freezer(kind: 'shot'): (row: EntityRow) => RequestShot;
+	private freezer(kind: 'asset'): (row: EntityRow) => RequestAsset;
+	private freezer(kind: ItemKind): (row: EntityRow) => RequestShot | RequestAsset {
+		const mapping = this.mapping?.[kind] ?? {};
+		const sequences = this.data.state === 'ready' ? this.data.value.sequences : new Map();
+		return kind === 'shot' ? (row) => freezeShot(row, mapping, sequences) : (row) => freezeAsset(row, mapping);
+	}
+
+	/** The table's selection changed. Rows not at hand are read by id. */
+	async select(kind: ItemKind, ids: number[], rows: EntityRow[]): Promise<void> {
+		const type = kind === 'shot' ? 'Shot' : 'Asset';
+		const current = kind === 'shot' ? this.state.shots : this.state.assets;
+		let merged = kind === 'shot' ? mergePicked(current as RequestShot[], ids, rows, this.freezer('shot')) : mergePicked(current as RequestAsset[], ids, rows, this.freezer('asset'));
+		if (merged.missing.length > 0) {
+			const extra = await rowsByIds(liveContext().client, type, merged.missing, this.fieldsFor(kind));
+			merged = kind === 'shot' ? mergePicked(current as RequestShot[], ids, [...rows, ...extra], this.freezer('shot')) : mergePicked(current as RequestAsset[], ids, [...rows, ...extra], this.freezer('asset'));
+		}
+		this.setItems(kind, merged.items);
+	}
+
+	/** Select all: every row the filter matches joins the picks. */
+	addRows(kind: ItemKind, rows: EntityRow[]): void {
+		if (kind === 'shot') this.setItems('shot', addPicked(this.state.shots, rows, this.freezer('shot')));
+		else this.setItems('asset', addPicked(this.state.assets, rows, this.freezer('asset')));
+	}
+
+	clear(kind: ItemKind): void {
+		this.setItems(kind, []);
+	}
+
+	private setItems(kind: ItemKind, items: RequestShot[] | RequestAsset[]): void {
+		this.state = kind === 'shot' ? { ...this.state, shots: items as RequestShot[] } : { ...this.state, assets: items as RequestAsset[] };
+		this.save();
+	}
+
+	editShot(id: string, patch: Parameters<typeof editItem>[2]): void {
+		this.setItems('shot', editItem(this.state.shots, id, patch));
+	}
+
+	editAsset(id: string, patch: Parameters<typeof editItem>[2]): void {
+		this.setItems('asset', editItem(this.state.assets, id, patch));
+	}
+
+	/** Copy the picked items again from Flow PT with the mapping shown. Edits to them are lost. */
+	async refreeze(): Promise<void> {
+		const client = liveContext().client;
+		const shotIds = this.state.shots.flatMap((s) => (s.fpt ? [s.fpt.id] : []));
+		const assetIds = this.state.assets.flatMap((a) => (a.fpt ? [a.fpt.id] : []));
+		const [shotRows, assetRows] = await Promise.all([
+			rowsByIds(client, 'Shot', shotIds, this.fieldsFor('shot')),
+			rowsByIds(client, 'Asset', assetIds, this.fieldsFor('asset'))
+		]);
+		this.state = {
+			...this.state,
+			shots: mergePicked([], shotIds, shotRows, this.freezer('shot')).items,
+			assets: mergePicked([], assetIds, assetRows, this.freezer('asset')).items
+		};
+		this.stale = false;
+		this.save();
+	}
+
+	tiers(kind: ItemKind): readonly string[] {
+		const field = this.mapping?.[kind].difficulty;
+		return tiersFor(field ? this.schemaOf(kind)[field] : undefined);
+	}
+
+	/** Start a new request: the stored draft is cleared. */
+	async discard(): Promise<void> {
+		await drafts.clearDraft();
+		this.state = { id: newId(), project: null, form: emptyHeaderForm(), shots: [], assets: [] };
+		this.mapping = null;
+		this.data = { state: 'idle' };
+		this.stale = false;
+	}
+}
