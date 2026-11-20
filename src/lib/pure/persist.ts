@@ -1,14 +1,16 @@
 /**
  * What the builder hands to storage, and what a new round starts from. Pure, no I/O.
  *
- * A draft saves as soon as it has a project and a code (the database's key is code and round per
- * project). A field that does not pass its check yet is left out of the save rather than stopping
- * it, so a half typed date never loses the rest. No thumbnail is stored: Flow PT's image URLs are
+ * A draft saves as soon as it has a project. The database's key is code and round per project, so a
+ * blank code saves as the one made from the project (`header.suggestCode`). A field that does not
+ * pass its check yet is left out of the save rather than stopping it, so a half typed date never
+ * loses the rest. No thumbnail is stored: Flow PT's image URLs are
  * presigned and expire (081).
  */
 
 import { isCurrency } from './currencies';
-import { isDay, toHeader } from './header';
+import { isDay, suggestCode, toHeader } from './header';
+import { isWebLink } from './safe-href';
 import type { BidRequest, RequestAsset, RequestHeader, RequestShot } from './model';
 import { buildRequest, type BuilderState } from './request';
 
@@ -35,16 +37,19 @@ function withoutThumbnail({ thumbnail, ...rest }: RequestShot): RequestShot {
 	return rest;
 }
 
-export function savable(state: BuilderState): Savable {
+/** `fallbackCode`: the code a blank one saves as. Without it, one is made from the project's name. */
+export function savable(state: BuilderState, fallbackCode?: string): Savable {
 	if (!state.project) return { ok: false, reason: 'Pick a project to save the draft.' };
-	const code = state.form.code.trim();
-	if (code === '') return { ok: false, reason: 'Give the request a code to save it.' };
+	const code = state.form.code.trim() || fallbackCode?.trim() || suggestCode(state.project.name, []);
 	const form = {
 		...state.form,
+		code,
 		baseCurrency: isCurrency(state.form.baseCurrency.trim()) ? state.form.baseCurrency.trim() : 'USD',
 		dueDate: isDay(state.form.dueDate.trim()) ? state.form.dueDate : '',
 		turnoverDate: isDay(state.form.turnoverDate.trim()) ? state.form.turnoverDate : '',
-		deliveryDate: isDay(state.form.deliveryDate.trim()) ? state.form.deliveryDate : ''
+		deliveryDate: isDay(state.form.deliveryDate.trim()) ? state.form.deliveryDate : '',
+		// The server takes only a web link (`wire.ts`); a half typed one would refuse the whole save.
+		materialLink: isWebLink(state.form.materialLink.trim()) ? state.form.materialLink : ''
 	};
 	const request = buildRequest({ ...state, form });
 	return {

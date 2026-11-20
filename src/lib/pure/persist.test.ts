@@ -39,15 +39,24 @@ describe('savable', () => {
 		expect(out.ok && 'thumbnail' in out.items.shots[0]).toBe(false);
 	});
 
-	it('waits for a project and a code', () => {
+	it('waits for a project and nothing else', () => {
 		expect(savable(state({ project: null }))).toEqual({ ok: false, reason: 'Pick a project to save the draft.' });
-		expect(savable(state({ form: { ...emptyHeaderForm(), code: ' ' } }))).toEqual({ ok: false, reason: 'Give the request a code to save it.' });
+		expect(savable(state({ form: emptyHeaderForm(), shots: [], assets: [] })).ok).toBe(true);
+	});
+
+	it('saves a blank code as the code given, else as one made from the project', () => {
+		const blank = { ...state().form, code: ' ' };
+		const given = savable(state({ form: blank }), 'DS-04');
+		expect(given.ok && [given.code, given.header.code]).toEqual(['DS-04', 'DS-04']);
+		const made = savable(state({ form: blank }));
+		expect(made.ok && made.code).toBe('DEMO_SHOW-01');
 	});
 
 	it('leaves out a date or a link that does not pass yet, so a half typed form still saves', () => {
-		const out = savable(state({ form: { ...state().form, dueDate: '2026-02-30', turnoverDate: 'soon', deliveryDate: '2027-01-10', round: 'x' } }));
+		const out = savable(state({ form: { ...state().form, dueDate: '2026-02-30', turnoverDate: 'soon', deliveryDate: '2027-01-10', round: 'x', materialLink: 'intranet/cut' } }));
 		expect(out.ok).toBe(true);
 		if (!out.ok) return;
+		expect(out.header.materialLink).toBeUndefined();
 		expect(out.header.dueDate).toBeUndefined();
 		expect(out.header.turnoverDate).toBeUndefined();
 		expect(out.header.deliveryDate).toBe('2027-01-10');

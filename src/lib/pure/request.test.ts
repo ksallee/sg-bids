@@ -3,9 +3,8 @@ import { normalizeFields } from 'sg-widgets-core';
 import { asset, shot } from './fixtures';
 import { SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
 import { emptyHeaderForm, type HeaderForm } from './header';
-import { DEFAULT_TIERS, blockers, buildRequest, editItem, restoreState, summarize, tiersFor, vendorView, type BuilderState } from './request';
+import { DEFAULT_TIERS, buildRequest, editItem, editItems, removeItems, restoreState, summarize, tiersFor, vendorView, type BuilderState } from './request';
 
-const TODAY = '2026-11-20';
 const form: HeaderForm = { ...emptyHeaderForm('GBP'), code: 'DS_R1', title: 'Main bid' };
 
 function state(extra: Partial<BuilderState> = {}): BuilderState {
@@ -70,6 +69,21 @@ describe('editItem', () => {
 	});
 });
 
+describe('editItems', () => {
+	it('changes every item named, the same way, and leaves the rest', () => {
+		const items = [shot('a'), shot('b'), shot('c')];
+		const next = editItems(items, ['a', 'c'], { difficulty: 'Hero' });
+		expect(next.map((s) => s.difficulty)).toEqual(['Hero', undefined, 'Hero']);
+		expect(next[1]).toBe(items[1]);
+	});
+});
+
+describe('removeItems', () => {
+	it('takes the items named out of the request', () => {
+		expect(removeItems([shot('a'), shot('b')], ['a']).map((s) => s.id)).toEqual(['b']);
+	});
+});
+
 describe('tiersFor', () => {
 	it("takes a list field's values as the tiers", () => {
 		expect(tiersFor(normalizeFields(SHOT_FIELDS_B).sg_complexity)).toEqual(['A', 'B', 'C', 'D']);
@@ -101,23 +115,5 @@ describe('vendorView and summarize', () => {
 
 	it('counts what goes out and what is held back', () => {
 		expect(summarize(request)).toEqual({ shots: 3, shotsOmitted: 1, assets: 1, assetsOmitted: 1, frames: 136, shotsWithoutFrames: 1, sequences: 2 });
-	});
-});
-
-describe('blockers', () => {
-	it('is empty for a request ready to review', () => {
-		expect(blockers(state({ shots: [shot('shot-1')] }), TODAY)).toEqual([]);
-	});
-
-	it('names what is missing, in order', () => {
-		expect(blockers(state({ project: null, form: emptyHeaderForm() }), TODAY)).toEqual(['Pick a project.', 'Fix 2 fields in the details.', 'Pick at least one shot or asset.']);
-	});
-
-	it('wants one item still in', () => {
-		expect(blockers(state({ shots: [shot('shot-1', { omitted: true })], assets: [asset('a', { omitted: true })] }), TODAY)).toEqual(['Every item is omitted.']);
-	});
-
-	it('says one field in the singular', () => {
-		expect(blockers(state({ form: { ...form, title: '' }, shots: [shot('s')] }), TODAY)).toEqual(['Fix 1 field in the details.']);
 	});
 });

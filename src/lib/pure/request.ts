@@ -4,8 +4,9 @@
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
-import { headerForm, toHeader, validateHeader, type HeaderForm, type ProjectPick } from './header';
-import type { BidRequest, Day, Id, RequestAsset, RequestHeader, RequestShot } from './model';
+import { DIFFICULTY_TIERS } from './field-map';
+import { headerForm, toHeader, type HeaderForm, type ProjectPick } from './header';
+import type { BidRequest, Id, RequestAsset, RequestHeader, RequestShot } from './model';
 
 export interface BuilderState {
 	readonly id: Id;
@@ -16,7 +17,7 @@ export interface BuilderState {
 }
 
 /** The tiers offered when the mapped difficulty field brings no list of its own. */
-export const DEFAULT_TIERS: readonly string[] = ['Simple', 'Moderate', 'Complex', 'Hero'];
+export const DEFAULT_TIERS: readonly string[] = DIFFICULTY_TIERS;
 
 /** The difficulty tiers: the mapped list field's values, else the defaults. */
 export function tiersFor(field: FieldSchema | undefined): readonly string[] {
@@ -66,6 +67,18 @@ export function editItem<T extends { id: Id } & Editable>(items: readonly T[], i
 	});
 }
 
+/** Several items changed the same way: a difficulty set for every row shown. */
+export function editItems<T extends { id: Id } & Editable>(items: readonly T[], ids: readonly Id[], patch: Editable): T[] {
+	const wanted = new Set(ids);
+	return items.map((item) => (wanted.has(item.id) ? editItem([item], item.id, patch)[0] : item));
+}
+
+/** The items named taken out of the request. */
+export function removeItems<T extends { id: Id }>(items: readonly T[], ids: readonly Id[]): T[] {
+	const gone = new Set(ids);
+	return items.filter((item) => !gone.has(item.id));
+}
+
 export interface VendorView {
 	readonly header: RequestHeader;
 	readonly shots: readonly RequestShot[];
@@ -99,16 +112,4 @@ export function summarize(request: BidRequest): Summary {
 		shotsWithoutFrames: shots.filter((s) => s.frames === undefined).length,
 		sequences: new Set(shots.map((s) => s.sequence).filter(Boolean)).size
 	};
-}
-
-/** What stops the draft from being reviewed as complete, in the order the steps fix it. */
-export function blockers(state: BuilderState, today: Day): string[] {
-	const out: string[] = [];
-	if (!state.project) out.push('Pick a project.');
-	const errors = Object.keys(validateHeader(state.form, today)).length;
-	if (errors > 0) out.push(`Fix ${errors} ${errors === 1 ? 'field' : 'fields'} in the details.`);
-	const items = [...state.shots, ...state.assets];
-	if (items.length === 0) out.push('Pick at least one shot or asset.');
-	else if (items.every((item) => item.omitted)) out.push('Every item is omitted.');
-	return out;
 }

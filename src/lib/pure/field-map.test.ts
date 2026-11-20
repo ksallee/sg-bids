@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeFields } from 'sg-widgets-core';
 import { ASSET_FIELDS_A, ASSET_FIELDS_B, SEQUENCE_FIELDS_A, SEQUENCE_FIELDS_CUSTOM, SEQUENCE_FIELDS_TWO, SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
-import { EPISODE_FROM_SEQUENCE, cleanMapping, sequenceEpisodeField, detectMapping, readFields, slotOptions, slotsFor, type SiteShape } from './field-map';
+import {
+	DIFFICULTY_TIERS,
+	EPISODE_FROM_SEQUENCE,
+	cleanMapping,
+	sequenceEpisodeField,
+	detectMapping,
+	mappingStatus,
+	mappingWords,
+	readFields,
+	slotOptions,
+	slotsFor,
+	type SiteShape
+} from './field-map';
 
 const shotA = normalizeFields(SHOT_FIELDS_A);
 const assetA = normalizeFields(ASSET_FIELDS_A);
@@ -139,5 +151,64 @@ describe('sequenceEpisodeField', () => {
 	it('has none when nothing links an Episode, or two do and neither is the stock one', () => {
 		expect(sequenceEpisodeField(normalizeFields(SHOT_FIELDS_A))).toBeNull();
 		expect(sequenceEpisodeField(normalizeFields(SEQUENCE_FIELDS_TWO))).toBeNull();
+	});
+});
+
+describe('mappingStatus', () => {
+	const schemas = { shot: shotA, asset: assetA };
+	const detected = () => ({ shot: detectMapping('shot', shotA, NO_EPISODE), asset: detectMapping('asset', assetA, NO_EPISODE) });
+
+	it('counts the fields read and names what is left unmapped', () => {
+		const status = mappingStatus(detected(), schemas, NO_EPISODE);
+		expect(status.used).toBe(6);
+		expect(status.unmapped.map((u) => [u.kind, u.slot, u.options, u.creatable])).toEqual([
+			['shot', 'type', 2, true],
+			['shot', 'difficulty', 5, true],
+			['asset', 'difficulty', 3, true]
+		]);
+	});
+
+	it('leaves out a slot the site cannot fill and the app cannot create, such as an Episode on a film site', () => {
+		expect(mappingStatus(detected(), schemas, NO_EPISODE).unmapped.some((u) => u.slot === 'episode')).toBe(false);
+	});
+
+	it('says it in words, one line per concept', () => {
+		expect(mappingWords(mappingStatus(detected(), schemas, NO_EPISODE))).toEqual({
+			headline: 'Using 6 fields from this site.',
+			unmapped: ['Type is not mapped for Shots.', 'Difficulty is not mapped for Shots and Assets.']
+		});
+		const mapping = detected();
+		const full = { shot: { ...mapping.shot, type: 'description', difficulty: 'description' }, asset: { ...mapping.asset, difficulty: 'description' } };
+		expect(mappingWords(mappingStatus(full, schemas, NO_EPISODE))).toEqual({ headline: 'Using 6 fields from this site.', unmapped: [] });
+	});
+
+	it('says one field in the singular', () => {
+		const one = { shot: { description: 'description' }, asset: {} };
+		expect(mappingWords(mappingStatus(one, schemas, NO_EPISODE)).headline).toBe('Using 1 field from this site.');
+	});
+});
+
+describe('create specs', () => {
+	it('creates a text, a number or a list for a slot, never a link', () => {
+		const created = (kind: 'shot' | 'asset') => slotsFor(kind).map((s) => [s.slot, s.create?.dataType ?? null]);
+		expect(created('shot')).toEqual([
+			['description', 'text'],
+			['frames', 'number'],
+			['sequence', null],
+			['episode', null],
+			['type', 'list'],
+			['difficulty', 'list'],
+			['assets', null]
+		]);
+		expect(created('asset')).toEqual([
+			['description', 'text'],
+			['type', 'list'],
+			['difficulty', 'list']
+		]);
+	});
+
+	it('offers the four tiers for a new difficulty list', () => {
+		expect(slotsFor('shot').find((s) => s.slot === 'difficulty')?.create).toEqual({ dataType: 'list', display: 'Difficulty', values: ['Simple', 'Moderate', 'Complex', 'Hero'] });
+		expect(DIFFICULTY_TIERS).toEqual(['Simple', 'Moderate', 'Complex', 'Hero']);
 	});
 });

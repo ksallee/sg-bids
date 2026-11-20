@@ -90,10 +90,14 @@ export interface VendorForm {
 /** The database takes `^[^@\s]+@[^@\s]+$` (supabase/migrations). */
 const EMAIL = /^[^@\s]+@[^@\s]+$/;
 
+/** What the invite form cannot go without. The Flow PT Group is optional. */
+export const VENDOR_REQUIRED: readonly (keyof VendorForm)[] = ['name', 'email'];
+
 export function validateVendor(form: VendorForm): Partial<Record<keyof VendorForm, string>> {
 	const errors: Partial<Record<keyof VendorForm, string>> = {};
 	if (form.name.trim() === '') errors.name = 'Name the vendor.';
-	if (!EMAIL.test(form.email.trim())) errors.email = 'Write an email address.';
+	if (form.email.trim() === '') errors.email = 'Write the contact email.';
+	else if (!EMAIL.test(form.email.trim())) errors.email = 'The contact email is not an address. Write it as name@studio.com.';
 	return errors;
 }
 

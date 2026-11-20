@@ -6,19 +6,24 @@
  */
 
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
-import { liveContext, liveState, prepareLive } from '$lib/live';
-import { api, type RequestStatus } from '$lib/api';
+import { liveAuth, liveContext, liveState, prepareLive } from '$lib/live';
+import { api, ApiError, type RequestStatus } from '$lib/api';
 import { setCurrentProject, currentProject } from '$lib/current-project';
 import { cushion, drafts } from '$lib/drafts';
 import { isLocalId, localId, savable } from '$lib/pure/persist';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
+import { fptApi } from '$lib/io/fpt-api';
+import { createField, readCreateRight } from '$lib/io/fpt-field-create';
 import { loadSequences, loadShape, rowsByIds, type ProjectShape } from '$lib/io/reads';
-import { cleanMapping, detectMapping, readFields, type ItemKind, type Mapping } from '$lib/pure/field-map';
+import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
+import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
-import { emptyHeaderForm, type HeaderForm, type ProjectPick } from '$lib/pure/header';
+import { emptyHeaderForm, suggestCode, type HeaderForm, type ProjectPick } from '$lib/pure/header';
 import { addPicked, mergePicked } from '$lib/pure/pick';
-import { buildRequest, editItem, restoreState, tiersFor, type BuilderState } from '$lib/pure/request';
+import { readiness, type OtherRequest, type Readiness } from '$lib/pure/readiness';
+import { buildRequest, editItem, editItems, removeItems, restoreState, tiersFor, type BuilderState } from '$lib/pure/request';
 import type { RequestAsset, RequestShot } from '$lib/pure/model';
+import { today } from '$lib/app/today';
 
 type Load<T> = { state: 'idle' } | { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string };
 
@@ -58,6 +63,21 @@ export class Builder {
 	stale = $state(false);
 	status = $state<RequestStatus>('draft');
 	saving = $state<SaveState>({ kind: 'idle' });
+	/** The project's other requests, for the code: made from the first free number, never one in use. */
+	others = $state.raw<OtherRequest[]>([]);
+	/** The list is read (or failed): a blank code may be made now without clashing with one in use. */
+	private othersRead = false;
+	/** The mapping was kept for this project: set by hand once, so it is not offered as a check again. */
+	mappingKept = $state(false);
+
+	/** How far the draft is from going out, named field by field. */
+	readonly readiness: Readiness = $derived(readiness({ state: this.state, today: today(), others: this.others }));
+
+	/** The code a blank one saves as. */
+	get suggestedCode(): string {
+		const project = this.state.project;
+		return project ? suggestCode(project.name, this.others.filter((o) => o.id !== this.state.id).map((o) => o.code)) : '';
+	}
 
 	readonly ready: Promise<void>;
 	/** Called once a new draft has its stored id, so the page can put it in the URL. */
@@ -115,7 +135,11 @@ export class Builder {
 			this.again = true;
 			return this.inFlight;
 		}
-		const ready = savable(this.state);
+		if (this.state.project && !this.othersRead && this.state.form.code.trim() === '') {
+			this.saving = { kind: 'waiting', reason: 'Making the request code.' };
+			return;
+		}
+		const ready = savable(this.state, this.suggestedCode);
 		if (!ready.ok) {
 			this.saving = { kind: 'waiting', reason: ready.reason };
 			return;
@@ -133,7 +157,9 @@ export class Builder {
 				this.saving = { kind: 'saved', at: new Date() };
 			})
 			.catch((error) => {
-				this.saving = { kind: 'error', message: message(error) };
+				// The database keeps one request per code and round in a project; `readiness` names the clash first.
+				const clash = error instanceof ApiError && error.status === 409;
+				this.saving = { kind: 'error', message: clash ? `Another request in this project has the code ${ready.code} in this round. Change the code.` : message(error) };
 			})
 			.finally(() => {
 				this.inFlight = null;
@@ -163,11 +189,13 @@ export class Builder {
 
 	private async loadProject(project: ProjectPick): Promise<void> {
 		this.data = { state: 'loading' };
+		void this.loadOthers(project);
 		try {
 			const context = liveContext();
 			const shape = await loadShape(context);
 			const rows = await loadSequences(context.client, project.id, shape.site.sequenceEpisodeField);
 			const saved = loadMapping(liveState().siteUrl, project.id);
+			this.mappingKept = saved !== null;
 			this.mapping = {
 				shot: saved ? cleanMapping('shot', saved.shot, shape.shot, shape.site) : detectMapping('shot', shape.shot, shape.site),
 				asset: saved ? cleanMapping('asset', saved.asset, shape.asset, shape.site) : detectMapping('asset', shape.asset, shape.site)
@@ -178,11 +206,30 @@ export class Builder {
 		}
 	}
 
+	/** The project's requests, for a free code. A blank code is filled with it, so the draft saves at once. */
+	private async loadOthers(project: ProjectPick): Promise<void> {
+		try {
+			const rows = await api.list(project.id);
+			if (this.state.project?.id !== project.id) return;
+			this.others = rows.map((r) => ({ id: r.id, code: r.code, round: r.round }));
+		} catch {
+			// Without the list the code is made from the project alone; a clash is named when it saves.
+		}
+		if (this.state.project?.id === project.id) this.othersRead = true;
+		if (!this.readOnly && this.state.project?.id === project.id && this.state.form.code.trim() === '') {
+			this.setForm({ ...this.state.form, code: this.suggestedCode });
+		}
+	}
+
 	/** One project per request: a new one starts the picks over. */
 	async setProject(project: ProjectPick | null): Promise<void> {
 		if (this.readOnly || project?.id === this.state.project?.id) return;
 		setCurrentProject(liveState().siteUrl, project);
-		this.state = { ...this.state, project, shots: [], assets: [] };
+		// A code made from the last project goes with it; one typed by hand stays.
+		const made = this.state.form.code.trim() !== '' && this.state.form.code.trim() === this.suggestedCode;
+		this.state = { ...this.state, project, form: made ? { ...this.state.form, code: '' } : this.state.form, shots: [], assets: [] };
+		this.others = [];
+		this.othersRead = false;
 		this.mapping = null;
 		this.stale = false;
 		this.data = { state: 'idle' };
@@ -201,11 +248,53 @@ export class Builder {
 		return kind === 'shot' ? this.data.value.shape.shot : this.data.value.shape.asset;
 	}
 
-	setMapping(kind: ItemKind, slot: string, field: string | null): void {
+	setMapping(kind: ItemKind, slot: string, field: string | null, options: { fresh?: boolean } = {}): void {
 		if (!this.mapping || !this.state.project) return;
 		this.mapping = { ...this.mapping, [kind]: { ...this.mapping[kind], [slot]: field } };
+		this.keepMapping();
+		// A field made a moment ago is empty on every row: copying again would only drop edits.
+		if (!options.fresh && this.state.shots.length + this.state.assets.length > 0) this.stale = true;
+	}
+
+	/** Keep the mapping shown for this project, so it is not offered as a check again. */
+	keepMapping(): void {
+		if (!this.mapping || !this.state.project) return;
 		storeMapping(liveState().siteUrl, this.state.project.id, this.mapping);
-		if (this.state.shots.length + this.state.assets.length > 0) this.stale = true;
+		this.mappingKept = true;
+	}
+
+	/** The fields read and what is left unmapped. Null until the project is read. */
+	get mappingStatus(): MappingStatus | null {
+		if (this.data.state !== 'ready' || !this.mapping) return null;
+		const shape = this.data.value.shape;
+		return mappingStatus(this.mapping, { shot: shape.shot, asset: shape.asset }, shape.site);
+	}
+
+	private right: Promise<CreateRight> | null = null;
+
+	/** Whether the person may create a field in Flow PT, read once (132). */
+	createRight(): Promise<CreateRight> {
+		this.right ??= (async () => {
+			const auth = liveAuth();
+			return readCreateRight(fptApi(auth.siteUrl, auth.token), await auth.token());
+		})().catch((error) => {
+			this.right = null;
+			return { state: 'unknown' as const, reason: `The right could not be read: ${message(error)}` };
+		});
+		return this.right;
+	}
+
+	/** Create the planned field, read the schema again and map the new field. Answers what the site said. */
+	async createField(plan: PlannedCreate): Promise<CreateAnswer> {
+		const auth = liveAuth();
+		const answer = await createField(fptApi(auth.siteUrl, auth.token), plan);
+		if (answer.state !== 'created' && answer.state !== 'renamed') return answer;
+		const context = liveContext();
+		context.schema.invalidate();
+		const shape = await loadShape(context);
+		if (this.data.state === 'ready') this.data = { state: 'ready', value: { ...this.data.value, shape } };
+		this.setMapping(plan.kind, plan.slot, answer.name, { fresh: true });
+		return answer;
 	}
 
 	fieldsFor(kind: ItemKind): string[] {
@@ -254,6 +343,18 @@ export class Builder {
 
 	editAsset(id: string, patch: Parameters<typeof editItem>[2]): void {
 		this.setItems('asset', editItem(this.state.assets, id, patch));
+	}
+
+	/** One edit to several items of a kind: a difficulty for every row shown. */
+	editMany(kind: ItemKind, ids: string[], patch: Parameters<typeof editItem>[2]): void {
+		if (kind === 'shot') this.setItems('shot', editItems(this.state.shots, ids, patch));
+		else this.setItems('asset', editItems(this.state.assets, ids, patch));
+	}
+
+	/** Take items out of the request. Picking them again copies them fresh from Flow PT. */
+	remove(kind: ItemKind, ids: string[]): void {
+		if (kind === 'shot') this.setItems('shot', removeItems(this.state.shots, ids));
+		else this.setItems('asset', removeItems(this.state.assets, ids));
 	}
 
 	/** Copy the picked items again from Flow PT with the mapping shown. Edits to them are lost. */
