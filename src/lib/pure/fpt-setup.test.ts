@@ -174,16 +174,19 @@ describe('setupReport', () => {
 	});
 
 	it('reports read allowed as a risk, names the three leak paths, and says what to set', () => {
-		const report = setupReport(input({ rights: { CustomEntity14: ALLOWED, CustomEntity15: SHOT_RULE, EventLogEntry: ALLOWED, Shot: SHOT_RULE, Asset: SHOT_RULE } }));
+		const report = setupReport(
+			input({ vendorGroupName: 'Vendor', rights: { CustomEntity14: ALLOWED, CustomEntity15: SHOT_RULE, EventLogEntry: ALLOWED, Shot: SHOT_RULE, Asset: SHOT_RULE } })
+		);
 		expect(report.safe).toBe(false);
+		expect(report.access.group).toBe('vendor');
 		expect(report.access.bid).toEqual({ state: 'allowed' });
 		expect(report.access.line.state).toBe('conditional');
-		expect(report.risks).toContain("The vendor role reads every Bid in its projects: every vendor sees every other vendor's prices.");
+		expect(report.risks).toContain("The Vendor role reads every Bid in its projects: every vendor sees every other vendor's prices.");
 		for (const path of LEAK_PATHS) expect(report.risks).toContain(path);
 		expect(report.adminSteps).toEqual([
-			"In the vendor role's permissions, set See entities to Not allowed for Bid.",
-			"In the vendor role's permissions, set See entities to Not allowed for Bid Line.",
-			'Consider setting See entities to Not allowed for Event Log Entry on the vendor role. While it reads the event log, values written to Bids reach it.'
+			"In the Vendor role's permissions, set See entities to Not allowed for Bid.",
+			"In the Vendor role's permissions, set See entities to Not allowed for Bid Line.",
+			'Consider setting See entities to Not allowed for Event Log Entry on the Vendor role. While it reads the event log, values written to Bids reach it.'
 		]);
 	});
 

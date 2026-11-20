@@ -20,6 +20,9 @@
  *   string (field_types/currency, field_types/float). Amounts go through `toFptCurrency`.
  * - A `url` write mints an Attachment row each time (field_types/url). The link is written on create
  *   only, and the undo deletes the Attachment of a row it deletes (recipe 006).
+ * - Measured here, not in the corpus yet: `_batch` refuses a `url` value in a create and in an update,
+ *   400 `Value is not legal.`, where a single POST or PUT takes it. So the link is its own last step,
+ *   one PUT per new Bid, outside any batch.
  * - A write is confirmed by reading the row back, never by its status (recipe 009).
  */
 
@@ -79,7 +82,7 @@ export interface PendingBid {
 	readonly pendingBid: string;
 }
 
-export type FieldValue = string | number | boolean | null | EntityRef | PendingBid | { readonly url: string; readonly name: string };
+export type FieldValue = string | number | boolean | null | EntityRef | PendingBid;
 
 export type Write =
 	| { readonly kind: 'create'; readonly entity: 'bid' | 'line'; readonly key: string; readonly data: Readonly<Record<string, FieldValue>> }
@@ -90,10 +93,13 @@ export type Write =
 			readonly id: number;
 			readonly field: string;
 			readonly groups: readonly number[];
-	  };
+	  }
+	| { readonly kind: 'link'; readonly key: string; readonly url: string };
 
 export interface Step {
 	readonly label: string;
+	/** `batch`: one `_batch` per 200 writes. `single`: one request per write; a url cannot go in a batch. */
+	readonly mode: 'batch' | 'single';
 	readonly writes: readonly Write[];
 }
 
@@ -190,6 +196,7 @@ export function planAward(input: AwardInput): AwardPlan {
 
 	const bidWrites: Write[] = [];
 	const lineWrites: Write[] = [];
+	const linkWrites: Write[] = [];
 	const previews: BidPreview[] = [];
 	const seenKeys = new Set<string>();
 	for (const bid of bids) {
@@ -235,7 +242,7 @@ export function planAward(input: AwardInput): AwardPlan {
 		if (id === undefined) {
 			data.project = project;
 			const link = options.appLinks?.[bid.id];
-			if (link) data[BID.appLink] = { url: link, name: 'sg-bids' };
+			if (link) linkWrites.push({ kind: 'link', key, url: link });
 			bidWrites.push({ kind: 'create', entity: 'bid', key, data });
 		} else bidWrites.push({ kind: 'update', entity: 'bid', key, id, data });
 
@@ -292,10 +299,13 @@ export function planAward(input: AwardInput): AwardPlan {
 		if (added.length > 0) groupWrites.push({ kind: 'addGroups', itemType: type, id: item.ref.id, field, groups: added });
 	}
 
-	const steps: Step[] = [
-		{ label: 'Bids', writes: bidWrites },
-		{ label: 'Bid Lines and vendor Groups', writes: [...lineWrites, ...groupWrites] }
-	].filter((s) => s.writes.length > 0);
+	const steps: Step[] = (
+		[
+			{ label: 'Bids', mode: 'batch', writes: bidWrites },
+			{ label: 'Bid Lines and vendor Groups', mode: 'batch', writes: [...lineWrites, ...groupWrites] },
+			{ label: 'App links', mode: 'single', writes: linkWrites }
+		] as Step[]
+	).filter((s) => s.writes.length > 0);
 	return { steps, preview: { bids: previews, groups: groupPreviews }, warnings };
 }
 
@@ -336,6 +346,11 @@ export function toBatchRequest(write: Write, site: FptSite, bidIds: ReadonlyMap<
 				record_id: write.id,
 				data: { [write.field]: { multi_entity_update_mode: 'add', value: write.groups.map((id) => ({ type: 'Group', id })) } }
 			};
+		case 'link': {
+			const id = bidIds.get(write.key);
+			if (id === undefined) throw new Error(`The Bid ${write.key} has no id yet.`);
+			return { request_type: 'update', entity: site.bidType, record_id: id, data: { [BID.appLink]: { url: write.url, name: 'sg-bids' } } };
+		}
 	}
 }
 
@@ -385,7 +400,6 @@ function same(field: string, sent: unknown, row: ReadRow, site: FptSite, bidIds:
 	const got = row.attributes[field];
 	if (type === 'currency') return sameCurrency(got, sent as string | null);
 	if (type === 'float') return sent === null ? got === null : got !== null && Number(got) === Number(sent);
-	if (type === 'url') return refOf(got) !== null && (got as { url?: unknown }).url === (sent as { url: string }).url;
 	return (got ?? null) === sent;
 }
 
@@ -397,6 +411,11 @@ export function verify(plan: AwardPlan, back: ReadBack, site: FptSite, bidIds: R
 			if (write.kind === 'addGroups') {
 				const have = new Set(back.groups[`${write.itemType}:${write.id}`] ?? []);
 				for (const g of write.groups) if (!have.has(g)) problems.push(`${write.itemType} ${write.id}: Group ${g} is not in ${write.field}.`);
+				continue;
+			}
+			if (write.kind === 'link') {
+				const got = refOf(back.bids.get(write.key)?.attributes[BID.appLink]) as { url?: unknown } | null;
+				if (got?.url !== write.url) problems.push(`${write.key}: ${BID.appLink} reads back ${JSON.stringify(got?.url ?? null)}.`);
 				continue;
 			}
 			const row = (write.entity === 'bid' ? back.bids : back.lines).get(write.key);

@@ -138,6 +138,7 @@ let state: LiveState = { siteUrl: '', session: null, devToken: false, problem: n
 let context: SgContext | null = null;
 let writer: RestClient | null = null;
 let devBearer: (() => Promise<string>) | null = null;
+let auth: { siteUrl: string; token: () => Promise<string> } | null = null;
 let ready: Promise<LiveState> | null = null;
 
 async function resolve(): Promise<LiveState> {
@@ -157,7 +158,8 @@ async function resolve(): Promise<LiveState> {
 	// and the widgets show the error state they show for any refusal.
 	const problem = !site ? 'Name the site to read.' : token ? null : 'Sign in to read Flow PT.';
 	const refuse = (): Promise<string> => Promise.reject(new Error(problem ?? 'Not connected to Flow PT.'));
-	writer = new RestClient({ siteUrl: site, token: token ?? refuse });
+	auth = { siteUrl: site, token: token ?? refuse };
+	writer = new RestClient(auth);
 	context = createSgContext({ client: writer, siteUrl: site });
 	return { siteUrl: site, session: stored, devToken: devToken !== null, problem };
 }
@@ -206,6 +208,15 @@ export async function productionClaim(projectId: number): Promise<ProductionClai
 	if (state.session && state.session.siteUrl === state.siteUrl) return { siteUrl: state.siteUrl, projectId, sessionToken: state.session.token };
 	if (devBearer) return { siteUrl: state.siteUrl, projectId, bearer: await devBearer() };
 	throw new Error('Sign in to Flow PT.');
+}
+
+/**
+ * The site and the bearer behind the client, for the calls `RestClient` lacks: a field create and a
+ * permission group read (`src/lib/io/fpt-api.ts`). The bearer stays in this browser.
+ */
+export function liveAuth(): { siteUrl: string; token: () => Promise<string> } {
+	if (!auth) throw new Error('Not connected to Flow PT. Await prepareLive() first.');
+	return auth;
 }
 
 /** The person behind the session: their HumanUser row, by login, read once. */

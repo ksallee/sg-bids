@@ -89,9 +89,14 @@ const KEY_A = bidKey('req1', 'va', 1);
 const KEY_B = bidKey('req1', 'vb', 1);
 
 describe('planAward', () => {
-	it('creates the Bids first, then the awarded lines and the Groups, in two steps', () => {
+	it('creates the Bids first, then the awarded lines and the Groups, then the links one by one', () => {
 		const plan = planAward(input());
-		expect(plan.steps.map((s) => s.label)).toEqual(['Bids', 'Bid Lines and vendor Groups']);
+		expect(plan.steps.map((s) => [s.label, s.mode])).toEqual([
+			['Bids', 'batch'],
+			['Bid Lines and vendor Groups', 'batch'],
+			['App links', 'single']
+		]);
+		expect(plan.steps[2].writes).toEqual([{ kind: 'link', key: KEY_A, url: 'https://bids.test/b/bidA' }]);
 		expect(plan.steps[0].writes.map((w) => (w.kind === 'create' ? w.key : w.kind))).toEqual([KEY_A, KEY_B]);
 		expect(plan.steps[1].writes.map((w) => (w.kind === 'addGroups' ? `groups ${w.id}` : w.kind === 'create' ? w.key : '?'))).toEqual([
 			lineKey(KEY_A, onShot('sh010')),
@@ -124,12 +129,10 @@ describe('planAward', () => {
 			sg_awarded_date: '2026-11-20',
 			sg_bid_version: 2,
 			sg_status_list: 'fin',
-			project: { type: 'Project', id: 1180 },
-			sg_app_link: { url: 'https://bids.test/b/bidA', name: 'sg-bids' }
+			project: { type: 'Project', id: 1180 }
 		});
 		expect(b.data).toMatchObject({ sg_total: '2700.00', sg_currency: 'EUR', sg_total_base: '2970.00', sg_exchange_rate: '1.1', sg_rate_date: '2026-11-15' });
 		expect(b.data).not.toHaveProperty('sg_bid_version');
-		expect(b.data).not.toHaveProperty('sg_app_link');
 	});
 
 	it('writes a split line with its share and the awarded part in the base currency', () => {
@@ -168,7 +171,7 @@ describe('planAward', () => {
 		const [a] = plan.steps[0].writes;
 		expect(a).toMatchObject({ kind: 'update', id: 9001, key: KEY_A });
 		expect((a as { data: object }).data).not.toHaveProperty('project');
-		expect((a as { data: object }).data).not.toHaveProperty('sg_app_link');
+		expect(plan.steps.map((s) => s.label)).not.toContain('App links');
 		const l = plan.steps[1].writes.find((w) => w.kind !== 'addGroups' && w.key === lineKey(KEY_A, onShot('sh010')))!;
 		expect(l).toMatchObject({ kind: 'update', id: 9101, data: { sg_bid: { type: 'CustomEntity14', id: 9001 } } });
 		expect(plan.preview.bids.map((b) => b.action)).toEqual(['update', 'create']);
@@ -227,6 +230,12 @@ describe('toBatchRequest', () => {
 			[KEY_A, 5001],
 			[KEY_B, 5002]
 		]);
+		expect(toBatchRequest(plan.steps[2].writes[0], SITE, ids)).toEqual({
+			request_type: 'update',
+			entity: 'CustomEntity14',
+			record_id: 5001,
+			data: { sg_app_link: { url: 'https://bids.test/b/bidA', name: 'sg-bids' } }
+		});
 		const [lineWrite] = plan.steps[1].writes;
 		expect(toBatchRequest(lineWrite, SITE, ids)).toMatchObject({ request_type: 'create', entity: 'CustomEntity15', data: { sg_bid: { type: 'CustomEntity14', id: 5001 } } });
 		const groups = plan.steps[1].writes.find((w) => w.kind === 'addGroups')!;
@@ -298,6 +307,11 @@ describe('verify', () => {
 		const wrong = { ...back, lines: new Map([[lkey, { ...lineRow, attributes: { ...lineRow.attributes, sg_amount: '999.99' } }]]), groups: {} };
 		expect(verify(plan, wrong, SITE, ids)).toEqual([`${lkey}: sg_amount reads back "999.99".`, 'Shot 101: Group 38 is not in sg_vendor_groups.']);
 		expect(verify(plan, { ...back, bids: new Map() }, SITE, ids)).toEqual([`${KEY_A}: no row reads back.`]);
+
+		const linked = planAward(input({ bids: [BID_A], scenario, options: { date: '2026-11-20', requestCode: 'RQ-1', appLinks: { bidA: 'https://bids.test/b/bidA' } } }));
+		const withLink = (url: string) => ({ ...back, bids: new Map([[KEY_A, { ...bidRow, attributes: { ...bidRow.attributes, sg_app_link: { url, name: 'sg-bids', link_type: 'web', type: 'Attachment', id: 77 } } }]]) });
+		expect(verify(linked, withLink('https://bids.test/b/bidA'), SITE, ids)).toEqual([]);
+		expect(verify(linked, withLink('https://elsewhere.test'), SITE, ids)).toEqual([`${KEY_A}: sg_app_link reads back "https://elsewhere.test".`]);
 	});
 
 	it('finds the Attachment a link minted', () => {

@@ -68,6 +68,8 @@ export interface SetupInput {
 	readonly bidStatuses?: readonly StatusOffer[];
 	/** The Vendor permission group's code. */
 	readonly vendorGroup: string;
+	/** Its display name, for the report's words. The code when absent. */
+	readonly vendorGroupName?: string;
 	/** The group's rights by entity type: the two slots, Shot, Asset and EventLogEntry. */
 	readonly rights: Readonly<Record<string, RightsRead>>;
 	/** The signed-in person's HumanUser id, which a person reading their own group sees in a rule. */
@@ -141,7 +143,7 @@ export interface SetupReport {
 export const LEAK_PATHS: readonly string[] = [
 	'A filter through a link. A vendor who can read a Bid Line can filter on the fields of a Bid it cannot see, and learn them one yes or no at a time.',
 	'A total grouped on a link. A summary of Bid Lines grouped on their Bid or their Shot shows each hidden row and the total of its lines.',
-	'The event log. Every value written to a Bid or a Bid Line shows in the event log, on a row the vendor cannot see too, while the Vendor role reads Event Log Entries.'
+	'The event log. Every value written to a Bid or a Bid Line shows in the event log, even for a row the vendor cannot see, while the Vendor role reads Event Log Entries.'
 ];
 
 const SLOT = /^CustomEntity\d+$/;
@@ -332,9 +334,9 @@ export function setupReport(input: SetupInput): SetupReport {
 		Asset: detectVendorField(input.fields.Asset, input.settings?.vendorField?.Asset)
 	};
 	const statuses = mapStatuses(input.bidStatuses ?? [], input.settings?.statuses);
-	const group = input.vendorGroup;
+	const group = input.vendorGroupName ?? input.vendorGroup;
 	const access: VendorAccess = {
-		group,
+		group: input.vendorGroup,
 		bid: bidType ? readAccess(input.rights[bidType]) : { state: 'unreadable', reason: 'Bid is not enabled.' },
 		line: lineType ? readAccess(input.rights[lineType]) : { state: 'unreadable', reason: 'Bid Line is not enabled.' },
 		eventLog: readAccess(input.rights.EventLogEntry),
