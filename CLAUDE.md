@@ -41,8 +41,9 @@ metaphors, no "not X, Y", no filler.
 
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
 - `src/lib/app/`: the app's own components (shell, banner, page header), and the request
-  builder's steps and page state under `builder/` and `builder.svelte.ts`, the comparison's grid,
-  scenario rail and page state under `compare/`.
+  builder's one page under `builder/` (header panel, items, summary rail, fields setting, review)
+  with its page state in `builder.svelte.ts`, the comparison's grid, scenario rail and page state
+  under `compare/`. What is required and what blocks the issue is `pure/readiness.ts`.
 - `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.
 - `src/lib/drafts.ts`: the one place a draft request is stored. Storage plugs in there.
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.

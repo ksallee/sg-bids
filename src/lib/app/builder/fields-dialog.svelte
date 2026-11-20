@@ -119,7 +119,7 @@
 				<Dialog.Title>Fields from Flow PT</Dialog.Title>
 				<Dialog.Description>
 					Which field on this site fills each thing a vendor reads. {status ? mappingWords(status).headline : ''} Mapping is optional: anything left unmapped can still be set per item in
-					the request. Kept for this project.
+					the request. Kept for this project in this browser.
 				</Dialog.Description>
 			</Dialog.Header>
 			<div class="flex min-h-0 flex-col gap-6 overflow-y-auto px-5 py-4">
