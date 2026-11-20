@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Store } from '$lib/server/store';
-import { draft, issuedWithTwoVendors, store, superuser } from './helpers';
+import { draft, forVendor, issuedWithTwoVendors, store, superuser, vendorIds } from './helpers';
 import { browser, type Handler } from './vendor-browser';
 
 const holder = vi.hoisted(() => ({ store: null as unknown }));
@@ -22,6 +22,12 @@ const reviseRoute = await import('../../src/routes/v/api/bid/revise/+server');
 
 const sql = superuser();
 const COOKIE = 'sg_bids_vendor';
+
+/** A draft as the vendor's page would send it for this request: lines on the vendor's item ids. */
+async function drafts(requestId: string) {
+	const ids = await vendorIds(sql, requestId);
+	return Object.assign((total: number) => forVendor(draft(total), ids), { ids });
+}
 
 beforeAll(() => {
 	holder.store = store();
@@ -97,7 +103,8 @@ describe('a vendor link opened where another vendor bid is open', () => {
 	});
 
 	it('refuses every write from A’s tab once the browser holds B’s link, and leaves B’s bid as it was', async () => {
-		const { a, b } = await issuedWithTwoVendors();
+		const { a, b, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
 		const s = holder.store as Store;
 		const bDraft = await s.saveDraftBid(b.token, draft(500_000));
 
@@ -105,7 +112,7 @@ describe('a vendor link opened where another vendor bid is open', () => {
 		const tab = browser('203.0.113.44');
 		await tab.open(openRoute, openPage, a.token);
 		const page = (await tab.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).json;
-		const saved = await tab.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: draft(100_000) });
+		const saved = await tab.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: vd(100_000) });
 		expect(saved.status).toBe(200);
 		const aBid = saved.json.bid.id as string;
 
@@ -115,8 +122,8 @@ describe('a vendor link opened where another vendor bid is open', () => {
 
 		// A's tab keeps going with what it loaded: every write is refused, with a reason.
 		const writes: [Handler, string, string, unknown][] = [
-			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: aBid, draft: draft(1) }],
-			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: bDraft.id, draft: draft(1) }],
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: aBid, draft: vd(1) }],
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: bDraft.id, draft: vd(1) }],
 			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: page.invitationId, bidId: aBid }],
 			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: page.invitationId, bidId: bDraft.id }],
 			[withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { invitationId: page.invitationId, bidId: bDraft.id }],
@@ -128,7 +135,7 @@ describe('a vendor link opened where another vendor bid is open', () => {
 			expect(answer.json).toEqual({ error: 'Another bid is open in this browser now. Reload the page to see whose.', reason: 'session' });
 		}
 		// A write that names no invitation is refused too.
-		expect((await tab.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: draft(1) })).status).toBe(400);
+		expect((await tab.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { draft: vd(1) })).status).toBe(400);
 		expect((await tab.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { bidId: bDraft.id })).status).toBe(400);
 
 		// B's draft is as B left it, still a draft, with B's amounts.
@@ -141,19 +148,20 @@ describe('a vendor link opened where another vendor bid is open', () => {
 	});
 
 	it('refuses a write for a bid the page did not load: another tab moved on', async () => {
-		const { a } = await issuedWithTwoVendors();
+		const { a, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
 		const A = browser('203.0.113.45');
 		await A.open(openRoute, openPage, a.token);
 		const page = (await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).json;
-		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: draft(100_000) });
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: vd(100_000) });
 		const v1 = first.json.bid.id as string;
 		// A tab that loaded before the first save still says no bid: refused.
-		const stale = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: draft(1) });
+		const stale = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: null, draft: vd(1) });
 		expect(stale.status).toBe(409);
 		expect(stale.json.reason).toBe('bid');
 		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: page.invitationId, bidId: v1 });
 		// After the submit, a save naming v1 would open a version the page never saw: refused.
-		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: v1, draft: draft(1) })).status).toBe(409);
+		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: page.invitationId, bidId: v1, draft: vd(1) })).status).toBe(409);
 		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: page.invitationId, bidId: v1 });
 		expect(revised.status).toBe(200);
 		expect(revised.json.bid.version).toBe(2);

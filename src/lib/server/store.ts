@@ -36,6 +36,7 @@ import {
 	type ScenarioRow
 } from '$lib/pure/rows';
 import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/pure/token';
+import type { ItemKey } from '$lib/pure/vendor-keys';
 import type { VendorBidRecord } from '$lib/pure/vendor-view';
 import { fromDatabase, StoreError } from './errors';
 
@@ -73,6 +74,8 @@ export interface VendorView {
 	readonly request: BidRequest;
 	/** This vendor's bids, oldest version first. */
 	readonly bids: readonly VendorBid[];
+	/** Each item's stored key and row id: the vendor sees the row id (`vendor-keys.ts`). */
+	readonly itemKeys: readonly ItemKey[];
 }
 
 export interface BidWithVendor {
@@ -299,6 +302,10 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	// Vendor.
 
+	function itemKey(row: RequestItemRow): ItemKey {
+		return { kind: row.kind, key: row.key, id: row.id };
+	}
+
 	/** The vendor principal behind a link token. One refusal for every bad token. */
 	async function resolveToken(token: unknown): Promise<{ principal: VendorPrincipal; row: InvitationRow }> {
 		const parsed = parseToken(token);
@@ -364,7 +371,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 			issuedAt: request.issued_at,
 			expiresAt: row.expires_at,
 			request: requestFromRows(request, items, [vendor]),
-			bids: await vendorBids(principal, request)
+			bids: await vendorBids(principal, request),
+			itemKeys: items.map(itemKey)
 		};
 	}
 
@@ -373,11 +381,15 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return (await vendorState(token)).records;
 	}
 
-	/** The token's invitation id beside its bids: what a write is checked against (`vendor-api.ts`). */
-	async function vendorState(token: unknown): Promise<{ invitationId: string; records: VendorBidRecord[] }> {
+	/**
+	 * The token's invitation id beside its bids and the request's item keys: what a write is checked
+	 * against and translated with (`vendor-api.ts`).
+	 */
+	async function vendorState(token: unknown): Promise<{ invitationId: string; records: VendorBidRecord[]; itemKeys: ItemKey[] }> {
 		const { principal } = await resolveToken(token);
 		const request = await vendorRequest(principal);
-		return { invitationId: principal.invitationId, records: await vendorRecords(principal, request) };
+		const [records, items] = await Promise.all([vendorRecords(principal, request), itemRows(principal, request.id)]);
+		return { invitationId: principal.invitationId, records, itemKeys: items.map(itemKey) };
 	}
 
 	async function vendorBid(principal: VendorPrincipal, request: RequestRow, bidId: string): Promise<VendorBid> {

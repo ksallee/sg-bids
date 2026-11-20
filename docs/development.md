@@ -144,6 +144,12 @@ Every answer under `/v` says `Referrer-Policy: no-referrer`, `Cache-Control: no-
 `src/lib/pure/vendor-view.ts` shapes each one, and `tests/db/vendor-endpoints.db.test.ts` walks
 every endpoint as one vendor of two and finds nothing of the other.
 
+A stored item key holds the Flow PT id (`shot-<id>`, `src/lib/pure/freeze.ts`), so a vendor never
+sees it. Each shot and asset goes out by its row id, and each line a vendor sends is read back to
+the stored key (`src/lib/pure/vendor-keys.ts`). Bids, scenarios and awards keep the stored keys
+and the Flow PT refs stay server side, for production and the award. The test seeds distinctive
+Flow PT ids and finds none in any vendor answer.
+
 Failed lookups are counted per client address: twenty in ten minutes, then 429 for the rest of the
 window (`src/lib/pure/rate-limit.ts`). The count lives in one server instance. On Vercel each
 instance keeps its own, so it slows a guesser and caps one instance's database calls; it is not a

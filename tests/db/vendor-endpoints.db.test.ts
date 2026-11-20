@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '$lib/pure/token';
 import { createRequests } from '$lib/server/requests';
 import type { Store } from '$lib/server/store';
-import { draft, issuedWithTwoVendors, rest, store, superuser } from './helpers';
+import { draft, forVendor, header, issuedWithTwoVendors, rest, store, superuser, tenant, vendor, vendorIds } from './helpers';
 import { browser, jarCookies, keys, type Handler } from './vendor-browser';
 
 const holder = vi.hoisted(() => ({ store: null as unknown }));
@@ -24,6 +24,12 @@ const reviseRoute = await import('../../src/routes/v/api/bid/revise/+server');
 
 const sql = superuser();
 
+/** A draft as the vendor's page would send it for this request: lines on the vendor's item ids. */
+async function drafts(requestId: string) {
+	const ids = await vendorIds(sql, requestId);
+	return Object.assign((total: number) => forVendor(draft(total), ids), { ids });
+}
+
 beforeAll(() => {
 	holder.store = store();
 });
@@ -32,9 +38,79 @@ afterAll(async () => {
 	await sql.end();
 });
 
+describe('the vendor endpoints and Flow PT', () => {
+	it('never show a vendor a Flow PT id: items go out by an opaque id, and production keeps the Flow PT ref', async () => {
+		const s = holder.store as Store;
+		const production = tenant();
+		// Keyed as the builder's freeze keys them: `shot-<Flow PT id>`, `asset-<Flow PT id>`.
+		const SHOT = 918273645;
+		const ASSET = 564738291;
+		const OTHER = 778899001;
+		const request = await s.createDraftRequest(production, {
+			code: 'BR-FPT',
+			header: header(),
+			items: {
+				shots: [
+					{ id: `shot-${SHOT}`, code: 'SH010', fpt: { type: 'Shot', id: SHOT }, omitted: false, assetIds: [`asset-${ASSET}`] },
+					{ id: `shot-${OTHER}`, code: 'SH020', fpt: { type: 'Shot', id: OTHER }, omitted: false, assetIds: [] }
+				],
+				assets: [{ id: `asset-${ASSET}`, name: 'Hero', fpt: { type: 'Asset', id: ASSET } }]
+			}
+		});
+		const a = await s.inviteVendor(production, request.id, vendor('Vendor A'));
+		await s.issueRequest(production, request.id);
+
+		const A = browser('203.0.113.30');
+		await A.open(open, openPage, a.token);
+		const req = (await A.call(requestRoute.GET as Handler, 'GET', '/v/api/request')).json;
+		const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+		const [sh010, sh020] = req.shots as { id: string; assetIds: string[] }[];
+		const [hero] = req.assets as { id: string }[];
+		for (const id of [sh010.id, sh020.id, hero.id]) expect(id).toMatch(UUID);
+		expect(sh010.assetIds).toEqual([hero.id]);
+
+		// A bids by those ids, through every move.
+		const me = req.invitationId as string;
+		const lines = [
+			{ target: { kind: 'shot', id: sh010.id }, total: { minor: 100_000, currency: 'USD' }, excluded: false },
+			{ target: { kind: 'shot', id: sh020.id }, total: { minor: 0, currency: 'USD' }, excluded: true },
+			{ target: { kind: 'asset', id: hero.id }, total: { minor: 50_000, currency: 'USD' }, excluded: false }
+		];
+		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: { ...draft(1), lines } });
+		expect(saved.status).toBe(200);
+		expect(saved.json.bid.lines.map((l: { target: { id: string } }) => l.target.id).sort()).toEqual([sh010.id, sh020.id, hero.id].sort());
+		const v1 = saved.json.bid.id as string;
+		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: v1 });
+		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: v1 });
+		expect(revised.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === sh010.id).total.minor).toBe(100_000);
+		await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
+
+		// The stored key or a made-up id names nothing a vendor may bid on.
+		for (const id of [`shot-${SHOT}`, '00000000-0000-4000-8000-000000000000', hero.id]) {
+			const wrong = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', {
+				invitationId: me,
+				bidId: revised.json.bid.id,
+				draft: { ...draft(1), lines: [{ ...lines[0], target: { kind: 'shot', id } }] }
+			});
+			expect(wrong.status, id).toBe(422);
+		}
+
+		// No Flow PT id in any answer, not even inside another number.
+		const everything = A.answers.map((x) => x.text).join('\n');
+		for (const id of [SHOT, ASSET, OTHER]) expect(everything, String(id)).not.toContain(String(id));
+
+		// Production sees the lines on its own keys, with the Flow PT refs the award writes to.
+		const [own] = await s.listBids(production, request.id);
+		expect(own.bid.lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
+		const stored = await s.getRequest(production, request.id);
+		expect(stored.shots[0].fpt).toEqual({ type: 'Shot', id: SHOT });
+	});
+});
+
 describe('the vendor endpoints', () => {
 	it('answer vendor A with nothing of vendor B, through every endpoint and every state', async () => {
-		const { a, b } = await issuedWithTwoVendors();
+		const { a, b, request: issued } = await issuedWithTwoVendors();
+		const vd = await drafts(issued.id);
 		const s = holder.store as Store;
 
 		// Vendor B bids with amounts, texts and versions of its own.
@@ -65,7 +141,7 @@ describe('the vendor endpoints', () => {
 		expect(me).toBe(a.invitation.id);
 
 		expect((await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid')).json).toEqual({ bid: null, versions: [] });
-		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: draft(100_000) });
+		const saved = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
 		expect(saved.status).toBe(200);
 		const aBid = saved.json.bid.id as string;
 		await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
@@ -75,14 +151,14 @@ describe('the vendor endpoints', () => {
 		expect(revised.json.bid.version).toBe(2);
 		expect(revised.json.versions).toHaveLength(2);
 		const v2 = revised.json.bid.id as string;
-		await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: v2, draft: draft(90_000) });
+		await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: v2, draft: vd(90_000) });
 
 		// A reaching for B's bids by id, and errors of every kind.
 		expect((await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: b2.id })).status).toBe(404);
 		expect((await A.call(withdrawRoute.POST as Handler, 'POST', '/v/api/bid/withdraw', { invitationId: me, bidId: b1.id })).status).toBe(404);
 		expect((await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: v2 })).status).toBe(409);
 		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: v2, draft: { nonsense: true } })).status).toBe(400);
-		const smuggled = { invitationId: me, bidId: v2, draft: { ...draft(1), lines: [{ ...draft(1).lines[0], id: b2.id }] } };
+		const smuggled = { invitationId: me, bidId: v2, draft: { ...vd(1), lines: [{ ...vd(1).lines[0], id: b2.id }] } };
 		expect((await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', smuggled)).status).toBe(200);
 		const final = await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: v2 });
 		expect(final.json.bid.status).toBe('submitted');
@@ -158,14 +234,15 @@ describe('the vendor endpoints', () => {
 	});
 
 	it('tell a vendor whose link production replaced, and open its bids with the new link', async () => {
-		const { production, a, b } = await issuedWithTwoVendors();
+		const { production, a, b, request } = await issuedWithTwoVendors();
+		const vd = await drafts(request.id);
 		const A = browser('203.0.113.13');
 		await A.open(open, openPage, a.token);
 		const me = a.invitation.id;
-		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: draft(100_000) });
+		const first = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: null, draft: vd(100_000) });
 		await A.call(submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: first.json.bid.id });
 		const revised = await A.call(reviseRoute.POST as Handler, 'POST', '/v/api/bid/revise', { invitationId: me, bidId: first.json.bid.id });
-		const second = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: revised.json.bid.id, draft: draft(95_000) });
+		const second = await A.call(bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: revised.json.bid.id, draft: vd(95_000) });
 		expect(second.json.bid.version).toBe(2);
 
 		// Production's "New link", the builder's reissue.
@@ -176,7 +253,7 @@ describe('the vendor endpoints', () => {
 		const calls: [Handler, string, string, unknown][] = [
 			[requestRoute.GET as Handler, 'GET', '/v/api/request', undefined],
 			[bidRoute.GET as Handler, 'GET', '/v/api/bid', undefined],
-			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: second.json.bid.id, draft: draft(1) }],
+			[bidRoute.PUT as Handler, 'PUT', '/v/api/bid', { invitationId: me, bidId: second.json.bid.id, draft: vd(1) }],
 			[submitRoute.POST as Handler, 'POST', '/v/api/bid/submit', { invitationId: me, bidId: second.json.bid.id }]
 		];
 		for (const [handler, method, path, body] of calls) {
@@ -194,7 +271,7 @@ describe('the vendor endpoints', () => {
 		const bid = await A.call(bidRoute.GET as Handler, 'GET', '/v/api/bid');
 		expect(bid.json.bid).toMatchObject({ id: second.json.bid.id, version: 2, status: 'draft' });
 		expect(bid.json.versions.map((v: { status: string }) => v.status)).toEqual(['submitted', 'draft']);
-		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === 'sh010').total.minor).toBe(95_000);
+		expect(bid.json.bid.lines.find((l: { target: { id: string } }) => l.target.id === vd.ids.get('shot:sh010')).total.minor).toBe(95_000);
 
 		// A forged cookie naming another vendor's invitation with a dead token learns nothing of it.
 		const forger = browser('203.0.113.14');

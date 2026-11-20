@@ -12,6 +12,7 @@
 import type { VendorBid } from '$lib/pure/model';
 import type { BidDraft } from '$lib/pure/rows';
 import { readDraft } from '$lib/pure/draft-input';
+import { vendorKeys, type VendorKeys } from '$lib/pure/vendor-keys';
 import { vendorBidView, vendorRequestView, type VendorBidRecord, type VendorBidView, type VendorRequestView } from '$lib/pure/vendor-view';
 import { StoreError } from './errors';
 import type { Store } from './store';
@@ -23,11 +24,24 @@ export const MOVED_ON = 'Your bid changed in another tab or window. Reload the p
 
 export async function loadRequest(store: Store, token: unknown): Promise<VendorRequestView> {
 	const view = await store.openInvitation(token);
-	return vendorRequestView(view);
+	return vendorRequestView({ ...view, keys: vendorKeys(view.itemKeys) });
 }
 
 export async function loadBid(store: Store, token: unknown): Promise<VendorBidView> {
-	return vendorBidView(await store.vendorBidRecords(token));
+	const { records, itemKeys } = await store.vendorState(token);
+	return vendorBidView(records, vendorKeys(itemKeys));
+}
+
+/** The draft with each line on its stored key. A line naming no item of the request is refused. */
+function stored(draft: BidDraft, keys: VendorKeys): BidDraft {
+	return {
+		...draft,
+		lines: draft.lines.map((line) => {
+			const target = keys.fromVendor(line.target);
+			if (!target) throw new StoreError(422, 'A line names a shot or asset that is not in the request. Reload the page.');
+			return { ...line, target };
+		})
+	};
 }
 
 /** The invitation and bid a write names. `bidId` null: the page had no bid yet. */
@@ -48,21 +62,21 @@ function binding(body: unknown, bidRequired: boolean): Binding {
  * The cookie's records, once the write's names match them: the same invitation, and as its latest
  * bid the one the page shows (`draftOnly`: and that one is an open draft, or there is none yet).
  */
-async function checked(store: Store, token: unknown, want: Binding, draftOnly: boolean): Promise<VendorBidRecord[]> {
-	const { invitationId, records } = await store.vendorState(token);
+async function checked(store: Store, token: unknown, want: Binding, draftOnly: boolean): Promise<{ records: VendorBidRecord[]; keys: VendorKeys }> {
+	const { invitationId, records, itemKeys } = await store.vendorState(token);
 	if (invitationId !== want.invitationId) throw new StoreError(409, OTHER_SESSION, { reason: 'session' });
 	const latest = records.at(-1);
 	const fits = want.bidId === null ? latest === undefined : latest?.bid.id === want.bidId && (!draftOnly || latest.bid.status === 'draft');
 	if (!fits) throw new StoreError(409, MOVED_ON, { reason: 'bid' });
-	return records;
+	return { records, keys: vendorKeys(itemKeys) };
 }
 
 export async function saveDraft(store: Store, token: unknown, body: unknown): Promise<VendorBidView> {
 	const want = binding(body, false);
 	const input = readDraft((body as { draft?: unknown } | null)?.draft);
 	if (!input.ok) throw new StoreError(400, input.message);
-	await checked(store, token, want, true);
-	await store.saveDraftBid(token, input.draft);
+	const { keys } = await checked(store, token, want, true);
+	await store.saveDraftBid(token, stored(input.draft, keys));
 	return loadBid(store, token);
 }
 
@@ -92,7 +106,7 @@ export function asDraft(bid: VendorBid): BidDraft {
 
 /** Opens the next version as a draft, a copy of the latest submitted or withdrawn one, dated today. */
 export async function revise(store: Store, token: unknown, body: unknown, today: string): Promise<VendorBidView> {
-	const records = await checked(store, token, binding(body, true), false);
+	const { records } = await checked(store, token, binding(body, true), false);
 	const latest = records.at(-1)!;
 	if (latest.bid.status === 'draft') throw new StoreError(409, 'You already have a draft open.');
 	await store.saveDraftBid(token, { ...asDraft(latest.bid), date: today });
