@@ -8,5 +8,6 @@ The hosted copy is a demo. Bids hold shot lists and prices, so a studio runs its
    form offers. Nothing else is needed today.
 4. Open the deployment and sign in as yourself.
 
-Supabase comes later: vendors will answer through a link, and the requests and bids will live in
-your own Supabase project. This page will say how to set it up then.
+Supabase: the requests and bids live in your own Supabase project. The schema is in
+`supabase/migrations/`; `docs/development.md` describes it. The steps to wire it to your deployment
+land with the first page that uses it.

@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest';
+import { allowed, scope, stamp, TABLES, type Principal, type Table } from './access';
+
+const production: Principal = { kind: 'production', siteHost: 'studio.example.com', projectId: 70 };
+const vendor: Principal = { kind: 'vendor', invitationId: 'inv-a', requestId: 'req-1' };
+const tenant = { site_host: 'studio.example.com', project_id: 70 };
+
+describe('production', () => {
+	it('reads every table through its tenant, and nothing else', () => {
+		for (const table of TABLES) {
+			expect(scope(production, table, 'read').eq).toEqual(tenant);
+		}
+	});
+
+	it('sees submitted and withdrawn bids, never a vendor draft', () => {
+		expect(scope(production, 'bids', 'read').in).toEqual({ status: ['submitted', 'withdrawn'] });
+	});
+
+	it('writes requests, items, invitations, scenarios and awards in its tenant', () => {
+		expect(scope(production, 'bid_requests', 'insert').eq).toEqual(tenant);
+		expect(scope(production, 'bid_requests', 'update').eq).toEqual(tenant);
+		expect(scope(production, 'request_items', 'insert').eq).toEqual(tenant);
+		expect(scope(production, 'invitations', 'insert').eq).toEqual(tenant);
+		expect(scope(production, 'invitations', 'update').eq).toEqual(tenant);
+		expect(scope(production, 'award_scenarios', 'update').eq).toEqual(tenant);
+		expect(scope(production, 'award_scenario_items', 'delete').eq).toEqual(tenant);
+		expect(scope(production, 'awards', 'insert').eq).toEqual(tenant);
+	});
+
+	it('never writes a bid or a bid line', () => {
+		for (const action of ['insert', 'update', 'delete'] as const) {
+			expect(allowed(production, 'bids', action)).toBe(false);
+			expect(allowed(production, 'bid_lines', action)).toBe(false);
+			expect(() => scope(production, 'bids', action)).toThrow();
+		}
+	});
+
+	it('never deletes a request or an invitation', () => {
+		expect(allowed(production, 'bid_requests', 'delete')).toBe(false);
+		expect(allowed(production, 'invitations', 'delete')).toBe(false);
+	});
+
+	it('refuses a principal with no tenant', () => {
+		expect(() => scope({ kind: 'production', siteHost: '', projectId: 70 }, 'bid_requests', 'read')).toThrow();
+		expect(() => scope({ kind: 'production', siteHost: 'a.example.com', projectId: 0 }, 'bid_requests', 'read')).toThrow();
+		expect(() => scope({ kind: 'production', siteHost: 'a.example.com', projectId: 1.5 }, 'bid_requests', 'read')).toThrow();
+	});
+});
+
+describe('vendor', () => {
+	it('reads its own invitation by id, and may only stamp it opened', () => {
+		expect(scope(vendor, 'invitations', 'read').eq).toEqual({ id: 'inv-a' });
+		expect(scope(vendor, 'invitations', 'update').eq).toEqual({ id: 'inv-a' });
+		expect(allowed(vendor, 'invitations', 'insert')).toBe(false);
+		expect(allowed(vendor, 'invitations', 'delete')).toBe(false);
+	});
+
+	it('reads the request it was invited to, once issued, and its items', () => {
+		expect(scope(vendor, 'bid_requests', 'read')).toEqual({ eq: { id: 'req-1' }, in: { status: ['issued', 'closed'] } });
+		expect(scope(vendor, 'request_items', 'read').eq).toEqual({ request_id: 'req-1' });
+		expect(allowed(vendor, 'bid_requests', 'update')).toBe(false);
+		expect(allowed(vendor, 'request_items', 'insert')).toBe(false);
+	});
+
+	it('reads and writes only bids and lines under its own invitation', () => {
+		for (const table of ['bids', 'bid_lines'] as const) {
+			for (const action of ['read', 'insert', 'update'] as const) {
+				expect(scope(vendor, table, action).eq).toEqual({ invitation_id: 'inv-a' });
+			}
+		}
+		expect(allowed(vendor, 'bids', 'delete')).toBe(false);
+	});
+
+	it('never reaches scenarios or awards', () => {
+		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards'];
+		for (const table of hidden) {
+			for (const action of ['read', 'insert', 'update', 'delete'] as const) {
+				expect(allowed(vendor, table, action)).toBe(false);
+			}
+		}
+	});
+
+	it('never filters by tenant, so it can never widen to the whole project', () => {
+		for (const table of TABLES) {
+			if (!allowed(vendor, table, 'read')) continue;
+			const { eq } = scope(vendor, table, 'read');
+			expect(Object.keys(eq)).not.toContain('site_host');
+			expect(Object.keys(eq)).not.toContain('project_id');
+		}
+	});
+
+	it('refuses a principal with no invitation', () => {
+		expect(() => scope({ kind: 'vendor', invitationId: '', requestId: 'req-1' }, 'bids', 'read')).toThrow();
+		expect(() => scope({ kind: 'vendor', invitationId: 'inv-a', requestId: '' }, 'bids', 'read')).toThrow();
+	});
+});
+
+describe('stamp', () => {
+	it('forces the scope onto a row to insert, whatever the row said', () => {
+		const row = { code: 'BR-1', site_host: 'evil.example.com', project_id: 1 };
+		expect(stamp(row, scope(production, 'bid_requests', 'insert'))).toEqual({ code: 'BR-1', ...tenant });
+	});
+});

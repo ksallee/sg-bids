@@ -1,0 +1,348 @@
+/**
+ * Rows of the database (`supabase/migrations/`) to the model (`model.ts`) and back.
+ *
+ * What is queried is a column: tenant, status, currency, the rate, a line's total in minor units.
+ * The rest of a header, a shot's fields and a line's detail is jsonb, in the model's own shape.
+ *
+ * - A request's `projectRef` is never stored: the tenant's project is the project.
+ * - A request's vendors are its invitations. The request row holds none, so a vendor reading the
+ *   request learns nothing of the others.
+ * - A shot or asset is a request item: kind, key (the model's id), code (shot code or asset name).
+ * - A bid's vendor is its invitation. A line points at its item by kind and key.
+ * - A rate is kept as the exact string typed, never a float.
+ */
+
+import type {
+	AwardScenario,
+	BidLine,
+	BidRequest,
+	EntityRef,
+	InvitedVendor,
+	RequestAsset,
+	RequestHeader,
+	RequestShot,
+	ScenarioPick,
+	Target,
+	VendorBid
+} from './model';
+import { targetKey } from './model';
+import { minorDigits, money } from './money';
+import { isPercent } from './percent';
+import { checkBid } from './totals';
+
+type Json = Record<string, unknown>;
+
+interface Tenant {
+	site_host: string;
+	project_id: number;
+}
+
+export type RequestStatus = 'draft' | 'issued' | 'closed';
+export type BidRowStatus = 'draft' | 'submitted' | 'withdrawn';
+
+export interface RequestRow extends Tenant {
+	id: string;
+	code: string;
+	round: number;
+	status: RequestStatus;
+	base_currency: string;
+	header: Json;
+	due_on: string | null;
+	issued_at: string | null;
+	closed_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+/** A shot or asset as written: everything but its row id and parents. */
+export interface ItemColumns {
+	kind: 'shot' | 'asset';
+	key: string;
+	code: string;
+	position: number;
+	fpt_type: string | null;
+	fpt_id: number | null;
+	fields: Json;
+	omitted: boolean;
+}
+
+export interface RequestItemRow extends Tenant, ItemColumns {
+	id: string;
+	request_id: string;
+}
+
+export interface VendorColumns {
+	vendor_name: string;
+	vendor_group_id: number | null;
+	contact_email: string;
+	details: Json;
+}
+
+export interface InvitationRow extends Tenant, VendorColumns {
+	id: string;
+	request_id: string;
+	token_hash: string;
+	expires_at: string;
+	revoked_at: string | null;
+	last_opened_at: string | null;
+	created_at: string;
+}
+
+export interface BidColumns {
+	currency: string;
+	exchange_rate: string | null;
+	exchange_rate_date: string | null;
+	header: Json;
+	non_shot_costs: unknown[];
+	rebate_splits: unknown[];
+}
+
+export interface BidRow extends Tenant, BidColumns {
+	id: string;
+	invitation_id: string;
+	request_id: string;
+	version: number;
+	status: BidRowStatus;
+	submitted_at: string | null;
+	withdrawn_at: string | null;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface LineColumns {
+	item_kind: 'shot' | 'asset';
+	item_key: string;
+	total_minor: number;
+	excluded: boolean;
+	detail: Json;
+}
+
+export interface BidLineRow extends Tenant, LineColumns {
+	id: string;
+	bid_id: string;
+	invitation_id: string;
+	request_id: string;
+}
+
+export interface ScenarioRow extends Tenant {
+	id: string;
+	request_id: string;
+	name: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ScenarioItemColumns {
+	item_kind: 'shot' | 'asset';
+	item_key: string;
+	bid_id: string;
+	share_percent: string;
+	position: number;
+}
+
+export interface ScenarioItemRow extends Tenant, ScenarioItemColumns {
+	id: string;
+	scenario_id: string;
+	request_id: string;
+}
+
+/** Drops keys whose value is undefined, so jsonb and the model match key for key. */
+function defined(record: Json): Json {
+	return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
+}
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+// The request.
+
+export function headerToColumns(header: RequestHeader): Pick<RequestRow, 'round' | 'base_currency' | 'due_on' | 'header'> {
+	minorDigits(header.baseCurrency);
+	if (!Number.isSafeInteger(header.round) || header.round < 1) throw new Error(`Round ${header.round} is not a whole number from 1.`);
+	if (header.dueDate !== undefined && !DAY.test(header.dueDate)) throw new Error(`'${header.dueDate}' is not a day written YYYY-MM-DD.`);
+	const { round, baseCurrency, dueDate, projectRef, ...rest } = header;
+	return { round, base_currency: baseCurrency, due_on: dueDate ?? null, header: defined(rest) };
+}
+
+function entity(type: string | null, id: number | null): { fpt?: EntityRef } {
+	return type !== null && id !== null ? { fpt: { type, id } } : {};
+}
+
+export function itemsToRows(shots: readonly RequestShot[], assets: readonly RequestAsset[]): ItemColumns[] {
+	const rows: ItemColumns[] = [];
+	const seen = new Set<string>();
+	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, fields: Json) => {
+		const name = `${kind}:${key}`;
+		if (!key) throw new Error(`A ${kind} needs an id.`);
+		if (seen.has(name)) throw new Error(`Two ${kind}s have the id '${key}'.`);
+		seen.add(name);
+		rows.push({ kind, key, code, position: rows.length, fpt_type: fpt?.type ?? null, fpt_id: fpt?.id ?? null, fields: defined(fields), omitted });
+	};
+	for (const { id, code, fpt, omitted, ...fields } of shots) push('shot', id, code, fpt, omitted, fields);
+	for (const { id, name, fpt, ...fields } of assets) push('asset', id, name, fpt, false, fields);
+	return rows;
+}
+
+export function itemsFromRows(rows: readonly ItemColumns[]): { shots: RequestShot[]; assets: RequestAsset[] } {
+	const sorted = [...rows].sort((a, b) => a.position - b.position);
+	const shots = sorted
+		.filter((row) => row.kind === 'shot')
+		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id) }));
+	const assets = sorted
+		.filter((row) => row.kind === 'asset')
+		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id) }));
+	return { shots, assets };
+}
+
+export function requestFromRows(row: RequestRow, items: readonly ItemColumns[], vendors: readonly InvitedVendor[]): BidRequest {
+	const stored = row.header as Partial<RequestHeader>;
+	const header: RequestHeader = {
+		...stored,
+		project: stored.project ?? '',
+		assumptions: stored.assumptions ?? [],
+		projectRef: { type: 'Project', id: row.project_id },
+		round: row.round,
+		baseCurrency: row.base_currency,
+		...(row.due_on ? { dueDate: row.due_on } : {})
+	};
+	return { id: row.id, header, ...itemsFromRows(items), vendors: [...vendors] };
+}
+
+// The vendor, through its invitation.
+
+export function vendorToColumns(vendor: Omit<InvitedVendor, 'id'>): VendorColumns {
+	if (vendor.fpt && vendor.fpt.type !== 'Group') throw new Error(`A vendor's Flow PT entity is a Group, not a ${vendor.fpt.type}.`);
+	const { name, fpt, email, ndaExecuted, ndaFile, tpn, capacity } = vendor;
+	return {
+		vendor_name: name,
+		vendor_group_id: fpt?.id ?? null,
+		contact_email: email,
+		details: defined({ ndaExecuted, ndaFile, tpn, capacity })
+	};
+}
+
+export function vendorFromRow(row: Pick<InvitationRow, 'id' | keyof VendorColumns>): InvitedVendor {
+	const details = row.details as Partial<InvitedVendor>;
+	return {
+		id: row.id,
+		name: row.vendor_name,
+		email: row.contact_email,
+		...(row.vendor_group_id !== null ? { fpt: { type: 'Group', id: row.vendor_group_id } } : {}),
+		...defined({ ndaFile: details.ndaFile, tpn: details.tpn, capacity: details.capacity }),
+		ndaExecuted: details.ndaExecuted === true
+	};
+}
+
+// The bid.
+
+/** What a vendor sends: a bid without the ids, round and status the server owns. */
+export type BidDraft = Omit<VendorBid, 'id' | 'requestId' | 'vendorId' | 'round' | 'status' | 'lines'> & {
+	readonly lines: readonly (Omit<BidLine, 'id'> & { readonly id?: string })[];
+};
+
+interface StoredBidHeader {
+	number?: string;
+	date?: string;
+	validUntil?: string;
+	assumptions?: string[];
+	exclusions?: string[];
+	milestones?: VendorBid['milestones'];
+	discount?: VendorBid['discount'];
+	tax?: VendorBid['tax'];
+}
+
+export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumns; lines: LineColumns[] } {
+	const lines = bid.lines.map((line, index) => ({ ...line, id: line.id ?? `line ${index + 1}` }));
+	checkBid({ ...bid, id: 'draft', requestId: '', vendorId: '', round: 1, status: 'draft', lines }, baseCurrency);
+	const seen = new Set<string>();
+	for (const line of lines) {
+		const key = targetKey(line.target);
+		if (seen.has(key)) throw new Error(`Two lines are for ${line.target.kind} ${line.target.id}.`);
+		seen.add(key);
+	}
+	const header: StoredBidHeader = {
+		number: bid.number,
+		date: bid.date,
+		validUntil: bid.validUntil,
+		assumptions: [...bid.assumptions],
+		exclusions: [...bid.exclusions],
+		milestones: bid.milestones,
+		discount: bid.discount,
+		tax: bid.tax
+	};
+	return {
+		bid: {
+			currency: bid.currency,
+			exchange_rate: bid.rate?.rate ?? null,
+			exchange_rate_date: bid.rate?.date ?? null,
+			header: defined({ ...header }),
+			non_shot_costs: [...bid.costs],
+			rebate_splits: [...bid.rebate]
+		},
+		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, elementsNeeded, startWeek }) => ({
+			item_kind: target.kind,
+			item_key: target.id,
+			total_minor: total.minor,
+			excluded,
+			detail: defined({ departments, compute, markup, notes, methodology, elementsNeeded, startWeek })
+		}))
+	};
+}
+
+export function bidFromRows(row: BidRow, lines: readonly BidLineRow[], request: { round: number; baseCurrency: string }): VendorBid {
+	const header = row.header as StoredBidHeader;
+	return {
+		id: row.id,
+		requestId: row.request_id,
+		vendorId: row.invitation_id,
+		number: header.number ?? '',
+		round: request.round,
+		date: header.date ?? '',
+		status: row.status,
+		currency: row.currency,
+		rate:
+			row.exchange_rate !== null && row.exchange_rate_date !== null
+				? { from: row.currency, to: request.baseCurrency, rate: row.exchange_rate, date: row.exchange_rate_date }
+				: null,
+		...(header.validUntil !== undefined ? { validUntil: header.validUntil } : {}),
+		assumptions: header.assumptions ?? [],
+		exclusions: header.exclusions ?? [],
+		milestones: header.milestones ?? [],
+		lines: lines.map(
+			(line): BidLine => ({
+				id: line.id,
+				target: { kind: line.item_kind, id: line.item_key } as Target,
+				total: money(line.total_minor, row.currency),
+				excluded: line.excluded,
+				...(line.detail as Partial<BidLine>)
+			})
+		),
+		costs: row.non_shot_costs as VendorBid['costs'],
+		discount: header.discount ?? null,
+		tax: header.tax ?? null,
+		rebate: row.rebate_splits as VendorBid['rebate']
+	};
+}
+
+// The award scenario.
+
+export function scenarioToRows(picks: readonly ScenarioPick[]): ScenarioItemColumns[] {
+	const rows: ScenarioItemColumns[] = [];
+	for (const pick of picks) {
+		for (const share of pick.shares) {
+			if (!isPercent(share.percent)) throw new Error(`'${share.percent}' is not a percent.`);
+			rows.push({ item_kind: pick.target.kind, item_key: pick.target.id, bid_id: share.bidId, share_percent: share.percent, position: rows.length });
+		}
+	}
+	return rows;
+}
+
+export function scenarioFromRows(row: ScenarioRow, items: readonly ScenarioItemColumns[]): AwardScenario {
+	const picks = new Map<string, { target: Target; shares: { bidId: string; percent: string }[] }>();
+	for (const item of [...items].sort((a, b) => a.position - b.position)) {
+		const target = { kind: item.item_kind, id: item.item_key } as Target;
+		const key = targetKey(target);
+		if (!picks.has(key)) picks.set(key, { target, shares: [] });
+		picks.get(key)!.shares.push({ bidId: item.bid_id, percent: item.share_percent });
+	}
+	return { id: row.id, requestId: row.request_id, name: row.name, picks: [...picks.values()] };
+}
