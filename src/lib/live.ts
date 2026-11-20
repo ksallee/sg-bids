@@ -211,6 +211,15 @@ export async function productionClaim(projectId: number): Promise<ProductionClai
 	throw new Error('Sign in to Flow PT.');
 }
 
+/** The claim for the whole site, for the requests list: the same credential, no project. */
+export async function siteClaim(): Promise<Omit<ProductionClaim, 'projectId'>> {
+	await prepareLive();
+	if (state.problem) throw new Error(state.problem);
+	if (state.session && state.session.siteUrl === state.siteUrl) return { siteUrl: state.siteUrl, sessionToken: state.session.token };
+	if (devBearer) return { siteUrl: state.siteUrl, bearer: await devBearer() };
+	throw new Error('Sign in to Flow PT.');
+}
+
 /**
  * The site and the bearer behind the client, for the calls `RestClient` lacks: a field create and a
  * permission group read (`src/lib/io/fpt-api.ts`). The bearer stays in this browser.

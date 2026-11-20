@@ -4,7 +4,7 @@
  * and takes the tenant from that, never from the body.
  */
 
-import { productionClaim } from '$lib/live';
+import { productionClaim, siteClaim } from '$lib/live';
 import type { BidRequest, InvitedVendor } from '$lib/pure/model';
 import type { InvitationState } from '$lib/pure/invitations';
 import type { Publication } from '$lib/pure/award-record';
@@ -54,14 +54,36 @@ export class ApiError extends Error {
 	}
 }
 
+/** A request in the list across the site. */
+export interface SiteRequestOverview extends RequestOverview {
+	projectId: number;
+}
+
+export interface RequestsAcross {
+	/** The projects that hold a listed request. */
+	projects: { id: number; name: string }[];
+	requests: SiteRequestOverview[];
+}
+
+/**
+ * The signed-in person's requests in every project they may read on the site. The server lists
+ * those projects with the person's own bearer; the browser sends no project.
+ */
+export async function listAcross(): Promise<RequestsAcross> {
+	return post<RequestsAcross>('requests', { claim: await siteClaim() });
+}
+
 export async function call<T>(action: string, projectId: number, body: Record<string, unknown> = {}): Promise<T> {
-	const claim = await productionClaim(projectId);
+	return post<T>(action, { ...body, claim: await productionClaim(projectId) });
+}
+
+async function post<T>(action: string, body: Record<string, unknown>): Promise<T> {
 	let res: Response;
 	try {
 		res = await fetch(`/api/production/${action}`, {
 			method: 'POST',
 			headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-			body: JSON.stringify({ ...body, claim })
+			body: JSON.stringify(body)
 		});
 	} catch {
 		throw new ApiError(0, 'The app could not reach its server.');

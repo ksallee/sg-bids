@@ -16,17 +16,19 @@
  * Every call asks the site again. Nothing is cached, so a revoked session stops at once.
  */
 
-import type { ProductionPrincipal } from '$lib/pure/access';
+import type { ProductionPrincipal, SitePrincipal } from '$lib/pure/access';
 import {
 	bearerUser,
 	DEFAULT_PRODUCTION_ROLES,
 	groupsAnswer,
 	ownGroupCode,
 	projectAnswer,
+	projectsPage,
 	ruleSetAnswer,
 	siteOrigin,
 	tokenAnswer,
-	type FptUser
+	type FptUser,
+	type ProjectRow
 } from '$lib/pure/fpt-session';
 import { StoreError } from './errors';
 
@@ -46,6 +48,8 @@ export interface VerifyOptions {
 	readonly allowScript?: boolean;
 	/** Permission group codes allowed as production. Default admin and manager. */
 	readonly productionRoles?: readonly string[];
+	/** Pages of the project list read at most, 500 rows each, before the site is taken as failing. */
+	readonly maxProjectPages?: number;
 }
 
 export interface VerifiedProduction extends ProductionPrincipal {
@@ -102,17 +106,11 @@ async function role(origin: string, bearer: string, userId: number, options: Ver
 	return code;
 }
 
-export async function verifyProduction(claim: ProductionClaim, options: VerifyOptions): Promise<VerifiedProduction> {
-	const site = siteOrigin(claim.siteUrl, options.allowedHosts);
-	if (!site) throw new StoreError(403, 'This app does not serve that site.');
-	const projectId = claim.projectId;
-	if (typeof projectId !== 'number' || !Number.isSafeInteger(projectId) || projectId <= 0) {
-		throw new StoreError(400, 'Name the project by its Flow PT id.');
-	}
-
+/** The bearer behind the claim, minted from a session token or as sent, and the person it names. */
+async function credential(claim: { sessionToken?: unknown; bearer?: unknown }, origin: string, options: VerifyOptions): Promise<{ bearer: string; user: FptUser }> {
 	let bearer: string;
 	if (typeof claim.sessionToken === 'string' && claim.sessionToken !== '') {
-		bearer = await mint(site.origin, claim.sessionToken, options.fetch);
+		bearer = await mint(origin, claim.sessionToken, options.fetch);
 	} else if (typeof claim.bearer === 'string' && claim.bearer !== '') {
 		bearer = claim.bearer;
 	} else {
@@ -124,6 +122,18 @@ export async function verifyProduction(claim: ProductionClaim, options: VerifyOp
 	if (user.type !== 'HumanUser' && !(options.allowScript && user.type === 'ApiUser')) {
 		throw new StoreError(403, 'Sign in to Flow PT as a person.');
 	}
+	return { bearer, user };
+}
+
+export async function verifyProduction(claim: ProductionClaim, options: VerifyOptions): Promise<VerifiedProduction> {
+	const site = siteOrigin(claim.siteUrl, options.allowedHosts);
+	if (!site) throw new StoreError(403, 'This app does not serve that site.');
+	const projectId = claim.projectId;
+	if (typeof projectId !== 'number' || !Number.isSafeInteger(projectId) || projectId <= 0) {
+		throw new StoreError(400, 'Name the project by its Flow PT id.');
+	}
+
+	const { bearer, user } = await credential(claim, site.origin, options);
 
 	let res: Response;
 	try {
@@ -147,4 +157,47 @@ export async function verifyProduction(claim: ProductionClaim, options: VerifyOp
 
 	const code = user.type === 'ApiUser' ? 'script' : await role(site.origin, bearer, user.id, options);
 	return { kind: 'production', siteHost: site.host, projectId, user, role: code };
+}
+
+/** What the browser sends to list across the site: no project. Anything else in it is ignored. */
+export interface SiteClaim {
+	readonly siteUrl: unknown;
+	readonly sessionToken?: unknown;
+	readonly bearer?: unknown;
+}
+
+export interface VerifiedSite extends SitePrincipal {
+	readonly user: FptUser;
+	readonly role: string;
+	/** The projects the person's own bearer listed, with their names. */
+	readonly projects: readonly ProjectRow[];
+}
+
+const PROJECT_PAGE = 500;
+
+/**
+ * Production across a site, for the requests list: the same person and role checks as a project's,
+ * then the projects the person's own bearer lists on that site (027: a person reads only the
+ * projects they may see, as a single read 404s on one they may not, 159). Those ids, and nothing
+ * the client sent, are the filter. Pages until an empty one (006), at most `maxProjectPages`.
+ */
+export async function verifyProductionSite(claim: SiteClaim, options: VerifyOptions): Promise<VerifiedSite> {
+	const site = siteOrigin(claim.siteUrl, options.allowedHosts);
+	if (!site) throw new StoreError(403, 'This app does not serve that site.');
+	const { bearer, user } = await credential(claim, site.origin, options);
+	const code = user.type === 'ApiUser' ? 'script' : await role(site.origin, bearer, user.id, options);
+
+	const projects: ProjectRow[] = [];
+	const cap = options.maxProjectPages ?? 40;
+	for (let page = 1; ; page++) {
+		if (page > cap) throw new StoreError(502, 'Flow PT listed more projects than this app reads.');
+		const answer = await read(`${site.origin}/api/v1/entity/projects?fields=name&sort=id&page[size]=${PROJECT_PAGE}&page[number]=${page}`, bearer, options.fetch);
+		const parsed = projectsPage(answer.status, answer.body);
+		if (parsed === 'bearer') throw new StoreError(401, 'Flow PT refused the session. Sign in again.');
+		if (parsed === 'site') throw new StoreError(502, 'Flow PT did not answer as expected.');
+		if (parsed.projects.length === 0) break;
+		projects.push(...parsed.projects);
+	}
+	const unique = [...new Map(projects.map((p) => [p.id, p])).values()];
+	return { kind: 'production-site', siteHost: site.host, projectIds: unique.map((p) => p.id), projects: unique, user, role: code };
 }

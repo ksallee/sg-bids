@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedHosts, bearerUser, groupsAnswer, ownGroupCode, productionRoles, projectAnswer, ruleSetAnswer, siteOrigin, tokenAnswer } from './fpt-session';
+import { allowedHosts, bearerUser, groupsAnswer, ownGroupCode, productionRoles, projectAnswer, projectsPage, ruleSetAnswer, siteOrigin, tokenAnswer } from './fpt-session';
 
 /** A bearer shaped like the corpus' (027, 052): three segments, the middle one base64url JSON. */
 function bearer(claims: Record<string, unknown>): string {
@@ -151,6 +151,30 @@ describe('projectAnswer', () => {
 		expect(projectAnswer(200, { data: { type: 'Project', id: 71 } }, 70)).toBe('site');
 		expect(projectAnswer(200, { data: { type: 'Shot', id: 70 } }, 70)).toBe('site');
 		expect(projectAnswer(500, null, 70)).toBe('site');
+	});
+});
+
+describe('projectsPage', () => {
+	const row = (id: number, name: unknown) => ({ type: 'Project', attributes: { name }, id, links: { self: `/api/v1/entity/projects/${id}` } });
+
+	it('reads a page of the Project rows the bearer may see (027: a lower level reads fewer rows)', () => {
+		const body = { data: [row(70, 'Show'), row(91, 'Kids Room')], links: { self: '/api/v1/entity/projects?page[number]=1', next: '/api/v1/entity/projects?page[number]=2' } };
+		expect(projectsPage(200, body)).toEqual({ projects: [{ id: 70, name: 'Show' }, { id: 91, name: 'Kids Room' }] });
+	});
+
+	it('answers an empty page as the end, whatever links.next says (006)', () => {
+		expect(projectsPage(200, { data: [], links: { next: '/api/v1/entity/projects?page[number]=3' } })).toEqual({ projects: [] });
+	});
+
+	it('names a project with no name by its id, and drops a row that is not a Project', () => {
+		expect(projectsPage(200, { data: [row(5, null), { type: 'Shot', id: 6, attributes: {} }, { type: 'Project', id: 'x' }] })).toEqual({ projects: [{ id: 5, name: 'Project 5' }] });
+	});
+
+	it('is a bad bearer on 401 code 102 (133), and the site failing on anything else', () => {
+		expect(projectsPage(401, { errors: [{ status: 401, code: 102, title: 'Unauthorized' }] })).toBe('bearer');
+		expect(projectsPage(500, null)).toBe('site');
+		expect(projectsPage(200, { data: 'nope' })).toBe('site');
+		expect(projectsPage(200, null)).toBe('site');
 	});
 });
 

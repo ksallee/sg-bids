@@ -5,7 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { scope, type ProductionPrincipal, type Table } from '$lib/pure/access';
+import { scope, siteScope, type ProductionPrincipal, type SitePrincipal, type Table } from '$lib/pure/access';
 import { invitationState, requestCounts, type BidFacts, type InvitationFacts, type InvitationState } from '$lib/pure/invitations';
 import type { InvitedVendor, RequestHeader } from '$lib/pure/model';
 import { vendorFromRow, type RequestRow, type VendorColumns } from '$lib/pure/rows';
@@ -23,6 +23,11 @@ export interface RequestOverview {
 	readonly issuedAt: string | null;
 	readonly invited: number;
 	readonly submitted: number;
+}
+
+/** A request in the list across a site: the overview and its project. */
+export interface SiteRequestOverview extends RequestOverview {
+	readonly projectId: number;
 }
 
 export interface InvitationView {
@@ -60,19 +65,20 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 		return query;
 	}
 
-	/** The project's requests, newest first, with how many vendors are invited and have submitted. */
-	async function listOverview(principal: ProductionPrincipal): Promise<RequestOverview[]> {
-		const rows = await run<RequestRow[]>(read(principal, 'bid_requests', '*').order('created_at', { ascending: false }));
+	/** Requests newest first, with how many vendors are invited and have submitted, read through `scoped`. */
+	async function overview(scoped: (table: Table, columns: string) => Query): Promise<(RequestOverview & { projectId: number })[]> {
+		const rows = await run<RequestRow[]>(scoped('bid_requests', '*').order('created_at', { ascending: false }));
 		if (rows.length === 0) return [];
 		const ids = rows.map((row) => row.id);
-		const invitations = await run<InvitationFacts[]>(read(principal, 'invitations', INVITATION_FACTS).in('request_id', ids));
-		const bids = await run<BidFacts[]>(read(principal, 'bids', BID_FACTS).in('request_id', ids));
+		const invitations = await run<InvitationFacts[]>(scoped('invitations', INVITATION_FACTS).in('request_id', ids));
+		const bids = await run<BidFacts[]>(scoped('bids', BID_FACTS).in('request_id', ids));
 		const counts = requestCounts(invitations, bids, now());
 		return rows.map((row) => {
 			const header = row.header as Partial<RequestHeader>;
 			const count = counts.get(row.id) ?? { invited: 0, submitted: 0 };
 			return {
 				id: row.id,
+				projectId: row.project_id,
 				code: row.code,
 				title: typeof header.title === 'string' ? header.title : null,
 				round: row.round,
@@ -81,6 +87,27 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 				issuedAt: row.issued_at,
 				...count
 			};
+		});
+	}
+
+	/** The project's requests, newest first, with how many vendors are invited and have submitted. */
+	async function listOverview(principal: ProductionPrincipal): Promise<RequestOverview[]> {
+		const rows = await overview((table, columns) => read(principal, table, columns));
+		return rows.map(({ projectId: _, ...row }) => row);
+	}
+
+	/**
+	 * The requests of every project the server verified for the person on the site (`siteScope`),
+	 * newest first, each with its project. No project, no read.
+	 */
+	async function listAcross(principal: SitePrincipal): Promise<SiteRequestOverview[]> {
+		siteScope(principal, 'bid_requests');
+		if (principal.projectIds.length === 0) return [];
+		return overview((table, columns) => {
+			const given = siteScope(principal, table);
+			let query: Query = db.from(table).select(columns).match(given.eq);
+			for (const [column, values] of Object.entries(given.in ?? {})) query = query.in(column, [...values]);
+			return query;
 		});
 	}
 
@@ -129,7 +156,7 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 		return { status: row.status, issuedAt: row.issued_at };
 	}
 
-	return { listOverview, listInvitations, reissueInvitation, requestMeta };
+	return { listOverview, listAcross, listInvitations, reissueInvitation, requestMeta };
 }
 
 export type Requests = ReturnType<typeof createRequests>;

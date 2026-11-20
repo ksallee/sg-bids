@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowed, scope, stamp, TABLES, type Principal, type Table } from './access';
+import { allowed, scope, siteScope, stamp, TABLES, type Principal, type SitePrincipal, type Table } from './access';
 
 const production: Principal = { kind: 'production', siteHost: 'studio.example.com', projectId: 70 };
 const vendor: Principal = { kind: 'vendor', invitationId: 'inv-a', requestId: 'req-1' };
@@ -102,5 +102,41 @@ describe('stamp', () => {
 	it('forces the scope onto a row to insert, whatever the row said', () => {
 		const row = { code: 'BR-1', site_host: 'evil.example.com', project_id: 1 };
 		expect(stamp(row, scope(production, 'bid_requests', 'insert'))).toEqual({ code: 'BR-1', ...tenant });
+	});
+});
+
+describe('production across its readable projects', () => {
+	const site: SitePrincipal = { kind: 'production-site', siteHost: 'studio.example.com', projectIds: [70, 91] };
+
+	it('reads requests, invitations and bids of its site, in the projects it was verified for only', () => {
+		expect(siteScope(site, 'bid_requests')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
+		expect(siteScope(site, 'invitations')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
+	});
+
+	it('sees submitted and withdrawn bids, never a vendor draft', () => {
+		expect(siteScope(site, 'bids')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91], status: ['submitted', 'withdrawn'] } });
+	});
+
+	it('reads nothing else: no lines, no scenarios, no awards, no rates', () => {
+		for (const table of ['request_items', 'bid_lines', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'] as Table[]) {
+			expect(() => siteScope(site, table)).toThrow();
+		}
+	});
+
+	it('refuses a principal with no site, or a project id that is not one', () => {
+		expect(() => siteScope({ ...site, siteHost: '' }, 'bid_requests')).toThrow();
+		expect(() => siteScope({ ...site, projectIds: [70, 0] }, 'bid_requests')).toThrow();
+		expect(() => siteScope({ ...site, projectIds: [1.5] }, 'bid_requests')).toThrow();
+	});
+
+	it('copies the list, so a caller cannot widen it after the check', () => {
+		const ids = [70];
+		const given = siteScope({ ...site, projectIds: ids }, 'bid_requests');
+		ids.push(99);
+		expect(given.in?.project_id).toEqual([70]);
+	});
+
+	it('is no production principal: scope refuses it', () => {
+		expect(() => scope(site as unknown as Principal, 'bid_requests', 'read')).toThrow();
 	});
 });
