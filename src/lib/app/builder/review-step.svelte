@@ -66,7 +66,9 @@
 				</div>
 			</dl>
 
-			{#if blocked.length > 0}
+			{#if builder.readOnly}
+				<!-- Issued: nothing blocks it any more. -->
+			{:else if blocked.length > 0}
 				<div class="border-warning/60 bg-warning/10 flex flex-col gap-2 rounded-lg border p-3 text-sm" role="alert" data-slot="review-blockers">
 					<p class="flex items-center gap-2 font-medium"><TriangleAlert class="text-warning size-4" aria-hidden="true" />Not ready yet</p>
 					<ul class="flex flex-col gap-1">

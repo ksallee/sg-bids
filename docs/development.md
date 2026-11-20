@@ -80,6 +80,16 @@ only be withdrawn). Writes that must land whole are SQL functions: `sg_save_requ
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
 
+### Production endpoints
+
+The browser reaches the data layer through `src/routes/api/production/<action>`: `list`, `get`,
+`save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`. Each is a POST whose body carries
+`claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
+`production.ts` before anything else. `src/lib/pure/wire.ts` checks the rest of the body and lets
+through only the model's header and item fields. The builder's drafts go through
+`src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
+`reissue`; the vendor pages live under `/v/`.
+
 ### Database tests
 
     pnpm test:db
