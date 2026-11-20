@@ -7,6 +7,7 @@
 	import { currencyLabel } from '$lib/pure/currencies';
 	import type { BidRequest } from '$lib/pure/model';
 	import { summarize, vendorView } from '$lib/pure/request';
+	import { safeHref } from '$lib/pure/safe-href';
 
 	let { request }: { request: BidRequest } = $props();
 
@@ -53,8 +54,11 @@
 				</dl>
 			{/if}
 			{#if h.materialLink}
+				{@const href = safeHref(h.materialLink)}
 				<p class="text-sm">
-					Bid material: <a class="underline decoration-current/40 underline-offset-2 hover:decoration-current break-all" href={h.materialLink} target="_blank" rel="noopener">{h.materialLink}</a>
+					Bid material:
+					{#if href}<a class="underline decoration-current/40 underline-offset-2 hover:decoration-current break-all" {href} target="_blank" rel="noopener noreferrer">{h.materialLink}</a
+						>{:else}<span class="break-all">{h.materialLink}</span>{/if}
 				</p>
 			{/if}
 		</header>

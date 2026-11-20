@@ -21,6 +21,7 @@
 import { dev } from '$app/environment';
 import { env } from '$env/dynamic/public';
 import { createSessionTokenAuth, createSgContext, RestClient, type EntityRow, type SgContext } from 'sg-widgets-core';
+import { safeHref } from '$lib/pure/safe-href';
 
 const KEYS = {
 	site: 'sg-bids:site',
@@ -255,10 +256,11 @@ export async function signIn(site: string, open: (url: string) => void): Promise
 		appName: 'sg-bids',
 		machineId: 'sg-bids'
 	});
-	if (created.status !== 200 || !created.body?.id || !created.body.url) {
+	const approval = safeHref(created.body?.url);
+	if (created.status !== 200 || !created.body?.id || !approval) {
 		throw new Error(created.body?.message ?? 'Flow PT did not offer an approval page.');
 	}
-	open(created.body.url);
+	open(approval);
 
 	// A pending request lives about five minutes, then the poll turns 404 (probe 052).
 	const deadline = Date.now() + 300_000;
