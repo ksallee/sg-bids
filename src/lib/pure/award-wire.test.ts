@@ -32,6 +32,33 @@ describe('parseWritten', () => {
 	});
 });
 
+describe('parseWritten, the rows a publish created', () => {
+	it('takes Shots, Assets and Sequences keyed as the app keys them', () => {
+		const items = [
+			{ key: 'shot:shot-bd-1f2e', type: 'Shot', id: 9001 },
+			{ key: 'asset:asset-bd-9', type: 'Asset', id: 9002 },
+			{ key: 'sequence:sq new', type: 'Sequence', id: 300 }
+		];
+		expect(parseWritten({ ...WRITTEN, items })).toEqual({ ...WRITTEN, items });
+	});
+
+	it('refuses another type, a bad key or id', () => {
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Task', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'task:a', type: 'Shot', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Shot', id: 0 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Sequence', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: 'x' })).toBeNull();
+	});
+});
+
+describe('parseAwardRecord, the choice for rows with no Flow PT row', () => {
+	it('keeps the choice per kind and the Sequence switch, and refuses another', () => {
+		const out = parseAwardRecord(body({ options: { allLines: false, groups: {}, missing: { shot: 'create', asset: 'without', sequences: true } } }), 1180);
+		expect(out.ok && out.value.options.missing).toEqual({ shot: 'create', asset: 'without', sequences: true });
+		expect(parseAwardRecord(body({ options: { allLines: false, groups: {}, missing: { shot: 'maybe' } } }), 1180).ok).toBe(false);
+	});
+});
+
 describe('parseSite', () => {
 	it("takes the site's names for the verified project only", () => {
 		expect(parseSite(SITE, 1180)).toEqual(SITE);

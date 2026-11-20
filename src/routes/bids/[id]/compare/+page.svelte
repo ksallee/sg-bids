@@ -13,6 +13,7 @@
 	import RowDetail from '$lib/app/compare/row-detail.svelte';
 	import ScenarioRail from '$lib/app/compare/scenario-rail.svelte';
 	import AwardPanel from '$lib/app/award/award-panel.svelte';
+	import UndoNote from '$lib/app/award/undo-note.svelte';
 	import { CompareState } from '$lib/app/compare/state.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { currentProject } from '$lib/current-project';
@@ -81,6 +82,7 @@
 			{#if s.data.awarded}<Notice tone="info">The award is made. The rates are locked.</Notice>{/if}
 		</PageHeader>
 
+		<UndoNote requestId={r.id} />
 		{#if s.data.publication}
 			<div class="border-b px-6 py-4">
 				<AwardPanel projectId={s.projectId} request={r} publication={s.data.publication} siteUrl={siteUrl} onChange={() => void s!.load()} />

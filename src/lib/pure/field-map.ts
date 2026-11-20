@@ -11,6 +11,7 @@
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
+import type { CreateFields } from './fpt-award';
 
 export type ItemKind = 'shot' | 'asset';
 export type ShotSlot = 'description' | 'frames' | 'sequence' | 'episode' | 'type' | 'difficulty' | 'assets';
@@ -200,6 +201,33 @@ export function sequenceEpisodeField(sequenceSchema: Record<string, FieldSchema>
 export function readFields(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>): string[] {
 	const wanted = ['code', 'image', 'sg_status_list', ...slotsFor(kind).map((spec) => mapping[spec.slot])];
 	return [...new Set(wanted.filter((name): name is string => typeof name === 'string' && name in schema))];
+}
+
+/**
+ * Where the award writes a created Shot's or Asset's values: each mapped field the schema holds and
+ * may be written, with its type and a list's values. The Sequence is its link field. The episode
+ * and linked assets are left out: they are links the created row does not get.
+ */
+export function createFieldsOf(
+	mapping: { readonly shot: Mapping; readonly asset: Mapping },
+	schemas: { readonly shot: Record<string, FieldSchema>; readonly asset: Record<string, FieldSchema> }
+): CreateFields {
+	const pick = (kind: ItemKind, slots: readonly string[]) => {
+		const out: Record<string, { name: string; dataType: string; validValues?: readonly string[] }> = {};
+		for (const slot of slots) {
+			const name = mapping[kind][slot];
+			const field = typeof name === 'string' ? schemas[kind][name] : undefined;
+			if (!field || !field.editable) continue;
+			out[slot] = field.dataType === 'list' ? { name: field.name, dataType: field.dataType, validValues: [...(field.validValues ?? [])] } : { name: field.name, dataType: field.dataType };
+		}
+		return out;
+	};
+	const sequence = mapping.shot.sequence;
+	const seqField = typeof sequence === 'string' ? schemas.shot[sequence] : undefined;
+	return {
+		shot: { ...pick('shot', ['description', 'frames', 'type', 'difficulty']), ...(seqField?.editable ? { sequence: seqField.name } : {}) },
+		asset: pick('asset', ['description', 'type', 'difficulty'])
+	};
 }
 
 export interface Unmapped {

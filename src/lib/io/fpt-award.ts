@@ -27,11 +27,14 @@ import {
 	planAward,
 	planUndo,
 	toBatchRequest,
+	toLookUp,
 	undoRequest,
 	verify,
 	type AwardInput,
 	type AwardPlan,
 	type BatchRequest,
+	type CreatedRow,
+	type CreatedType,
 	type Existing,
 	type FptSite,
 	type ReadBack,
@@ -108,12 +111,114 @@ export async function readExisting(api: FptApi, site: FptSite, request: BidReque
 	};
 }
 
+/** The project's rows whose code is one of `codes`: text filters ignore case (field_types/text). */
+async function withCodes(api: FptApi, type: string, projectId: number, codes: readonly string[]): Promise<{ id: number; code: string }[]> {
+	if (codes.length === 0) return [];
+	const rows = await byValues(api, type, projectId, 'code', [...codes], ['code']);
+	return rows.map((r) => ({ id: r.id, code: keyOf(r, 'code') }));
+}
+
+const CHILDREN = ['Task', 'Version'] as const;
+/** Links on the row itself that something else made, per type (entity_types/Shot, Asset, Sequence). */
+const OWN_LINKS: Readonly<Record<CreatedType, readonly { field: string; word: string }[]>> = {
+	Shot: [
+		{ field: 'notes', word: 'Note' },
+		{ field: 'sg_published_files', word: 'Published File' },
+		{ field: 'assets', word: 'linked Asset' },
+		{ field: 'shots', word: 'child Shot' },
+		{ field: 'parent_shots', word: 'parent Shot' }
+	],
+	Asset: [
+		{ field: 'notes', word: 'Note' },
+		{ field: 'sg_published_files', word: 'Published File' },
+		{ field: 'shots', word: 'linked Shot' },
+		{ field: 'parents', word: 'parent Asset' },
+		{ field: 'assets', word: 'child Asset' }
+	],
+	Sequence: [
+		{ field: 'notes', word: 'Note' },
+		{ field: 'sg_published_files', word: 'Published File' },
+		{ field: 'assets', word: 'linked Asset' },
+		{ field: 'shots', word: 'Shot' }
+	]
+};
+
+function counted(n: number, word: string): string {
+	return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * The rows a publish created that have gained links since, keyed `Shot:123`, with why. Tasks and
+ * Versions are read from their own side, where they link (entity_types/Shot); Notes, Published Files
+ * and the hierarchy from the row. A Bid Line the app did not write counts. A Sequence counts a Shot
+ * under it unless the undo deletes that Shot too. Deleting a linked row would hide its links (161).
+ */
+export async function foreignLinks(api: FptApi, site: FptSite, written: Written): Promise<Map<string, string>> {
+	const items = written.items ?? [];
+	const reasons = new Map<string, string[]>();
+	const add = (key: string, why: string) => reasons.set(key, [...(reasons.get(key) ?? []), why]);
+	if (items.length === 0) return new Map();
+	const project = ['project', 'is', { type: 'Project', id: site.projectId }] as Condition;
+	const refs = items.map((i) => ({ type: i.type, id: i.id }));
+	for (const child of CHILDREN) {
+		const counts = new Map<string, number>();
+		for (const part of chunk(refs)) {
+			for (const row of await searchAll(api, child, and(project, ['entity', 'in', part]), ['entity'])) {
+				const e = row.relationships.entity?.data as { type?: string; id?: number } | null;
+				if (e?.type && e.id) counts.set(`${e.type}:${e.id}`, (counts.get(`${e.type}:${e.id}`) ?? 0) + 1);
+			}
+		}
+		for (const [key, n] of counts) add(key, `it has ${counted(n, child)}`);
+	}
+	const ours = new Set(written.lines.map((l) => l.id));
+	const lineRefs = refs.filter((r) => r.type !== 'Sequence');
+	for (const part of chunk(lineRefs)) {
+		if (part.length === 0) continue;
+		const lines = (await searchAll(api, site.lineType, and(project, [LINE.item, 'in', part]), [LINE.item])).filter((l) => !ours.has(l.id));
+		const counts = new Map<string, number>();
+		for (const l of lines) {
+			const e = l.relationships[LINE.item]?.data as { type?: string; id?: number } | null;
+			if (e?.type && e.id) counts.set(`${e.type}:${e.id}`, (counts.get(`${e.type}:${e.id}`) ?? 0) + 1);
+		}
+		for (const [key, n] of counts) add(key, `${counted(n, 'Bid Line')} the app did not write ${n === 1 ? 'points' : 'point'} at it`);
+	}
+	const created = new Set(items.map((i) => `${i.type}:${i.id}`));
+	const seqShots = new Map<string, string[]>();
+	for (const type of ['Shot', 'Asset', 'Sequence'] as const) {
+		const ids = items.filter((i) => i.type === type).map((i) => i.id);
+		if (ids.length === 0) continue;
+		const fields = OWN_LINKS[type].map((l) => l.field);
+		for (const part of chunk(ids)) {
+			for (const row of await searchAll(api, type, and(['id', 'in', part]), fields)) {
+				const key = `${type}:${row.id}`;
+				for (const { field, word } of OWN_LINKS[type]) {
+					const linked = (Array.isArray(row.relationships[field]?.data) ? (row.relationships[field].data as { type: string; id: number }[]) : []).map((r) => `${r.type}:${r.id}`);
+					if (type === 'Sequence' && field === 'shots') {
+						seqShots.set(key, linked);
+						continue;
+					}
+					const others = linked.filter((l) => !created.has(l));
+					if (others.length > 0) add(key, `it has ${counted(others.length, word)}`);
+				}
+			}
+		}
+	}
+	// A Sequence keeps a Shot the undo leaves, or one it never made.
+	for (const [key, shots] of seqShots) {
+		const staying = shots.filter((s) => !created.has(s) || reasons.has(s));
+		if (staying.length > 0) add(key, `it has ${counted(staying.length, 'Shot')} that ${staying.length === 1 ? 'stays' : 'stay'}`);
+	}
+	return new Map([...reasons].map(([key, why]) => [key, why.join(', ')]));
+}
+
 export interface Applied {
 	readonly written: Written;
 	/** What the run took back of an earlier run's writes. */
 	readonly removed: Removed;
 	/** Each Bid's id by key, new and updated. */
 	readonly bidIds: ReadonlyMap<string, number>;
+	/** Each Shot, Asset and Sequence the run created, by key. */
+	readonly rowIds: ReadonlyMap<string, EntityRef>;
 	/** Why the run stopped, when it did. What was written before it is in `written`. */
 	readonly error: string | null;
 	/** The labels of the steps that answered, in order. */
@@ -125,16 +230,24 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite, onS
 	const bids: { key: string; id: number; created: boolean }[] = [];
 	const lines: { key: string; id: number; created: boolean }[] = [];
 	const groups: { itemType: ItemType; id: number; field: string; groups: number[] }[] = [];
-	const removed = { bids: [] as number[], lines: [] as number[], attachments: [] as number[], groups: [] as { itemType: ItemType; id: number; field: string; groups: number[] }[] };
+	const removed = {
+		bids: [] as number[],
+		lines: [] as number[],
+		attachments: [] as number[],
+		groups: [] as { itemType: ItemType; id: number; field: string; groups: number[] }[],
+		items: [...plan.released]
+	};
 	const bidIds = new Map<string, number>();
+	const rowIds = new Map<string, EntityRef>();
+	const items: CreatedRow[] = [];
 	const stepsDone: string[] = [];
-	const done = (error: string | null): Applied => ({ written: { bids, lines, groups, attachments: [] }, removed, bidIds, error, stepsDone });
+	const done = (error: string | null): Applied => ({ written: { bids, lines, groups, attachments: [], items }, removed, bidIds, rowIds, error, stepsDone });
 	for (const step of plan.steps) {
 		onStep?.(step.label);
 		if (step.mode === 'single') {
 			for (const write of step.writes) {
 				try {
-					const request = toBatchRequest(write, site, bidIds);
+					const request = toBatchRequest(write, site, bidIds, rowIds);
 					if (request.request_type !== 'update') throw new Error(`${step.label}: only an update goes one by one.`);
 					await api.client.update(request.entity, request.record_id, request.data);
 				} catch (e) {
@@ -147,7 +260,7 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite, onS
 		for (const part of chunk(step.writes)) {
 			let requests: BatchRequest[];
 			try {
-				requests = part.map((w) => toBatchRequest(w, site, bidIds));
+				requests = part.map((w) => toBatchRequest(w, site, bidIds, rowIds));
 			} catch (e) {
 				return done((e as Error).message);
 			}
@@ -160,7 +273,8 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite, onS
 			part.forEach((write, i) => {
 				const result = results[i];
 				if (write.kind === 'addGroups') {
-					groups.push({ itemType: write.itemType, id: write.id, field: write.field, groups: [...write.groups] });
+					const id = typeof write.id === 'number' ? write.id : rowIds.get(write.id.pendingRow)!.id;
+					groups.push({ itemType: write.itemType, id, field: write.field, groups: [...write.groups] });
 					return;
 				}
 				if (write.kind === 'link') return;
@@ -169,7 +283,13 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite, onS
 					return;
 				}
 				if (write.kind === 'delete') {
-					(write.entity === 'bid' ? removed.bids : write.entity === 'line' ? removed.lines : removed.attachments).push(write.id);
+					(write.entity === 'bid' ? removed.bids : write.entity === 'line' ? removed.lines : write.entity === 'item' ? removed.items : removed.attachments).push(write.id);
+					return;
+				}
+				if (write.kind === 'createItem') {
+					const id = result.request_type === 'delete' ? result.id : result.data.id;
+					items.push({ key: write.key, type: write.itemType, id });
+					rowIds.set(write.key, { type: write.itemType, id });
 					return;
 				}
 				const id = result.request_type === 'delete' ? result.id : result.data.id;
@@ -189,23 +309,43 @@ function asRead(row: EntityRow): ReadRow {
 	return { id: row.id, attributes: row.attributes, relationships: row.relationships as ReadRow['relationships'] };
 }
 
-/** Every Bid and Bid Line of the plan read back by key, with the Groups on its items. */
-export async function readBack(api: FptApi, plan: AwardPlan, site: FptSite): Promise<ReadBack> {
+/** Every Bid and Bid Line of the plan read back by key, every row it created by id, with the Groups on its items. */
+export async function readBack(api: FptApi, plan: AwardPlan, site: FptSite, rowIds: ReadonlyMap<string, EntityRef> = new Map()): Promise<ReadBack> {
 	const keys = { bid: [] as string[], line: [] as string[] };
-	const refs: EntityRef[] = plan.preview.groups.map((g) => g.ref);
+	const refs: EntityRef[] = plan.preview.groups.flatMap((g) => (g.ref ? [g.ref] : []));
+	const made: { key: string; type: string; fields: string[] }[] = [];
+	const gone: { key: string; type: string; id: number }[] = [];
 	for (const step of plan.steps) {
 		for (const w of step.writes) {
 			if (w.kind === 'create' || w.kind === 'update') keys[w.entity].push(w.key);
-			if (w.kind === 'delete' && w.entity !== 'attachment') keys[w.entity].push(w.key);
+			if (w.kind === 'delete' && (w.entity === 'bid' || w.entity === 'line')) keys[w.entity].push(w.key);
+			if (w.kind === 'delete' && w.entity === 'item') gone.push({ key: w.key, type: w.itemType, id: w.id });
 			if (w.kind === 'removeGroups') refs.push({ type: w.itemType, id: w.id });
+			if (w.kind === 'addGroups' && typeof w.id !== 'number') {
+				const ref = rowIds.get(w.id.pendingRow);
+				if (ref) refs.push(ref);
+			}
+			if (w.kind === 'createItem') made.push({ key: w.key, type: w.itemType, fields: Object.keys(w.data) });
 		}
 	}
 	const bidRows = await byValues(api, site.bidType, site.projectId, BID.key, keys.bid, [...BID_FIELDS.map((f) => f.name), 'project']);
 	const lineRows = await byValues(api, site.lineType, site.projectId, LINE.key, keys.line, [...LINE_FIELDS.map((f) => f.name), 'project']);
+	const items = new Map<string, ReadRow>();
+	for (const type of ['Sequence', 'Shot', 'Asset']) {
+		const wanted = made.filter((m) => m.type === type && rowIds.has(m.key));
+		const deleted = gone.filter((g) => g.type === type);
+		if (wanted.length + deleted.length === 0) continue;
+		const fields = [...new Set(wanted.flatMap((m) => m.fields))];
+		const byId = new Map([...wanted.map((m) => [rowIds.get(m.key)!.id, m.key] as const), ...deleted.map((g) => [g.id, g.key] as const)]);
+		for (const part of chunk([...byId.keys()])) {
+			for (const row of await searchAll(api, type, and(['id', 'in', part]), fields.length ? fields : ['code'])) items.set(byId.get(row.id)!, asRead(row));
+		}
+	}
 	return {
 		bids: new Map(bidRows.map((r) => [keyOf(r, BID.key), asRead(r)])),
 		lines: new Map(lineRows.map((r) => [keyOf(r, LINE.key), asRead(r)])),
-		groups: await readGroups(api, site, refs)
+		groups: await readGroups(api, site, refs),
+		items
 	};
 }
 
@@ -220,7 +360,13 @@ export async function prepareAward(api: FptApi, input: Omit<AwardInput, 'existin
 	const previous = input.previous ? await stillThere(api, input.site, input.previous) : null;
 	const existing = await readExisting(api, input.site, input.request, input.bids);
 	const needed = previous ? await stillNeeded(api, input.site, previous) : new Set<string>();
-	return { plan: planAward({ ...input, previous, existing: { ...existing, needed } }), previous };
+	// Rows to create: their codes, to catch a collision, and the Sequences they name.
+	const look = toLookUp({ ...input, previous });
+	const projectId = input.site.projectId;
+	const codes = { Shot: await withCodes(api, 'Shot', projectId, look.Shot), Asset: await withCodes(api, 'Asset', projectId, look.Asset) };
+	const sequences = await withCodes(api, 'Sequence', projectId, look.sequences);
+	const itemLinks = previous ? await foreignLinks(api, input.site, previous) : new Map<string, string>();
+	return { plan: planAward({ ...input, previous, existing: { ...existing, needed, codes, sequences, itemLinks } }), previous };
 }
 
 export interface Published {
@@ -237,16 +383,20 @@ export interface Published {
 /** Plan against what the site holds now, apply, read back and check. */
 export async function publishAward(api: FptApi, input: Omit<AwardInput, 'existing'>, onStep?: (label: string) => void): Promise<Published> {
 	const { plan, previous } = await prepareAward(api, input);
+	if (plan.collisions.length > 0) {
+		// Nothing is written: a second Shot with a code already there is a 201, never refused (entity_types/Shot).
+		throw new Error(`Not published. ${plan.collisions.map((c) => (c.twice ? `Two rows have the code ${c.code}.` : `${c.code} is in Flow PT already as ${c.found.map((f) => `${f.type} ${f.id}`).join(' and ')}.`)).join(' ')} Match them, or change the codes in a new round.`);
+	}
 	const applied = await applyPlan(api, plan, input.site, onStep);
 	onStep?.('Reading back');
-	const back = await readBack(api, plan, input.site);
+	const back = await readBack(api, plan, input.site, applied.rowIds);
 	const created = new Set(applied.written.bids.filter((b) => b.created).map((b) => b.key));
 	const attachments = [...back.bids].filter(([key]) => created.has(key)).flatMap(([key, row]) => {
 		const id = attachmentOf(row);
 		return id === null ? [] : [{ key, id }];
 	});
 	const written = mergeWritten(previous, { ...applied.written, attachments }, applied.removed);
-	const problems = applied.error ? [] : verify(plan, back, input.site, applied.bidIds);
+	const problems = applied.error ? [] : verify(plan, back, input.site, applied.bidIds, applied.rowIds);
 	return { plan, written, back, problems, error: applied.error, stepsDone: applied.stepsDone };
 }
 
@@ -290,11 +440,19 @@ async function stillThere(api: FptApi, site: FptSite, written: Written): Promise
 			/* Gone already, or never readable: nothing to delete. */
 		}
 	}
+	const items: CreatedRow[] = [];
+	for (const type of ['Shot', 'Asset', 'Sequence'] as const) {
+		const mine = (written.items ?? []).filter((i) => i.type === type);
+		if (mine.length === 0) continue;
+		const found = await live(type, mine.map((i) => i.id));
+		items.push(...mine.filter((i) => found.has(i.id)));
+	}
 	return {
 		bids: written.bids.filter((b) => bids.has(b.id)),
 		lines: written.lines.filter((l) => lines.has(l.id)),
 		groups: written.groups,
-		attachments
+		attachments,
+		items
 	};
 }
 
@@ -311,7 +469,7 @@ export interface Undone {
 /** Take back what a run wrote: its Groups unless still needed, then the rows it created. Read back after. */
 export async function undoAward(api: FptApi, site: FptSite, written: Written): Promise<Undone> {
 	const live = await stillThere(api, site, written);
-	const undo = planUndo(live, site, await stillNeeded(api, site, live));
+	const undo = planUndo(live, site, await stillNeeded(api, site, live), await foreignLinks(api, site, live));
 	let error: string | null = null;
 	for (const part of chunk(undo.writes.map(undoRequest))) {
 		try {
@@ -331,12 +489,15 @@ export async function undoAward(api: FptApi, site: FptSite, written: Written): P
 	const groups = live.groups
 		.map((g) => ({ ...g, groups: g.groups.filter((group) => !kept.has(`${g.itemType}:${g.id}:${group}`) && (present[`${g.itemType}:${g.id}`] ?? []).includes(group)) }))
 		.filter((g) => g.groups.length > 0);
-	// Rows the run only updated are left in place by design; they are not the app's to delete.
+	// Rows the run only updated are left in place by design; they are not the app's to delete. A
+	// created row that gained links is left too, and named: it is no longer the app's alone.
+	const left = new Set(undo.left.map((l) => l.id));
 	const remaining: Written = {
 		bids: after.bids.filter((b) => b.created),
 		lines: after.lines.filter((l) => l.created),
 		groups,
-		attachments: after.attachments
+		attachments: after.attachments,
+		items: (after.items ?? []).filter((i) => !left.has(i.id))
 	};
 	return { undo, error, remaining };
 }

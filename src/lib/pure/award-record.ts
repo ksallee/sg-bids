@@ -10,7 +10,7 @@
  * custom entity.
  */
 
-import { bidKey, lineKey, type FptSite, type Written } from './fpt-award';
+import { bidKey, lineKey, type FptSite, type MissingOptions, type Written } from './fpt-award';
 import { applyScenario } from './compare';
 import { targetKey, type AwardScenario, type BidRequest, type Id, type VendorBid } from './model';
 import { add, money, type Money } from './money';
@@ -145,7 +145,7 @@ export interface Publication {
 	readonly scenarioId: Id | null;
 	readonly site: FptSite;
 	readonly written: Written;
-	readonly options: { readonly allLines: boolean; readonly groups: Readonly<Record<Id, number | null>> };
+	readonly options: { readonly allLines: boolean; readonly groups: Readonly<Record<Id, number | null>>; readonly missing?: MissingOptions };
 	readonly problems: readonly string[];
 	readonly error: string | null;
 	readonly exposure: ExposureChoice | null;

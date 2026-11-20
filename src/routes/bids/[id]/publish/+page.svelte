@@ -11,6 +11,7 @@
 	import PageState from '$lib/app/page-state.svelte';
 	import StatusChip from '$lib/app/status-chip.svelte';
 	import AwardPanel from '$lib/app/award/award-panel.svelte';
+	import UndoNote from '$lib/app/award/undo-note.svelte';
 	import GateRail from '$lib/app/award/gate-rail.svelte';
 	import WriteLedger from '$lib/app/award/write-ledger.svelte';
 	import { PublishState } from '$lib/app/award/publish.svelte';
@@ -40,7 +41,7 @@
 	$effect(() => {
 		const current = s;
 		if (!current) return;
-		const key = JSON.stringify([current.gate?.blockers, current.allLines, current.groups, current.setup?.report.fields.length, current.publication?.updatedAt]);
+		const key = JSON.stringify([current.gate?.blockers, current.allLines, current.groups, current.missing, current.itemFields !== null, current.setup?.report.fields.length, current.publication?.updatedAt]);
 		void key;
 		if (untrack(() => current.phase) !== 'idle') return;
 		const timer = setTimeout(() => void current.preview(), 250);
@@ -89,6 +90,7 @@
 						</Notice>
 					{/if}
 
+					<UndoNote requestId={r.id} />
 					{#if s.publication && s.phase !== 'publishing'}
 						<AwardPanel
 							projectId={s.projectId}

@@ -9,7 +9,11 @@ import type { EntityRef } from 'sg-widgets-core';
 import { compareApi, type Comparison, type StoredScenario } from '$lib/compare-api';
 import { prepareAward, publishAward, type Prepared, type Published } from '$lib/io/fpt-award';
 import { ensureFields, readSetup, type EnsureResult, type SetupRead } from '$lib/io/fpt-setup';
-import { whoAmI } from '$lib/live';
+import { liveContext, liveState, whoAmI } from '$lib/live';
+import { loadMapping } from '$lib/app/mapping-store';
+import { loadShape } from '$lib/io/reads';
+import { cleanMapping, createFieldsOf, detectMapping } from '$lib/pure/field-map';
+import type { CreateFields, MissingOptions } from '$lib/pure/fpt-award';
 import { gate, type Gate } from '$lib/pure/award-gate';
 import type { Publication } from '$lib/pure/award-record';
 import { today } from '$lib/app/today';
@@ -34,6 +38,10 @@ export class PublishState {
 	/** The Group picked here, for its name. */
 	picked = $state<Record<string, EntityRef>>({});
 	accepted = $state(false);
+	/** What to do with awarded rows that have no Flow PT row, per kind; the Sequence switch off. */
+	missing = $state<MissingOptions>({});
+	/** Where a created Shot's or Asset's values go: the project's field mapping in this browser. */
+	itemFields = $state<CreateFields | null>(null);
 
 	prepared = $state<Prepared | null>(null);
 	previewing = $state(false);
@@ -60,7 +68,8 @@ export class PublishState {
 			scenario: this.scenario,
 			allLines: this.allLines,
 			groups: this.groups,
-			exposureAccepted: this.accepted
+			exposureAccepted: this.accepted,
+			missing: this.missing
 		});
 	});
 
@@ -75,6 +84,7 @@ export class PublishState {
 		if (this.publication) {
 			this.allLines = this.publication.options.allLines;
 			this.groups = { ...this.publication.options.groups };
+			this.missing = { ...(this.publication.options.missing ?? {}) };
 		}
 	}
 
@@ -83,6 +93,13 @@ export class PublishState {
 		try {
 			const me = await whoAmI().catch(() => null);
 			this.setup = await readSetup(siteApi(), this.projectId, { me: me?.id });
+			const shape = await loadShape(liveContext());
+			const saved = loadMapping(liveState().siteUrl, this.projectId);
+			const mapping = {
+				shot: saved ? cleanMapping('shot', saved.shot, shape.shot, shape.site) : detectMapping('shot', shape.shot, shape.site),
+				asset: saved ? cleanMapping('asset', saved.asset, shape.asset, shape.site) : detectMapping('asset', shape.asset, shape.site)
+			};
+			this.itemFields = createFieldsOf(mapping, { shot: shape.shot, asset: shape.asset });
 		} catch (e) {
 			this.setupError = e instanceof Error ? e.message : String(e);
 		}
@@ -99,6 +116,16 @@ export class PublishState {
 		} finally {
 			this.creating = false;
 		}
+	}
+
+	/** The choice for the awarded rows of a kind with no Flow PT row. */
+	setMissing(kind: 'shot' | 'asset', choice: 'create' | 'without'): void {
+		this.missing = { ...this.missing, [kind]: choice };
+	}
+
+	/** Also create the Sequences the new Shots name that the project lacks. */
+	setSequences(on: boolean): void {
+		this.missing = { ...this.missing, sequences: on };
 	}
 
 	setGroup(vendorId: string, group: EntityRef | null | 'none'): void {
@@ -124,7 +151,9 @@ export class PublishState {
 			scenario: this.scenario!,
 			site: g.site!,
 			previous: this.publication?.written ?? null,
+			createFields: this.itemFields ?? undefined,
 			options: {
+				missing: this.missing,
 				date: today(),
 				requestCode: data.code,
 				allLines: this.allLines,
@@ -137,7 +166,7 @@ export class PublishState {
 	/** Plan against what the site holds now. Only once nothing blocks. */
 	async preview(): Promise<void> {
 		const g = this.gate;
-		if (!g || g.blockers.length > 0 || !g.site || !this.scenario) {
+		if (!g || g.blockers.length > 0 || !g.site || !this.scenario || !this.itemFields) {
 			this.prepared = null;
 			return;
 		}
@@ -185,7 +214,7 @@ export class PublishState {
 				state: partial ? 'partial' : 'published',
 				site: this.gate.site,
 				written: run.written,
-				options: { allLines: this.allLines, groups: this.gate.groups },
+				options: { allLines: this.allLines, groups: this.gate.groups, missing: this.missing },
 				problems: [...run.problems].slice(0, 1000),
 				error: run.error ? run.error.slice(0, 2000) : null,
 				exposure,
