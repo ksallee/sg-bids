@@ -31,6 +31,7 @@ Copy `.env.example` to `.env.local` (gitignored). Every line is optional.
 | var | what it does |
 |---|---|
 | `PUBLIC_FPT_SITE_URL` | the site the sign-in form offers by default |
+| `PUBLIC_SITE_URL` | the deployment's own address, for the public pages' canonical URLs, share image, sitemap and `llms.txt`. Read at build. Unset: `https://sg-bids.vercel.app` |
 | `FPT_API_SITE_URL` | dev only: the site the script key opens |
 | `FPT_API_SCRIPT_NAME` | dev only: the script name |
 | `FPT_API_API_KEY` | dev only: the script key |
@@ -247,7 +248,8 @@ database. `E2E_STOP_AFTER=build|invite|bids|scenario` stops early, then cleans u
 `Referrer-Policy: same-origin` (`no-referrer` under `/v`, `same-origin` on `/v/open` so its form
 posts carry an Origin), `X-Frame-Options: DENY`, and HSTS over https. Pages get a
 Content-Security-Policy that SvelteKit writes from `src/lib/pure/security-headers.ts`
-(`vite.config.ts`, `csp`), with a nonce on each inline script, `app.html`'s included. The hook
+(`vite.config.ts`, `csp`), with a nonce on each inline script. The scheme script is a file,
+`static/theme.js`, so `app.html` holds no inline script. The hook
 adds the hosts of `FPT_SITE_HOSTS` to `connect-src` and `img-src` (in `vite dev` the script key's
 site too), and the S3 media hosts to `img-src`. `style-src` keeps `'unsafe-inline'`: Svelte
 transitions and the widgets' floating parts write inline styles. An answer that is not a page gets
@@ -257,8 +259,29 @@ transitions and the widgets' floating parts write inline styles. An answer that 
 
 From `main` alone. `vercel.json` names SvelteKit as the framework, enables `main` under
 `git.deploymentEnabled`, and skips every other ref in `ignoreCommand`, so a feature branch never
-builds a preview. `src/lib/deploy.test.ts` holds it to that. The page is a client-rendered shell
+builds a preview. `src/lib/deploy.test.ts` holds it to that. The app is a client-rendered shell
 (`ssr = false`) and the routes under `/live/` are serverless functions.
+
+## Public pages
+
+Home and `/how` live under `src/routes/(public)/`, rendered at build into static HTML with their
+full text (`prerender`), for search engines, link previews and AI readers. Their words are data in
+`src/lib/pure/public-content.ts`; their title, description, canonical URL and Open Graph tags come
+from `src/lib/pure/seo.ts` (`PUBLIC_PAGES`), their JSON-LD from `src/lib/pure/structured-data.ts`.
+`/robots.txt`, `/sitemap.xml`, `/llms.txt` and `/llms-full.txt` are prerendered from the same
+modules, the last with the docs as they are in the repo, so none can drift from the pages. A test
+renders each page and checks every word of its content is in it and in `llms-full.txt`.
+
+A prerendered page carries its CSP as a meta tag with script hashes, since it cannot have a
+per-request nonce. On Vercel it is a static file the hook never sees, so `vercel.json` sends its
+headers: the ones the hook sends, and `frame-ancestors 'none'`, which a meta tag cannot carry
+(`src/lib/deploy.test.ts` holds them equal). The meta policy has no Flow PT site, so every link on
+a public page loads the next page whole, under that page's own policy (`+layout.svelte`). Every
+other path answers `X-Robots-Tag: noindex, nofollow`.
+
+The share image, `static/og.png`, is the page `/dev/og` (dev only): the real comparison grid on demo
+data, in the default theme. `pnpm og` starts `vite dev` on 5188, shoots it, and writes the icons
+from `static/favicon.svg` (`apple-touch-icon.png`, `favicon.ico`). Rerun it when the grid changes.
 
 Set in the Vercel project, value never in the repo: `PUBLIC_FPT_SITE_URL`, `SUPABASE_URL`,
 `SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default (the public

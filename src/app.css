@@ -6,7 +6,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* The scheme follows the `.dark` class `app.html` and `$lib/theme` set; native controls follow it too. */
+/* The scheme follows the `.dark` class `static/theme.js` and `$lib/theme` set; native controls follow it too. */
 html {
 	color-scheme: dark;
 }

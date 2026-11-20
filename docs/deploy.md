@@ -57,6 +57,7 @@ Set these in the Vercel project, Settings, Environment Variables. Values never g
 | var | what it does |
 |---|---|
 | `PUBLIC_FPT_SITE_URL` | your Flow PT site, for example `https://yourstudio.shotgrid.autodesk.com`. The sign in form offers it. |
+| `PUBLIC_SITE_URL` | your deployment's address, for example `https://bids.yourstudio.com`. The public pages' canonical URLs, share image, sitemap and `llms.txt` use it. Read at build. Unset: the hosted demo's. |
 | `FPT_SITE_HOSTS` | the Flow PT hosts the server may call, comma separated. Unset: the host of `PUBLIC_FPT_SITE_URL`. Neither set: no site at all. |
 | `FPT_PRODUCTION_ROLES` | the permission group codes that may act as production, comma separated. Unset: `admin,manager`. Everyone else is refused. |
 | `SUPABASE_URL` | the Supabase project. Server only. |

@@ -39,6 +39,13 @@ export const MEDIA_HOSTS = ['https://*.s3-accelerate.amazonaws.com', 'https://*.
 /** For an answer that is not a page (JSON, a redirect): nothing loads, nothing frames it. */
 export const NON_PAGE_CSP = "default-src 'none'; frame-ancestors 'none'";
 
+/**
+ * A prerendered page's header policy, beside the meta tag SvelteKit writes into it with the script
+ * hashes. A meta tag cannot carry `frame-ancestors`, so this does, with what holds before the meta
+ * tag is read. The browser enforces both. `vercel.json` sends it; `src/lib/deploy.test.ts` holds it there.
+ */
+export const PRERENDERED_PAGE_CSP = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'";
+
 export function securityHeaders(options: { https: boolean }): Record<string, string> {
 	return {
 		'X-Content-Type-Options': 'nosniff',
