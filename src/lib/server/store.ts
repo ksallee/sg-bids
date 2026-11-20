@@ -14,7 +14,8 @@ import { scope, stamp, type Action, type Principal, type ProductionPrincipal, ty
 import type { AwardScenario, BidRequest, InvitedVendor, RequestAsset, RequestHeader, RequestShot, ScenarioPick, VendorBid } from '$lib/pure/model';
 import { targetKey } from '$lib/pure/model';
 import { comparePercent, sumPercents } from '$lib/pure/percent';
-import { validateSplits } from '$lib/pure/rebate';
+import { rangeProblems, submitProblems } from '$lib/pure/bid-limits';
+import { isCurrency } from '$lib/pure/currencies';
 import {
 	bidFromRows,
 	bidToRows,
@@ -36,7 +37,6 @@ import {
 } from '$lib/pure/rows';
 import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/pure/token';
 import type { VendorBidRecord } from '$lib/pure/vendor-view';
-import { bidTotals } from '$lib/pure/totals';
 import { fromDatabase, StoreError } from './errors';
 
 /** An invitation lives this long unless production says otherwise. */
@@ -395,6 +395,9 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		const { principal } = await resolveToken(token);
 		const request = await vendorRequest(principal);
 		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
+		if (!isCurrency(draft.currency)) throw new StoreError(422, `${draft.currency} is not a currency on the ISO 4217 list.`);
+		const ranges = rangeProblems(draft);
+		if (ranges.length > 0) throw new StoreError(422, ranges.join(' '));
 		let rows: ReturnType<typeof bidToRows>;
 		try {
 			rows = bidToRows({ ...draft, rate: null }, draft.currency);
@@ -412,13 +415,13 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
 		const bid = await vendorBid(principal, request, bidId);
 		if (bid.status !== 'draft') throw new StoreError(409, 'That bid is already submitted. A change is a new version.');
+		let problems: string[];
 		try {
-			bidTotals(bid, bid.currency);
+			problems = submitProblems(bid, bid.currency);
 		} catch (error) {
 			throw new StoreError(422, error instanceof Error ? error.message : String(error));
 		}
-		const splits = validateSplits(bid.rebate);
-		if (splits.length > 0) throw new StoreError(422, splits.join(' '));
+		if (problems.length > 0) throw new StoreError(422, problems.join(' '));
 		const row = await run<BidRow | null>(update(principal, 'bids', { status: 'submitted' }).eq('id', bidId).eq('status', 'draft').select().maybeSingle());
 		if (!row) throw new StoreError(404, 'No such draft bid.');
 		return vendorBid(principal, request, bidId);
