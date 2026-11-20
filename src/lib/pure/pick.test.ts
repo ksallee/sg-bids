@@ -5,7 +5,7 @@ import { normalizeFields } from 'sg-widgets-core';
 import { SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
 import { EPISODE_FROM_SEQUENCE, detectMapping } from './field-map';
 import { sequenceIndex } from './freeze';
-import { EMPTY_FILTER, addPicked, filterContext, isFiltered, mergePicked, pickColumns, pickFilters, selectionRefs, sequenceOptions, typeOptions, type FilterContext } from './pick';
+import { EMPTY_FILTER, addPicked, refrozen, filterContext, isFiltered, mergePicked, pickColumns, pickFilters, selectionRefs, sequenceOptions, typeOptions, type FilterContext } from './pick';
 
 const project = { type: 'Project', id: 85 };
 const sequences = sequenceIndex(
@@ -142,6 +142,15 @@ describe('mergePicked', () => {
 		expect(result.missing).toEqual([]);
 	});
 
+	it('keeps every breakdown row where it is, whatever the table selects, and never adds its Flow PT row twice', () => {
+		const pasted = shot('shot-bd-1', { code: 'SH900', source: 'breakdown' });
+		const matched = shot('shot-bd-2', { code: 'SH1001', source: 'breakdown', fpt: { type: 'Shot', id: 1001 } });
+		const picked = shot('shot-7', { fpt: { type: 'Shot', id: 7 } });
+		const result = mergePicked([pasted, picked, matched], [1001, 1002], [SHOT_1001, SHOT_1002], freeze);
+		expect(result.items.map((i) => i.id)).toEqual(['shot-bd-1', 'shot-bd-2', 'shot-1002']);
+		expect(mergePicked([pasted, matched], [], [], freeze).items.map((i) => i.id)).toEqual(['shot-bd-1', 'shot-bd-2']);
+	});
+
 	it('names the picks it has no row for', () => {
 		expect(mergePicked([], [1001, 42], [SHOT_1001], freeze).missing).toEqual([42]);
 	});
@@ -151,6 +160,20 @@ describe('mergePicked', () => {
 		const kept = shot('shot-1001', { fpt: { type: 'Shot', id: 1001 } });
 		mergePicked([kept], [1001, 1002], [SHOT_1001, SHOT_1002], (row, position) => (at.push(position), freeze(row)));
 		expect(at).toEqual([2]);
+	});
+});
+
+describe('refrozen', () => {
+	it('copies the Flow PT rows again in place and leaves the breakdown rows as typed', () => {
+		const freeze = (row: { id: number }) => shot(`shot-${row.id}`, { fpt: { type: 'Shot', id: row.id }, description: 'fresh' });
+		const pasted = shot('shot-bd-1', { source: 'breakdown', description: 'mine', fpt: { type: 'Shot', id: 1002 } });
+		const old = shot('shot-1001', { fpt: { type: 'Shot', id: 1001 }, description: 'stale' });
+		const gone = shot('shot-5', { fpt: { type: 'Shot', id: 5 } });
+		const items = refrozen([pasted, old, gone], [SHOT_1001, SHOT_1002], freeze);
+		expect(items.map((i) => [i.id, i.description ?? null])).toEqual([
+			['shot-bd-1', 'mine'],
+			['shot-1001', 'fresh']
+		]);
 	});
 });
 

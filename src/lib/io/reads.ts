@@ -35,6 +35,26 @@ export async function rowsByIds(client: SgClient, entityType: string, ids: reado
 	return rows;
 }
 
+/**
+ * The project's rows whose code is one of `codes`, 500 codes to a read. Text filters ignore case
+ * (field_types/text), so a code in another case comes back too; `match.ts` tells them apart.
+ */
+export async function rowsByCodes(client: SgClient, entityType: string, projectId: number, codes: readonly string[]): Promise<EntityRow[]> {
+	const rows: EntityRow[] = [];
+	for (let i = 0; i < codes.length; i += ID_CHUNK) {
+		const chunk = codes.slice(i, i + ID_CHUNK);
+		const filters: WireGroup = {
+			logical_operator: 'and',
+			conditions: [
+				['project', 'is', { type: 'Project', id: projectId }],
+				['code', 'in', chunk]
+			]
+		};
+		rows.push(...(await searchAll(client, entityType, filters, ['code'])));
+	}
+	return rows;
+}
+
 export interface ProjectShape {
 	readonly shot: Record<string, FieldSchema>;
 	readonly asset: Record<string, FieldSchema>;

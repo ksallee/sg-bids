@@ -12,6 +12,10 @@
 	import Segmented from '$lib/app/segmented.svelte';
 	import PickTable from './pick-table.svelte';
 	import PickedList from './picked-list.svelte';
+	import BreakdownDialog from './breakdown-dialog.svelte';
+	import MatchLine from './match-line.svelte';
+	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
+	import { Button } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
 	import type { ItemKind } from '$lib/pure/field-map';
 	import { controlId } from '$lib/pure/readiness';
@@ -32,6 +36,7 @@
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
 	const view = $derived(count(kind) === 0 && views[kind] === 'picked' ? 'add' : views[kind]);
 	const setView = (next: ItemsView) => (views = { ...views, [kind]: next });
+	let breakdownOpen = $state(false);
 
 	function tabKey(e: KeyboardEvent): void {
 		if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -75,14 +80,17 @@
 			]}
 			onChange={(v) => setView(v as ItemsView)}
 		/>
+		<Button size="sm" variant="outline" class="mb-1.5" onclick={() => (breakdownOpen = true)} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
 	</div>
+	<MatchLine {builder} />
 	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-w-0 flex-col gap-3">
 		{#key kind}
 			{#if view === 'add'}
 				<PickTable {builder} {kind} />
 			{:else}
-				<PickedList {builder} {kind} onAdd={() => setView('add')} {onFields} />
+				<PickedList {builder} {kind} onAdd={() => setView('add')} onBreakdown={() => (breakdownOpen = true)} {onFields} />
 			{/if}
 		{/key}
 	</div>
+	<BreakdownDialog {builder} {kind} bind:open={breakdownOpen} />
 </section>
