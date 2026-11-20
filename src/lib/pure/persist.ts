@@ -1,7 +1,8 @@
 /**
  * What the builder hands to storage, and what a new round starts from. Pure, no I/O.
  *
- * A draft saves as soon as it has a project. The database's key is code and round per project, so a
+ * A draft saves once it has a project and some content: a title or a row. A draft with neither
+ * is not stored anywhere, so a request left at once leaves nothing behind. The database's key is code and round per project, so a
  * blank code saves as the one made from the project (`header.suggestCode`). A field that does not
  * pass its check yet is left out of the save rather than stopping it, so a half typed date never
  * loses the rest. No thumbnail is stored: Flow PT's image URLs are
@@ -37,9 +38,15 @@ function withoutThumbnail({ thumbnail, ...rest }: RequestShot): RequestShot {
 	return rest;
 }
 
+/** A title or a row: what makes a draft worth keeping. A code is made for every draft, so it does not count. */
+export function hasContent(state: BuilderState): boolean {
+	return state.form.title.trim() !== '' || state.shots.length + state.assets.length > 0;
+}
+
 /** `fallbackCode`: the code a blank one saves as. Without it, one is made from the project's name. */
 export function savable(state: BuilderState, fallbackCode?: string): Savable {
 	if (!state.project) return { ok: false, reason: 'Pick a project to save the draft.' };
+	if (!hasContent(state)) return { ok: false, reason: 'Give it a title or add a row to save the draft.' };
 	const code = state.form.code.trim() || fallbackCode?.trim() || suggestCode(state.project.name, []);
 	const form = {
 		...state.form,
