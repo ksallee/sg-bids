@@ -102,7 +102,7 @@
 	/** The browser now holds another vendor's link: this page stops, and says so. */
 	function otherSession(error: unknown): boolean {
 		if (!(error instanceof VendorError) || error.reason !== 'session') return false;
-		problem = { title: 'Another bid is open in this browser', line: error.message, link: false };
+		problem = { title: 'Another bid is open in this browser', line: 'Reload the page to see whose.', link: false };
 		return true;
 	}
 

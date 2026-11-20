@@ -208,6 +208,18 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
 
+## Security headers
+
+`src/hooks.server.ts` sends on every answer: `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin` (`no-referrer` under `/v`, `same-origin` on `/v/open` so its form
+posts carry an Origin), `X-Frame-Options: DENY`, and HSTS over https. Pages get a
+Content-Security-Policy that SvelteKit writes from `src/lib/pure/security-headers.ts`
+(`vite.config.ts`, `csp`), with a nonce on each inline script, `app.html`'s included. The hook
+adds the hosts of `FPT_SITE_HOSTS` to `connect-src` and `img-src` (in `vite dev` the script key's
+site too), and the S3 media hosts to `img-src`. `style-src` keeps `'unsafe-inline'`: Svelte
+transitions and the widgets' floating parts write inline styles. An answer that is not a page gets
+`default-src 'none'; frame-ancestors 'none'`.
+
 ## Deploy
 
 From `main` alone. `vercel.json` names SvelteKit as the framework, enables `main` under

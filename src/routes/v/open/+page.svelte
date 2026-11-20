@@ -14,7 +14,6 @@
 
 <svelte:head>
 	<title>Another bid is open · SG Bids</title>
-	<meta name="referrer" content="no-referrer" />
 	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 

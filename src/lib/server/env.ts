@@ -40,6 +40,23 @@ export function fptSiteHosts(): string[] {
 	return allowedHosts(env.FPT_SITE_HOSTS, publicEnv.PUBLIC_FPT_SITE_URL);
 }
 
+/**
+ * The Flow PT hosts the browser may call, for the Content-Security-Policy: the allowlist, and in
+ * `vite dev` the script key's site too (`/live/dev-token`).
+ */
+export function browserSiteHosts(): string[] {
+	const hosts = fptSiteHosts();
+	if (dev && env.FPT_API_SITE_URL) {
+		try {
+			const host = new URL(env.FPT_API_SITE_URL).hostname.toLowerCase();
+			if (!hosts.includes(host)) hosts.push(host);
+		} catch {
+			/* not a URL: the dev token refuses it too */
+		}
+	}
+	return hosts;
+}
+
 export function verifyProductionClaim(claim: ProductionClaim): Promise<VerifiedProduction> {
 	return verifyProduction(claim, {
 		fetch,
