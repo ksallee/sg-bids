@@ -23,7 +23,7 @@ import { createServer, loadEnv } from 'vite';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TENANT = { kind: 'production', siteHost: 'dev-seed.sg-bids.local', projectId: 1 };
-const TABLES = ['awards', 'award_scenario_items', 'award_scenarios', 'bid_lines', 'bids', 'invitations', 'request_items', 'bid_requests'];
+const TABLES = ['bid_rates', 'awards', 'award_scenario_items', 'award_scenarios', 'bid_lines', 'bids', 'invitations', 'request_items', 'bid_requests'];
 
 const argv = process.argv.slice(2);
 const clean = argv.includes('--clean');

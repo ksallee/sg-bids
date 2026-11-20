@@ -35,7 +35,8 @@ export const TABLES = [
 	'bid_lines',
 	'award_scenarios',
 	'award_scenario_items',
-	'awards'
+	'awards',
+	'bid_rates'
 ] as const;
 
 export type Table = (typeof TABLES)[number];
@@ -58,7 +59,9 @@ const PRODUCTION: Grants = {
 	bid_lines: ['read'],
 	award_scenarios: ['read', 'insert', 'update', 'delete'],
 	award_scenario_items: ['read', 'insert', 'delete'],
-	awards: ['read', 'insert', 'update']
+	awards: ['read', 'insert', 'update'],
+	// Production's rate per bid, to the base currency. The database locks it at the award.
+	bid_rates: ['read', 'insert', 'update', 'delete']
 };
 
 const VENDOR: Grants = {

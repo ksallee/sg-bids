@@ -102,6 +102,12 @@ export function draft(total: number, extra: Partial<BidDraft> = {}): BidDraft {
 	};
 }
 
+/** The same draft in another currency: every amount in it. */
+export function draftIn(currency: string, total: number, extra: Partial<BidDraft> = {}): BidDraft {
+	const base = draft(total, extra);
+	return { ...base, currency, lines: base.lines.map((line) => ({ ...line, total: { minor: line.total.minor, currency } })), ...extra };
+}
+
 /** An issued request in a fresh tenant with two vendors invited. */
 export async function issuedWithTwoVendors(options: StoreOptions = {}) {
 	const s = store(options);

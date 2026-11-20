@@ -25,6 +25,7 @@ describe('production', () => {
 		expect(scope(production, 'award_scenarios', 'update').eq).toEqual(tenant);
 		expect(scope(production, 'award_scenario_items', 'delete').eq).toEqual(tenant);
 		expect(scope(production, 'awards', 'insert').eq).toEqual(tenant);
+		expect(scope(production, 'bid_rates', 'update').eq).toEqual(tenant);
 	});
 
 	it('never writes a bid or a bid line', () => {
@@ -71,8 +72,8 @@ describe('vendor', () => {
 		expect(allowed(vendor, 'bids', 'delete')).toBe(false);
 	});
 
-	it('never reaches scenarios or awards', () => {
-		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards'];
+	it('never reaches scenarios, awards or rates', () => {
+		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards', 'bid_rates'];
 		for (const table of hidden) {
 			for (const action of ['read', 'insert', 'update', 'delete'] as const) {
 				expect(allowed(vendor, table, action)).toBe(false);
