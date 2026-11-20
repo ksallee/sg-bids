@@ -212,12 +212,12 @@ export class Builder {
 		return this.mapping ? readFields(kind, this.mapping[kind], this.schemaOf(kind)) : ['code'];
 	}
 
-	private freezer(kind: 'shot'): (row: EntityRow) => RequestShot;
-	private freezer(kind: 'asset'): (row: EntityRow) => RequestAsset;
-	private freezer(kind: ItemKind): (row: EntityRow) => RequestShot | RequestAsset {
+	private freezer(kind: 'shot'): (row: EntityRow, position: number) => RequestShot;
+	private freezer(kind: 'asset'): (row: EntityRow, position: number) => RequestAsset;
+	private freezer(kind: ItemKind): (row: EntityRow, position: number) => RequestShot | RequestAsset {
 		const mapping = this.mapping?.[kind] ?? {};
 		const sequences = this.data.state === 'ready' ? this.data.value.sequences : new Map();
-		return kind === 'shot' ? (row) => freezeShot(row, mapping, sequences) : (row) => freezeAsset(row, mapping);
+		return kind === 'shot' ? (row, position) => freezeShot(row, mapping, sequences, position) : (row, position) => freezeAsset(row, mapping, position);
 	}
 
 	/** The table's selection changed. Rows not at hand are read by id. */

@@ -106,7 +106,7 @@ export function mergePicked<T extends Picked>(
 	current: readonly T[],
 	selected: readonly number[],
 	rows: readonly EntityRow[],
-	freeze: (row: EntityRow) => T
+	freeze: (row: EntityRow, position: number) => T
 ): { items: T[]; missing: number[] } {
 	const byFpt = new Map(current.filter((item) => item.fpt).map((item) => [item.fpt!.id, item]));
 	const rowById = new Map(rows.map((row) => [row.id, row]));
@@ -117,7 +117,7 @@ export function mergePicked<T extends Picked>(
 		if (kept) items.push(kept);
 		else {
 			const row = rowById.get(id);
-			if (row) items.push(freeze(row));
+			if (row) items.push(freeze(row, items.length + 1));
 			else missing.push(id);
 		}
 	}
@@ -125,9 +125,9 @@ export function mergePicked<T extends Picked>(
 }
 
 /** The picks with every row of a select all added; what was picked stays as it is. */
-export function addPicked<T extends Picked>(current: readonly T[], rows: readonly EntityRow[], freeze: (row: EntityRow) => T): T[] {
+export function addPicked<T extends Picked>(current: readonly T[], rows: readonly EntityRow[], freeze: (row: EntityRow, position: number) => T): T[] {
 	const have = new Set(current.map((item) => item.fpt?.id));
-	return [...current, ...rows.filter((row) => !have.has(row.id)).map(freeze)];
+	return [...current, ...rows.filter((row) => !have.has(row.id)).map((row, i) => freeze(row, current.length + i + 1))];
 }
 
 /**
