@@ -6,7 +6,10 @@ import {
 	awardedTotalsQuery,
 	bidKey,
 	chunk,
+	isClean,
 	lineKey,
+	mergeWritten,
+	NOTHING_WRITTEN,
 	planAward,
 	planUndo,
 	toBatchRequest,
@@ -16,7 +19,8 @@ import {
 	type Existing,
 	type FptSite,
 	type ReadRow,
-	type Write
+	type Write,
+	type Written
 } from './fpt-award';
 import type { AwardScenario, InvitedVendor } from './model';
 import { money, rate } from './money';
@@ -162,7 +166,7 @@ describe('planAward', () => {
 			{ kind: 'addGroups', itemType: 'Shot', id: 102, field: 'sg_vendor_groups', groups: [39] },
 			{ kind: 'addGroups', itemType: 'Shot', id: 103, field: 'sg_vendor_groups', groups: [39] }
 		]);
-		expect(plan.preview.groups[1]).toEqual({ item: 'SH020', ref: { type: 'Shot', id: 102 }, added: [39], already: [38] });
+		expect(plan.preview.groups[1]).toEqual({ item: 'SH020', ref: { type: 'Shot', id: 102 }, added: [39], addedVendors: ['Vendor B'], already: [38], withoutGroup: [] });
 	});
 
 	it('updates rows found by key instead of creating them again, and leaves the link alone', () => {
@@ -172,7 +176,7 @@ describe('planAward', () => {
 		expect(a).toMatchObject({ kind: 'update', id: 9001, key: KEY_A });
 		expect((a as { data: object }).data).not.toHaveProperty('project');
 		expect(plan.steps.map((s) => s.label)).not.toContain('App links');
-		const l = plan.steps[1].writes.find((w) => w.kind !== 'addGroups' && w.key === lineKey(KEY_A, onShot('sh010')))!;
+		const l = plan.steps[1].writes.find((w) => (w.kind === 'create' || w.kind === 'update') && w.key === lineKey(KEY_A, onShot('sh010')))!;
 		expect(l).toMatchObject({ kind: 'update', id: 9101, data: { sg_bid: { type: 'CustomEntity14', id: 9001 } } });
 		expect(plan.preview.bids.map((b) => b.action)).toEqual(['update', 'create']);
 	});
@@ -220,6 +224,174 @@ describe('planAward', () => {
 	it('refuses a scenario whose shares do not make 100', () => {
 		const bad: AwardScenario = { ...SCENARIO, picks: [{ target: onShot('sh020'), shares: [{ bidId: 'bidA', percent: '50' }] }] };
 		expect(() => planAward(input({ scenario: bad }))).toThrow('The shares of shot sh020 sum to 50%, not 100%.');
+	});
+});
+
+
+describe('planAward, the Group per vendor', () => {
+	it('takes a Group picked at publish over the invitation, and a vendor without one when told so', () => {
+		const noGroup = { ...REQUEST, vendors: [{ ...REQUEST.vendors[0], fpt: undefined }, REQUEST.vendors[1]] };
+		const picked = planAward(input({ request: noGroup, options: { date: '2026-11-20', groups: { va: 41 } } }));
+		expect((picked.steps[0].writes[0] as Extract<Write, { kind: 'create' }>).data.sg_vendor).toEqual({ type: 'Group', id: 41 });
+		expect(picked.steps[1].writes.find((w) => w.kind === 'addGroups' && w.id === 101)).toMatchObject({ groups: [41] });
+
+		const none = planAward(input({ request: noGroup, options: { date: '2026-11-20', groups: { va: null } } }));
+		expect((none.steps[0].writes[0] as Extract<Write, { kind: 'create' }>).data.sg_vendor).toBeNull();
+		const adds = none.steps[1].writes.filter((w) => w.kind === 'addGroups');
+		expect(adds).toEqual([
+			{ kind: 'addGroups', itemType: 'Shot', id: 102, field: 'sg_vendor_groups', groups: [39] },
+			{ kind: 'addGroups', itemType: 'Shot', id: 103, field: 'sg_vendor_groups', groups: [39] }
+		]);
+		expect(none.preview.groups[0]).toEqual({ item: 'SH010', ref: { type: 'Shot', id: 101 }, added: [], addedVendors: [], already: [], withoutGroup: ['Vendor A'] });
+		expect(none.warnings).toContain('Vendor A has no Flow PT Group. Its Bid is written, and no Shot or Asset is shared with it.');
+	});
+});
+
+describe('planAward, the preview', () => {
+	it('lists every line it writes with both amounts, the share and the awarded part', () => {
+		const plan = planAward(input());
+		expect(plan.preview.lines.map((l) => [l.item, l.vendor, l.action])).toEqual([
+			['SH010', 'Vendor A', 'create'],
+			['SH020', 'Vendor A', 'create'],
+			['SH020', 'Vendor B', 'create'],
+			['SH030', 'Vendor B', 'create']
+		]);
+		expect(plan.preview.lines[2]).toEqual({
+			key: lineKey(KEY_B, onShot('sh020')),
+			item: 'SH020',
+			ref: { type: 'Shot', id: 102 },
+			vendor: 'Vendor B',
+			action: 'create',
+			amount: money(180000, 'EUR'),
+			amountBase: money(198000, 'USD'),
+			share: '50',
+			awardedBase: money(99000, 'USD'),
+			excluded: false
+		});
+		expect(plan.preview.bids[1]).toMatchObject({ vendor: 'Vendor B', currency: 'EUR', rate: rate('EUR', 'USD', '1.1', '2026-11-15'), group: 39 });
+		expect(plan.preview.removed).toEqual({ bids: [], lines: [], groups: [] });
+	});
+});
+
+describe('planAward again, after a change', () => {
+	const KEY_A030 = lineKey(KEY_A, onShot('sh030'));
+	const KEY_A010 = lineKey(KEY_A, onShot('sh010'));
+	// The first run gave sh030 to A, and wrote A's Bid with its link.
+	const previous: Written = {
+		bids: [{ key: KEY_A, id: 5001, created: true }],
+		lines: [
+			{ key: KEY_A010, id: 6001, created: true },
+			{ key: KEY_A030, id: 6003, created: true }
+		],
+		groups: [
+			{ itemType: 'Shot', id: 101, field: 'sg_vendor_groups', groups: [38] },
+			{ itemType: 'Shot', id: 103, field: 'sg_vendor_groups', groups: [38] }
+		],
+		attachments: [{ key: KEY_A, id: 77 }]
+	};
+	const existing: Existing = { bids: [{ id: 5001, key: KEY_A }], lines: [{ id: 6001, key: KEY_A010 }, { id: 6003, key: KEY_A030 }], groups: { 'Shot:101': [38], 'Shot:103': [38] } };
+
+	it('first takes back what the new scenario drops, then updates what it keeps', () => {
+		const plan = planAward(input({ existing, previous }));
+		expect(plan.steps[0]).toEqual({
+			label: 'Take back what the scenario dropped',
+			mode: 'batch',
+			writes: [
+				{ kind: 'removeGroups', itemType: 'Shot', id: 103, field: 'sg_vendor_groups', groups: [38] },
+				{ kind: 'delete', entity: 'line', key: KEY_A030, id: 6003 }
+			]
+		});
+		expect(plan.steps[1].writes[0]).toMatchObject({ kind: 'update', key: KEY_A, id: 5001 });
+		expect(plan.preview.removed).toEqual({ bids: [], lines: [{ key: KEY_A030, item: 'SH030', vendor: 'Vendor A' }], groups: [{ item: 'SH030', ref: { type: 'Shot', id: 103 }, groups: [38] }] });
+	});
+
+	it('keeps a Group another award still needs, and deletes a Bid the scenario no longer names with its link', () => {
+		const onlyB: AwardScenario = { ...SCENARIO, picks: [{ target: onShot('sh030'), shares: [{ bidId: 'bidB', percent: '100' }] }] };
+		const plan = planAward(input({ bids: [BID_B], scenario: onlyB, existing: { ...existing, needed: new Set(['Shot:101:38']) }, previous }));
+		expect(plan.steps[0].writes).toEqual([
+			{ kind: 'removeGroups', itemType: 'Shot', id: 103, field: 'sg_vendor_groups', groups: [38] },
+			{ kind: 'delete', entity: 'line', key: KEY_A010, id: 6001 },
+			{ kind: 'delete', entity: 'line', key: KEY_A030, id: 6003 },
+			{ kind: 'delete', entity: 'attachment', key: KEY_A, id: 77 },
+			{ kind: 'delete', entity: 'bid', key: KEY_A, id: 5001 }
+		]);
+	});
+
+	it('sends the take back as a batch removal and deletes', () => {
+		const [remove, del] = planAward(input({ existing, previous })).steps[0].writes;
+		expect(toBatchRequest(remove, SITE, new Map())).toEqual({
+			request_type: 'update',
+			entity: 'Shot',
+			record_id: 103,
+			data: { sg_vendor_groups: { multi_entity_update_mode: 'remove', value: [{ type: 'Group', id: 38 }] } }
+		});
+		expect(toBatchRequest(del, SITE, new Map())).toEqual({ request_type: 'delete', entity: 'CustomEntity15', record_id: 6003 });
+		expect(toBatchRequest({ kind: 'delete', entity: 'attachment', key: KEY_A, id: 77 }, SITE, new Map())).toEqual({ request_type: 'delete', entity: 'Attachment', record_id: 77 });
+	});
+
+	it('checks the take back on the read-back: the row gone, the Group off', () => {
+		const plan = { steps: [{ label: 'x', mode: 'batch' as const, writes: [{ kind: 'removeGroups' as const, itemType: 'Shot' as const, id: 103, field: 'sg_vendor_groups', groups: [38] }, { kind: 'delete' as const, entity: 'line' as const, key: KEY_A030, id: 6003 }] }], preview: { bids: [], lines: [], groups: [], removed: { bids: [], lines: [], groups: [] } }, warnings: [] };
+		expect(verify(plan, { bids: new Map(), lines: new Map(), groups: { 'Shot:103': [39] } }, SITE, new Map())).toEqual([]);
+		const still = { bids: new Map(), lines: new Map([[KEY_A030, { id: 6003, attributes: {}, relationships: {} }]]), groups: { 'Shot:103': [38] } };
+		expect(verify(plan, still, SITE, new Map())).toEqual(['Shot 103: Group 38 is still in sg_vendor_groups.', `${KEY_A030}: the row is still there.`]);
+	});
+});
+
+describe('isClean', () => {
+	it('is clean only when nothing the app wrote is left', () => {
+		expect(isClean(NOTHING_WRITTEN)).toBe(true);
+		expect(isClean({ ...NOTHING_WRITTEN, groups: [{ itemType: 'Shot', id: 1, field: 'f', groups: [38] }] })).toBe(false);
+		expect(isClean({ ...NOTHING_WRITTEN, attachments: [{ key: 'k', id: 1 }] })).toBe(false);
+	});
+});
+
+describe('mergeWritten', () => {
+	it('keeps what an earlier run created as created, adds the new, drops what was taken back', () => {
+		const previous: Written = {
+			bids: [{ key: 'b1', id: 1, created: true }],
+			lines: [
+				{ key: 'l1', id: 11, created: true },
+				{ key: 'l2', id: 12, created: true }
+			],
+			groups: [{ itemType: 'Shot', id: 101, field: 'f', groups: [38, 39] }],
+			attachments: [{ key: 'b1', id: 77 }]
+		};
+		const run: Written = {
+			bids: [
+				{ key: 'b1', id: 1, created: false },
+				{ key: 'b2', id: 2, created: true }
+			],
+			lines: [{ key: 'l3', id: 13, created: true }],
+			groups: [
+				{ itemType: 'Shot', id: 101, field: 'f', groups: [40] },
+				{ itemType: 'Shot', id: 102, field: 'f', groups: [38] }
+			],
+			attachments: [{ key: 'b2', id: 78 }]
+		};
+		const removed = { bids: [], lines: [12], attachments: [], groups: [{ itemType: 'Shot' as const, id: 101, field: 'f', groups: [39] }] };
+		expect(mergeWritten(previous, run, removed)).toEqual({
+			bids: [
+				{ key: 'b1', id: 1, created: true },
+				{ key: 'b2', id: 2, created: true }
+			],
+			lines: [
+				{ key: 'l1', id: 11, created: true },
+				{ key: 'l3', id: 13, created: true }
+			],
+			groups: [
+				{ itemType: 'Shot', id: 101, field: 'f', groups: [38, 40] },
+				{ itemType: 'Shot', id: 102, field: 'f', groups: [38] }
+			],
+			attachments: [
+				{ key: 'b1', id: 77 },
+				{ key: 'b2', id: 78 }
+			]
+		});
+	});
+
+	it('starts from nothing', () => {
+		const run: Written = { bids: [{ key: 'b1', id: 1, created: true }], lines: [], groups: [], attachments: [] };
+		expect(mergeWritten(null, run)).toEqual(run);
 	});
 });
 
@@ -334,7 +506,7 @@ describe('planUndo', () => {
 			{ itemType: 'Shot' as const, id: 101, field: 'sg_vendor_groups', groups: [38] },
 			{ itemType: 'Shot' as const, id: 102, field: 'sg_vendor_groups', groups: [38, 39] }
 		],
-		attachments: [77]
+		attachments: [{ key: KEY_A, id: 77 }]
 	};
 
 	it('takes the Groups away first, then deletes the created lines, Attachments and Bids', () => {

@@ -24,13 +24,17 @@
  *   400 `Value is not legal.`, where a single POST or PUT takes it. So the link is its own last step,
  *   one PUT per new Bid, outside any batch.
  * - A write is confirmed by reading the row back, never by its status (recipe 009).
+ * - Published again after the scenario changed, the plan first takes back what the new scenario
+ *   drops: the Groups an earlier run added that no pick needs now, unless another award outside the
+ *   app's rows still needs them (recipe 009), and the rows an earlier run created that the new plan
+ *   does not write. Then it updates the rest by key. Nothing is written twice.
  */
 
 import { BID, BID_FIELDS, LINE, LINE_FIELDS, sameCurrency, toFptCurrency, type FptAmount } from './fpt-fields';
 import type { AppStatus, ItemType } from './fpt-setup';
 import { applyScenario } from './compare';
-import { targetKey, type AwardScenario, type BidRequest, type Day, type EntityRef, type Id, type Target, type VendorBid } from './model';
-import { fromDecimal, minorDigits, toDecimal, type Money } from './money';
+import { targetKey, type AwardScenario, type BidRequest, type Day, type EntityRef, type Id, type InvitedVendor, type Target, type VendorBid } from './model';
+import { fromDecimal, minorDigits, toDecimal, type Money, type Rate } from './money';
 import { percentOf } from './percent';
 import { estimateRebate } from './rebate';
 import { bidTotals, toBase } from './totals';
@@ -54,6 +58,8 @@ export interface Existing {
 	readonly lines: readonly { readonly id: number; readonly key: string }[];
 	/** Group ids on each item's vendor field, keyed `Shot:123`. */
 	readonly groups: Readonly<Record<string, readonly number[]>>;
+	/** `Shot:123:38` for each Group an awarded line outside the app's rows still needs on its item. */
+	readonly needed?: ReadonlySet<string>;
 }
 
 export interface AwardOptions {
@@ -65,6 +71,11 @@ export interface AwardOptions {
 	readonly allLines?: boolean;
 	/** The app's address for each bid, by bid id, written to the Bid's link on create. */
 	readonly appLinks?: Readonly<Record<Id, string>>;
+	/**
+	 * The Group per vendor id, over the invitation's: a Group id picked at publish, or null to write
+	 * the vendor's Bid with no Group and share no Shot or Asset with it.
+	 */
+	readonly groups?: Readonly<Record<Id, number | null>>;
 }
 
 export interface AwardInput {
@@ -75,6 +86,8 @@ export interface AwardInput {
 	readonly options: AwardOptions;
 	readonly site: FptSite;
 	readonly existing: Existing;
+	/** What earlier runs of this award wrote, merged. Rows they created that this plan drops are deleted. */
+	readonly previous?: Written | null;
 }
 
 /** A new Bid's id, put in once the Bid step answers. */
@@ -94,7 +107,15 @@ export type Write =
 			readonly field: string;
 			readonly groups: readonly number[];
 	  }
-	| { readonly kind: 'link'; readonly key: string; readonly url: string };
+	| { readonly kind: 'link'; readonly key: string; readonly url: string }
+	| {
+			readonly kind: 'removeGroups';
+			readonly itemType: ItemType;
+			readonly id: number;
+			readonly field: string;
+			readonly groups: readonly number[];
+	  }
+	| { readonly kind: 'delete'; readonly entity: 'bid' | 'line' | 'attachment'; readonly key: string; readonly id: number };
 
 export interface Step {
 	readonly label: string;
@@ -109,21 +130,57 @@ export interface BidPreview {
 	readonly vendor: string;
 	readonly action: 'create' | 'update';
 	readonly status: AppStatus;
+	readonly currency: string;
 	readonly total: Money;
 	readonly totalBase: Money;
+	/** The locked rate, null in the base currency. */
+	readonly rate: Rate | null;
+	/** The vendor's Group, null when published without one. */
+	readonly group: number | null;
 	readonly lines: number;
+}
+
+export interface LinePreview {
+	readonly key: string;
+	readonly item: string;
+	readonly ref: EntityRef;
+	readonly vendor: string;
+	readonly action: 'create' | 'update';
+	/** Null when excluded. */
+	readonly amount: Money | null;
+	readonly amountBase: Money | null;
+	/** The vendor's share of the item, null when not awarded. */
+	readonly share: string | null;
+	readonly awardedBase: Money | null;
+	readonly excluded: boolean;
 }
 
 export interface GroupPreview {
 	readonly item: string;
 	readonly ref: EntityRef;
 	readonly added: readonly number[];
+	/** The vendor of each Group in `added`, in order. */
+	readonly addedVendors: readonly string[];
 	readonly already: readonly number[];
+	/** Vendors that win the item and have no Group: nothing is shared with them. */
+	readonly withoutGroup: readonly string[];
+}
+
+export interface RemovedPreview {
+	readonly bids: readonly { readonly key: string; readonly vendor: string }[];
+	readonly lines: readonly { readonly key: string; readonly item: string; readonly vendor: string }[];
+	readonly groups: readonly { readonly item: string; readonly ref: EntityRef; readonly groups: readonly number[] }[];
 }
 
 export interface AwardPlan {
 	readonly steps: readonly Step[];
-	readonly preview: { readonly bids: readonly BidPreview[]; readonly groups: readonly GroupPreview[] };
+	readonly preview: {
+		readonly bids: readonly BidPreview[];
+		readonly lines: readonly LinePreview[];
+		readonly groups: readonly GroupPreview[];
+		/** What an earlier run wrote that this plan takes back. */
+		readonly removed: RemovedPreview;
+	};
 	/** What the site cannot hold exactly, or what is left unwritten, in plain words. */
 	readonly warnings: readonly string[];
 }
@@ -176,6 +233,13 @@ function share(percent: string): string {
 	return percent.includes('.') ? percent : `${percent}.0`;
 }
 
+/** The vendor's Group: the one picked at publish, else the invitation's. Null: none, said so. */
+function groupOf(vendor: InvitedVendor, options: AwardOptions): number | null {
+	if (options.groups && vendor.id in options.groups) return options.groups[vendor.id];
+	if (!vendor.fpt || vendor.fpt.type !== 'Group') throw new Error(`Vendor ${vendor.name} has no Flow PT Group.`);
+	return vendor.fpt.id;
+}
+
 export function planAward(input: AwardInput): AwardPlan {
 	const { request, bids, scenario, options, site, existing } = input;
 	applyScenario(request, bids, scenario); // throws on a scenario that does not hold together
@@ -198,6 +262,8 @@ export function planAward(input: AwardInput): AwardPlan {
 	const lineWrites: Write[] = [];
 	const linkWrites: Write[] = [];
 	const previews: BidPreview[] = [];
+	const linePreviews: LinePreview[] = [];
+	const groupIds = new Map<Id, number | null>();
 	const seenKeys = new Set<string>();
 	for (const bid of bids) {
 		if (bid.status === 'draft' || bid.status === 'withdrawn') {
@@ -205,7 +271,11 @@ export function planAward(input: AwardInput): AwardPlan {
 		}
 		const vendor = vendors.get(bid.vendorId);
 		if (!vendor) throw new Error(`Bid ${bid.id} is from vendor ${bid.vendorId}, not invited to the request.`);
-		if (!vendor.fpt || vendor.fpt.type !== 'Group') throw new Error(`Vendor ${vendor.name} has no Flow PT Group.`);
+		const group = groupOf(vendor, options);
+		if (!groupIds.has(vendor.id)) {
+			groupIds.set(vendor.id, group);
+			if (group === null) warnings.push(`${vendor.name} has no Flow PT Group. Its Bid is written, and no Shot or Asset is shared with it.`);
+		}
 		const key = bidKey(request.id, bid.vendorId, bid.round);
 		if (seenKeys.has(key)) throw new Error(`Two bids from ${vendor.name} for round ${bid.round}. Publish one.`);
 		seenKeys.add(key);
@@ -219,7 +289,7 @@ export function planAward(input: AwardInput): AwardPlan {
 		const data: Record<string, FieldValue> = {
 			[BID.name]: `${requestCode} ${vendor.name} R${bid.round}`,
 			[BID.key]: key,
-			[BID.vendor]: { type: 'Group', id: vendor.fpt.id },
+			[BID.vendor]: group === null ? null : { type: 'Group', id: group },
 			[BID.round]: bid.round,
 			[BID.total]: amount(totals.grand.bid, `${where} total`, warnings),
 			[BID.currency]: bid.currency,
@@ -270,6 +340,18 @@ export function planAward(input: AwardInput): AwardPlan {
 			const lid = lineRows.get(lkey);
 			if (lid === undefined) lineWrites.push({ kind: 'create', entity: 'line', key: lkey, data: { ...ldata, project } });
 			else lineWrites.push({ kind: 'update', entity: 'line', key: lkey, id: lid, data: ldata });
+			linePreviews.push({
+				key: lkey,
+				item: item.label,
+				ref: item.ref,
+				vendor: vendor.name,
+				action: lid === undefined ? 'create' : 'update',
+				amount: line.excluded ? null : line.total,
+				amountBase: lineBase,
+				share: percent,
+				awardedBase: percent !== null && lineBase ? percentOf(lineBase, percent) : null,
+				excluded: line.excluded
+			});
 		}
 		previews.push({
 			key,
@@ -277,8 +359,11 @@ export function planAward(input: AwardInput): AwardPlan {
 			vendor: vendor.name,
 			action: id === undefined ? 'create' : 'update',
 			status,
+			currency: bid.currency,
 			total: totals.grand.bid,
 			totalBase: totals.grand.base,
+			rate: bid.rate,
+			group,
 			lines: lines.length
 		});
 	}
@@ -286,27 +371,93 @@ export function planAward(input: AwardInput): AwardPlan {
 	// The vendor's Group on each awarded item, only where it is not there yet.
 	const groupWrites: Write[] = [];
 	const groupPreviews: GroupPreview[] = [];
+	const wantedGroups = new Set<string>();
 	const bidsById = new Map(bids.map((b) => [b.id, b]));
 	for (const pick of scenario.picks) {
 		const item = itemOf(all, pick.target);
 		const type = ITEM_OF[pick.target.kind];
 		const field = site.vendorField[type];
 		if (!field) throw new Error(`No vendor groups field on ${type}. The award cannot reach ${item.label}.`);
-		const wanted = [...new Set(pick.shares.map((s) => vendors.get(bidsById.get(s.bidId)!.vendorId)!.fpt!.id))];
+		const winners = [...new Set(pick.shares.map((s) => bidsById.get(s.bidId)!.vendorId))];
+		const byGroup = new Map<number, string>();
+		const withoutGroup: string[] = [];
+		for (const v of winners) {
+			const g = groupIds.get(v);
+			const name = vendors.get(v)!.name;
+			if (g === null || g === undefined) withoutGroup.push(name);
+			else if (!byGroup.has(g)) byGroup.set(g, name);
+		}
+		const wanted = [...byGroup.keys()];
+		for (const g of wanted) wantedGroups.add(`${type}:${item.ref.id}:${g}`);
 		const present = new Set(existing.groups[itemKey(item.ref)] ?? []);
 		const added = wanted.filter((g) => !present.has(g));
-		groupPreviews.push({ item: item.label, ref: item.ref, added, already: wanted.filter((g) => present.has(g)) });
+		groupPreviews.push({
+			item: item.label,
+			ref: item.ref,
+			added,
+			addedVendors: added.map((g) => byGroup.get(g)!),
+			already: wanted.filter((g) => present.has(g)),
+			withoutGroup
+		});
 		if (added.length > 0) groupWrites.push({ kind: 'addGroups', itemType: type, id: item.ref.id, field, groups: added });
 	}
 
+	const cleanup = takeBack(input, all, bidWrites, lineWrites, wantedGroups);
 	const steps: Step[] = (
 		[
+			{ label: 'Take back what the scenario dropped', mode: 'batch', writes: cleanup.writes },
 			{ label: 'Bids', mode: 'batch', writes: bidWrites },
 			{ label: 'Bid Lines and vendor Groups', mode: 'batch', writes: [...lineWrites, ...groupWrites] },
 			{ label: 'App links', mode: 'single', writes: linkWrites }
 		] as Step[]
 	).filter((s) => s.writes.length > 0);
-	return { steps, preview: { bids: previews, groups: groupPreviews }, warnings };
+	return { steps, preview: { bids: previews, lines: linePreviews, groups: groupPreviews, removed: cleanup.preview }, warnings };
+}
+
+/**
+ * What earlier runs wrote that this plan no longer wants: their Groups no pick needs, unless an award
+ * outside the app's rows still needs them, then the rows they created that this plan does not write.
+ * Keys are `sgbids/<request>/<vendor>/r<round>[/<kind>:<id>]`.
+ */
+function takeBack(input: AwardInput, all: Map<string, Item | null>, bidWrites: readonly Write[], lineWrites: readonly Write[], wanted: ReadonlySet<string>) {
+	const writes: Write[] = [];
+	const preview = {
+		bids: [] as { key: string; vendor: string }[],
+		lines: [] as { key: string; item: string; vendor: string }[],
+		groups: [] as { item: string; ref: EntityRef; groups: number[] }[]
+	};
+	const previous = input.previous;
+	if (!previous) return { writes, preview };
+	const byRef = new Map<string, string>();
+	for (const item of all.values()) if (item) byRef.set(itemKey(item.ref), item.label);
+	const keyed = (w: Write) => (w.kind === 'create' || w.kind === 'update' ? w.key : null);
+	const plannedBids = new Set(bidWrites.map(keyed));
+	const plannedLines = new Set(lineWrites.map(keyed));
+	const vendorName = new Map(input.request.vendors.map((v) => [v.id, v.name]));
+	const vendorOf = (key: string) => vendorName.get(key.split('/')[2] ?? '') ?? 'A vendor';
+	for (const g of previous.groups) {
+		const remove = g.groups.filter((group) => {
+			const k = `${g.itemType}:${g.id}:${group}`;
+			return !wanted.has(k) && !input.existing.needed?.has(k);
+		});
+		if (remove.length === 0) continue;
+		writes.push({ kind: 'removeGroups', itemType: g.itemType, id: g.id, field: g.field, groups: remove });
+		const ref = { type: g.itemType, id: g.id };
+		preview.groups.push({ item: byRef.get(itemKey(ref)) ?? `${g.itemType} ${g.id}`, ref, groups: remove });
+	}
+	for (const l of previous.lines) {
+		if (!l.created || plannedLines.has(l.key)) continue;
+		writes.push({ kind: 'delete', entity: 'line', key: l.key, id: l.id });
+		const target = l.key.split('/').slice(4).join('/');
+		preview.lines.push({ key: l.key, item: all.get(target)?.label ?? target, vendor: vendorOf(l.key) });
+	}
+	for (const b of previous.bids) {
+		if (!b.created || plannedBids.has(b.key)) continue;
+		for (const a of previous.attachments) if (a.key === b.key) writes.push({ kind: 'delete', entity: 'attachment', key: a.key, id: a.id });
+		writes.push({ kind: 'delete', entity: 'bid', key: b.key, id: b.id });
+		preview.bids.push({ key: b.key, vendor: vendorOf(b.key) });
+	}
+	return { writes, preview };
 }
 
 /** One `_batch` request, as the site takes it (recipe 002). */
@@ -335,6 +486,10 @@ function resolveData(data: Readonly<Record<string, FieldValue>>, site: FptSite, 
 export function toBatchRequest(write: Write, site: FptSite, bidIds: ReadonlyMap<string, number>): BatchRequest {
 	const entity = (e: 'bid' | 'line') => (e === 'bid' ? site.bidType : site.lineType);
 	switch (write.kind) {
+		case 'removeGroups':
+			return undoRequest(write);
+		case 'delete':
+			return { request_type: 'delete', entity: write.entity === 'attachment' ? 'Attachment' : entity(write.entity), record_id: write.id };
 		case 'create':
 			return { request_type: 'create', entity: entity(write.entity), data: resolveData(write.data, site, bidIds) };
 		case 'update':
@@ -366,8 +521,60 @@ export interface Written {
 	readonly bids: readonly { readonly key: string; readonly id: number; readonly created: boolean }[];
 	readonly lines: readonly { readonly key: string; readonly id: number; readonly created: boolean }[];
 	readonly groups: readonly { readonly itemType: ItemType; readonly id: number; readonly field: string; readonly groups: readonly number[] }[];
-	/** Attachments minted by a link written on a Bid this run created. */
+	/** Attachments minted by a link written on a Bid this run created, by the Bid's key. */
+	readonly attachments: readonly { readonly key: string; readonly id: number }[];
+}
+
+/** What a run took back of an earlier run's writes, by id. */
+export interface Removed {
+	readonly bids: readonly number[];
+	readonly lines: readonly number[];
 	readonly attachments: readonly number[];
+	readonly groups: readonly { readonly itemType: ItemType; readonly id: number; readonly field: string; readonly groups: readonly number[] }[];
+}
+
+export const NOTHING_REMOVED: Removed = { bids: [], lines: [], attachments: [], groups: [] };
+
+export const NOTHING_WRITTEN: Written = { bids: [], lines: [], groups: [], attachments: [] };
+
+/** Nothing the app wrote is left. */
+export function isClean(written: Written): boolean {
+	return written.bids.length + written.lines.length + written.groups.length + written.attachments.length === 0;
+}
+
+type WrittenRow = { readonly key: string; readonly id: number; readonly created: boolean };
+
+function mergeRows(previous: readonly WrittenRow[], run: readonly WrittenRow[], gone: readonly number[]): WrittenRow[] {
+	const out = new Map<string, WrittenRow>();
+	for (const r of previous) if (!gone.includes(r.id)) out.set(r.key, r);
+	for (const r of run) {
+		const was = out.get(r.key);
+		out.set(r.key, { key: r.key, id: r.id, created: r.created || (was?.created ?? false) });
+	}
+	return [...out.values()];
+}
+
+/**
+ * Every run of an award, as one: a row an earlier run created stays created when a later run only
+ * updates it, so the undo still deletes it. Groups and Attachments taken back leave the record.
+ */
+export function mergeWritten(previous: Written | null, run: Written, removed: Removed = NOTHING_REMOVED): Written {
+	if (!previous) return run;
+	const off = new Set(removed.groups.flatMap((g) => g.groups.map((group) => `${g.itemType}:${g.id}:${group}`)));
+	const groups = new Map<string, { itemType: ItemType; id: number; field: string; groups: number[] }>();
+	for (const g of [...previous.groups, ...run.groups]) {
+		const k = `${g.itemType}:${g.id}`;
+		const entry = groups.get(k) ?? { itemType: g.itemType, id: g.id, field: g.field, groups: [] };
+		for (const group of g.groups) if (!off.has(`${k}:${group}`) && !entry.groups.includes(group)) entry.groups.push(group);
+		groups.set(k, entry);
+	}
+	const kept = previous.attachments.filter((a) => !removed.attachments.includes(a.id));
+	return {
+		bids: mergeRows(previous.bids, run.bids, removed.bids),
+		lines: mergeRows(previous.lines, run.lines, removed.lines),
+		groups: [...groups.values()].filter((g) => g.groups.length > 0),
+		attachments: [...kept, ...run.attachments.filter((a) => !kept.some((p) => p.id === a.id))]
+	};
 }
 
 /** A row read back: the API's shape. */
@@ -411,6 +618,15 @@ export function verify(plan: AwardPlan, back: ReadBack, site: FptSite, bidIds: R
 			if (write.kind === 'addGroups') {
 				const have = new Set(back.groups[`${write.itemType}:${write.id}`] ?? []);
 				for (const g of write.groups) if (!have.has(g)) problems.push(`${write.itemType} ${write.id}: Group ${g} is not in ${write.field}.`);
+				continue;
+			}
+			if (write.kind === 'removeGroups') {
+				const have = new Set(back.groups[`${write.itemType}:${write.id}`] ?? []);
+				for (const g of write.groups) if (have.has(g)) problems.push(`${write.itemType} ${write.id}: Group ${g} is still in ${write.field}.`);
+				continue;
+			}
+			if (write.kind === 'delete') {
+				if (write.entity !== 'attachment' && (write.entity === 'bid' ? back.bids : back.lines).has(write.key)) problems.push(`${write.key}: the row is still there.`);
 				continue;
 			}
 			if (write.kind === 'link') {
@@ -463,7 +679,7 @@ export function planUndo(written: Written, site: FptSite, stillNeeded: ReadonlyS
 		if (remove.length > 0) writes.push({ kind: 'removeGroups', itemType: g.itemType, id: g.id, field: g.field, groups: remove });
 	}
 	for (const l of written.lines) if (l.created) writes.push({ kind: 'delete', entityType: site.lineType, id: l.id });
-	for (const a of written.attachments) writes.push({ kind: 'delete', entityType: 'Attachment', id: a });
+	for (const a of written.attachments) writes.push({ kind: 'delete', entityType: 'Attachment', id: a.id });
 	for (const b of written.bids) if (b.created) writes.push({ kind: 'delete', entityType: site.bidType, id: b.id });
 	const untouched = [...written.bids, ...written.lines].filter((r) => !r.created).map((r) => r.key);
 	return { writes, kept, untouched };

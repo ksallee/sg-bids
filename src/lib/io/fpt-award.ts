@@ -23,6 +23,7 @@ import {
 	bidKey,
 	chunk,
 	lineKey,
+	mergeWritten,
 	planAward,
 	planUndo,
 	toBatchRequest,
@@ -35,6 +36,7 @@ import {
 	type FptSite,
 	type ReadBack,
 	type ReadRow,
+	type Removed,
 	type UndoPlan,
 	type Written
 } from '../pure/fpt-award';
@@ -108,20 +110,27 @@ export async function readExisting(api: FptApi, site: FptSite, request: BidReque
 
 export interface Applied {
 	readonly written: Written;
+	/** What the run took back of an earlier run's writes. */
+	readonly removed: Removed;
 	/** Each Bid's id by key, new and updated. */
 	readonly bidIds: ReadonlyMap<string, number>;
 	/** Why the run stopped, when it did. What was written before it is in `written`. */
 	readonly error: string | null;
+	/** The labels of the steps that answered, in order. */
+	readonly stepsDone: readonly string[];
 }
 
 /** Send the plan's steps in order, 200 requests a batch. Stops at the first refusal. */
-export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite): Promise<Applied> {
+export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite, onStep?: (label: string) => void): Promise<Applied> {
 	const bids: { key: string; id: number; created: boolean }[] = [];
 	const lines: { key: string; id: number; created: boolean }[] = [];
 	const groups: { itemType: ItemType; id: number; field: string; groups: number[] }[] = [];
+	const removed = { bids: [] as number[], lines: [] as number[], attachments: [] as number[], groups: [] as { itemType: ItemType; id: number; field: string; groups: number[] }[] };
 	const bidIds = new Map<string, number>();
-	const done = (error: string | null): Applied => ({ written: { bids, lines, groups, attachments: [] }, bidIds, error });
+	const stepsDone: string[] = [];
+	const done = (error: string | null): Applied => ({ written: { bids, lines, groups, attachments: [] }, removed, bidIds, error, stepsDone });
 	for (const step of plan.steps) {
+		onStep?.(step.label);
 		if (step.mode === 'single') {
 			for (const write of step.writes) {
 				try {
@@ -132,6 +141,7 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite): Pr
 					return done(`${step.label}: ${(e as Error).message}`);
 				}
 			}
+			stepsDone.push(step.label);
 			continue;
 		}
 		for (const part of chunk(step.writes)) {
@@ -154,6 +164,14 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite): Pr
 					return;
 				}
 				if (write.kind === 'link') return;
+				if (write.kind === 'removeGroups') {
+					removed.groups.push({ itemType: write.itemType, id: write.id, field: write.field, groups: [...write.groups] });
+					return;
+				}
+				if (write.kind === 'delete') {
+					(write.entity === 'bid' ? removed.bids : write.entity === 'line' ? removed.lines : removed.attachments).push(write.id);
+					return;
+				}
 				const id = result.request_type === 'delete' ? result.id : result.data.id;
 				const row = { key: write.key, id, created: write.kind === 'create' };
 				if (write.entity === 'bid') {
@@ -162,6 +180,7 @@ export async function applyPlan(api: FptApi, plan: AwardPlan, site: FptSite): Pr
 				} else lines.push(row);
 			});
 		}
+		stepsDone.push(step.label);
 	}
 	return done(null);
 }
@@ -173,40 +192,62 @@ function asRead(row: EntityRow): ReadRow {
 /** Every Bid and Bid Line of the plan read back by key, with the Groups on its items. */
 export async function readBack(api: FptApi, plan: AwardPlan, site: FptSite): Promise<ReadBack> {
 	const keys = { bid: [] as string[], line: [] as string[] };
-	for (const step of plan.steps) for (const w of step.writes) if (w.kind === 'create' || w.kind === 'update') keys[w.entity].push(w.key);
+	const refs: EntityRef[] = plan.preview.groups.map((g) => g.ref);
+	for (const step of plan.steps) {
+		for (const w of step.writes) {
+			if (w.kind === 'create' || w.kind === 'update') keys[w.entity].push(w.key);
+			if (w.kind === 'delete' && w.entity !== 'attachment') keys[w.entity].push(w.key);
+			if (w.kind === 'removeGroups') refs.push({ type: w.itemType, id: w.id });
+		}
+	}
 	const bidRows = await byValues(api, site.bidType, site.projectId, BID.key, keys.bid, [...BID_FIELDS.map((f) => f.name), 'project']);
 	const lineRows = await byValues(api, site.lineType, site.projectId, LINE.key, keys.line, [...LINE_FIELDS.map((f) => f.name), 'project']);
 	return {
 		bids: new Map(bidRows.map((r) => [keyOf(r, BID.key), asRead(r)])),
 		lines: new Map(lineRows.map((r) => [keyOf(r, LINE.key), asRead(r)])),
-		groups: await readGroups(
-			api,
-			site,
-			plan.preview.groups.map((g) => g.ref)
-		)
+		groups: await readGroups(api, site, refs)
 	};
+}
+
+export interface Prepared {
+	readonly plan: AwardPlan;
+	/** The earlier runs' writes that still exist on the site. */
+	readonly previous: Written | null;
+}
+
+/** Read what the site holds now and plan against it. The preview shows this plan. */
+export async function prepareAward(api: FptApi, input: Omit<AwardInput, 'existing'>): Promise<Prepared> {
+	const previous = input.previous ? await stillThere(api, input.site, input.previous) : null;
+	const existing = await readExisting(api, input.site, input.request, input.bids);
+	const needed = previous ? await stillNeeded(api, input.site, previous) : new Set<string>();
+	return { plan: planAward({ ...input, previous, existing: { ...existing, needed } }), previous };
 }
 
 export interface Published {
 	readonly plan: AwardPlan;
+	/** This run's writes merged with the earlier runs': what the undo takes back. */
 	readonly written: Written;
 	readonly back: ReadBack;
 	/** Differences between the plan and the read-back. Empty when every write landed as sent. */
 	readonly problems: readonly string[];
 	readonly error: string | null;
+	readonly stepsDone: readonly string[];
 }
 
 /** Plan against what the site holds now, apply, read back and check. */
-export async function publishAward(api: FptApi, input: Omit<AwardInput, 'existing'>): Promise<Published> {
-	const existing = await readExisting(api, input.site, input.request, input.bids);
-	const plan = planAward({ ...input, existing });
-	const applied = await applyPlan(api, plan, input.site);
+export async function publishAward(api: FptApi, input: Omit<AwardInput, 'existing'>, onStep?: (label: string) => void): Promise<Published> {
+	const { plan, previous } = await prepareAward(api, input);
+	const applied = await applyPlan(api, plan, input.site, onStep);
+	onStep?.('Reading back');
 	const back = await readBack(api, plan, input.site);
 	const created = new Set(applied.written.bids.filter((b) => b.created).map((b) => b.key));
-	const attachments = [...back.bids].filter(([key]) => created.has(key)).flatMap(([, row]) => attachmentOf(row) ?? []);
-	const written = { ...applied.written, attachments };
+	const attachments = [...back.bids].filter(([key]) => created.has(key)).flatMap(([key, row]) => {
+		const id = attachmentOf(row);
+		return id === null ? [] : [{ key, id }];
+	});
+	const written = mergeWritten(previous, { ...applied.written, attachments }, applied.removed);
 	const problems = applied.error ? [] : verify(plan, back, input.site, applied.bidIds);
-	return { plan, written, back, problems, error: applied.error };
+	return { plan, written, back, problems, error: applied.error, stepsDone: applied.stepsDone };
 }
 
 /** `Shot:123:38` for each Group an awarded line outside this run still needs on its item. */
@@ -240,11 +281,11 @@ async function stillThere(api: FptApi, site: FptSite, written: Written): Promise
 	};
 	const bids = await live(site.bidType, written.bids.map((b) => b.id));
 	const lines = await live(site.lineType, written.lines.map((l) => l.id));
-	const attachments: number[] = [];
-	for (const id of written.attachments) {
+	const attachments: { key: string; id: number }[] = [];
+	for (const a of written.attachments) {
 		try {
-			await api.client.read('Attachment', id, { fields: ['id'] });
-			attachments.push(id);
+			await api.client.read('Attachment', a.id, { fields: ['id'] });
+			attachments.push(a);
 		} catch {
 			/* Gone already, or never readable: nothing to delete. */
 		}
@@ -260,20 +301,44 @@ async function stillThere(api: FptApi, site: FptSite, written: Written): Promise
 export interface Undone {
 	readonly undo: UndoPlan;
 	readonly error: string | null;
+	/**
+	 * Read back after the undo: what the app wrote that is still on the site. Empty when the undo is
+	 * complete. A Group kept because another award needs it is left out: it is no longer the app's.
+	 */
+	readonly remaining: Written;
 }
 
-/** Take back what a run wrote: its Groups unless still needed, then the rows it created. */
+/** Take back what a run wrote: its Groups unless still needed, then the rows it created. Read back after. */
 export async function undoAward(api: FptApi, site: FptSite, written: Written): Promise<Undone> {
 	const live = await stillThere(api, site, written);
 	const undo = planUndo(live, site, await stillNeeded(api, site, live));
+	let error: string | null = null;
 	for (const part of chunk(undo.writes.map(undoRequest))) {
 		try {
 			await api.client.batch(part as Parameters<FptApi['client']['batch']>[0]);
 		} catch (e) {
-			return { undo, error: (e as Error).message };
+			error = (e as Error).message;
+			break;
 		}
 	}
-	return { undo, error: null };
+	const after = await stillThere(api, site, live);
+	const kept = new Set(undo.kept.map((k) => `${k.itemType}:${k.id}:${k.group}`));
+	const present = await readGroups(
+		api,
+		site,
+		live.groups.map((g) => ({ type: g.itemType, id: g.id }))
+	);
+	const groups = live.groups
+		.map((g) => ({ ...g, groups: g.groups.filter((group) => !kept.has(`${g.itemType}:${g.id}:${group}`) && (present[`${g.itemType}:${g.id}`] ?? []).includes(group)) }))
+		.filter((g) => g.groups.length > 0);
+	// Rows the run only updated are left in place by design; they are not the app's to delete.
+	const remaining: Written = {
+		bids: after.bids.filter((b) => b.created),
+		lines: after.lines.filter((l) => l.created),
+		groups,
+		attachments: after.attachments
+	};
+	return { undo, error, remaining };
 }
 
 /** Each item's awarded total in the base currency, keyed `Shot:123`, from one `_summarize` (167). */
