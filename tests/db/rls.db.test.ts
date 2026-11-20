@@ -105,6 +105,11 @@ describe('the schema', () => {
 
 	it('passes the guard: every relation in public has row level security and no public grant', async () => {
 		expect(await guard(sql)).toEqual([]);
+		// The guard reads the catalog, so it covers every table there, bid_rates included.
+		const seen = (await sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+			where n.nspname = 'public' and c.relkind in ('r', 'p') and c.relrowsecurity`).map((r) => r.relname);
+		for (const table of TABLES) expect(seen, table).toContain(table);
+		expect(seen).toContain('bid_rates');
 	});
 
 	it('gives a table or function added later nothing for the public roles, and the guard catches one without row level security', async () => {

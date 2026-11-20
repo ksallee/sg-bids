@@ -6,6 +6,7 @@
 import type { RequestEvent } from '@sveltejs/kit';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hashToken } from '$lib/pure/token';
+import { createComparison } from '$lib/server/comparison';
 import { createRequests } from '$lib/server/requests';
 import type { Store } from '$lib/server/store';
 import { draft, forVendor, header, issuedWithTwoVendors, rest, store, superuser, tenant, vendor, vendorIds } from './helpers';
@@ -104,6 +105,19 @@ describe('the vendor endpoints and Flow PT', () => {
 		expect(own.bid.lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
 		const stored = await s.getRequest(production, request.id);
 		expect(stored.shots[0].fpt).toEqual({ type: 'Shot', id: SHOT });
+
+		// The comparison and its scenarios key rows on the same stored keys: the vendor's opaque
+		// ids never reach them.
+		const comparison = createComparison(rest('service_role'));
+		const grid = await comparison.loadComparison(production, request.id);
+		expect(grid.bids).toHaveLength(1);
+		expect(grid.bids[0].lines.map((l) => l.target.id).sort()).toEqual([`asset-${ASSET}`, `shot-${OTHER}`, `shot-${SHOT}`]);
+		const scenario = await comparison.saveScenario(production, request.id, {
+			name: 'All A',
+			picks: [{ target: { kind: 'shot', id: `shot-${SHOT}` }, shares: [{ bidId: v1, percent: '100' }] }],
+			costsLeftOut: []
+		});
+		expect(scenario.picks[0].target).toEqual({ kind: 'shot', id: `shot-${SHOT}` });
 	});
 });
 
