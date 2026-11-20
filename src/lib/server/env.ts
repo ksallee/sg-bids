@@ -4,13 +4,15 @@
  *
  * `SUPABASE_URL` and `SUPABASE_SECRET_KEY` name the project. `FPT_SITE_HOSTS` lists the Flow PT
  * hosts this deployment serves, comma separated; unset, it is the host of `PUBLIC_FPT_SITE_URL`.
+ * `FPT_PRODUCTION_ROLES` lists the permission group codes that may act as production, comma
+ * separated; unset, `admin,manager`.
  */
 
 import { dev } from '$app/environment';
 import { env } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { allowedHosts } from '$lib/pure/fpt-session';
+import { allowedHosts, productionRoles } from '$lib/pure/fpt-session';
 import { StoreError } from './errors';
 import { verifyProduction, type ProductionClaim, type VerifiedProduction } from './production';
 import { createStore, type Store } from './store';
@@ -36,6 +38,7 @@ export function verifyProductionClaim(claim: ProductionClaim): Promise<VerifiedP
 	return verifyProduction(claim, {
 		fetch,
 		allowedHosts: allowedHosts(env.FPT_SITE_HOSTS, publicEnv.PUBLIC_FPT_SITE_URL),
-		allowScript: dev
+		allowScript: dev,
+		productionRoles: productionRoles(env.FPT_PRODUCTION_ROLES)
 	});
 }

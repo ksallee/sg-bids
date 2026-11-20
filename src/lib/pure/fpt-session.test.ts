@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowedHosts, bearerUser, projectAnswer, siteOrigin, tokenAnswer } from './fpt-session';
+import { allowedHosts, bearerUser, groupsAnswer, ownGroupCode, productionRoles, projectAnswer, ruleSetAnswer, siteOrigin, tokenAnswer } from './fpt-session';
 
 /** A bearer shaped like the corpus' (027, 052): three segments, the middle one base64url JSON. */
 function bearer(claims: Record<string, unknown>): string {
@@ -117,5 +117,88 @@ describe('projectAnswer', () => {
 		expect(projectAnswer(200, { data: { type: 'Project', id: 71 } }, 70)).toBe('site');
 		expect(projectAnswer(200, { data: { type: 'Shot', id: 70 } }, 70)).toBe('site');
 		expect(projectAnswer(500, null, 70)).toBe('site');
+	});
+});
+
+describe('productionRoles', () => {
+	it('defaults to admin and manager', () => {
+		expect(productionRoles(undefined)).toEqual(['admin', 'manager']);
+		expect(productionRoles('')).toEqual(['admin', 'manager']);
+		expect(productionRoles(' , ')).toEqual(['admin', 'manager']);
+	});
+
+	it('reads a comma list of group codes, lower case', () => {
+		expect(productionRoles(' Admin, producer_plus ,')).toEqual(['admin', 'producer_plus']);
+	});
+});
+
+/** `GET /entity/human_users/<id>?fields=permission_rule_set`, as a person reads their own row (052, HumanUser card). */
+const ownRow = (ruleSet: unknown) => ({
+	data: { type: 'HumanUser', id: 253, attributes: {}, relationships: { permission_rule_set: { data: ruleSet, links: {} } }, links: {} }
+});
+
+describe('ruleSetAnswer', () => {
+	it('reads the permission rule set link off the row', () => {
+		expect(ruleSetAnswer(200, ownRow({ id: 8, name: 'Admin', type: 'PermissionRuleSet' }), 253)).toEqual({ id: 8, name: 'Admin' });
+	});
+
+	it('takes the link written without `data`, as the HumanUser card prints it', () => {
+		const body = { data: { type: 'HumanUser', id: 253, relationships: { permission_rule_set: { id: 8, name: 'Admin', type: 'PermissionRuleSet' } } } };
+		expect(ruleSetAnswer(200, body, 253)).toEqual({ id: 8, name: 'Admin' });
+	});
+
+	it('is null for another row, an empty link, a refusal or garbage', () => {
+		expect(ruleSetAnswer(200, { ...ownRow({ id: 8, name: 'Admin', type: 'PermissionRuleSet' }), data: { type: 'HumanUser', id: 254 } }, 253)).toBeNull();
+		expect(ruleSetAnswer(200, ownRow(null), 253)).toBeNull();
+		expect(ruleSetAnswer(200, ownRow({ id: 8, name: 'Admin', type: 'Group' }), 253)).toBeNull();
+		expect(ruleSetAnswer(404, { errors: [{ status: 404, code: 104 }] }, 253)).toBeNull();
+		expect(ruleSetAnswer(200, null, 253)).toBeNull();
+	});
+});
+
+/** `GET /schema/permission_groups?permission_rule_set_entity_type=HumanUser` (endpoint card, 132, 162). */
+const group = (id: string, code: string, display_name: string) => ({ id, code, display_name, entity_type: 'HumanUser', parent_set_id: null, updated_at: 't' });
+const ALL = [group('8', 'admin', 'Admin'), group('9', 'manager', 'Manager'), group('10', 'artist', 'Artist'), group('11', 'vendor', 'Vendor'), group('12', 'artist_plus', 'Artist plus')];
+
+describe('groupsAnswer', () => {
+	it('reads code, id and display name of each group listed', () => {
+		expect(groupsAnswer(200, { data: [group('11', 'vendor', 'Vendor')], links: {} })).toEqual([{ id: '11', code: 'vendor', displayName: 'Vendor' }]);
+	});
+
+	it('is null on anything but a 200 with a list', () => {
+		expect(groupsAnswer(403, { errors: [] })).toBeNull();
+		expect(groupsAnswer(200, { data: {} })).toBeNull();
+		expect(groupsAnswer(200, null)).toBeNull();
+	});
+
+	it('drops an entry with no code', () => {
+		expect(groupsAnswer(200, { data: [{ id: '1', display_name: 'X' }, group('11', 'vendor', 'Vendor')] })).toEqual([{ id: '11', code: 'vendor', displayName: 'Vendor' }]);
+	});
+});
+
+describe('ownGroupCode', () => {
+	const groups = (list: ReturnType<typeof group>[]) => groupsAnswer(200, { data: list })!;
+
+	it('is the one group listed: a person without set_permissions sees only their own (162)', () => {
+		expect(ownGroupCode(groups([group('11', 'vendor', 'Vendor')]), null)).toBe('vendor');
+		expect(ownGroupCode(groups([group('11', 'vendor', 'Vendor')]), { id: 11, name: 'Vendor' })).toBe('vendor');
+	});
+
+	it('picks the person’s own group out of every group an Admin sees, by id or by name', () => {
+		expect(ownGroupCode(groups(ALL), { id: 8, name: 'Admin' })).toBe('admin');
+		expect(ownGroupCode(groups(ALL), { id: 999, name: 'Manager' })).toBe('manager');
+		expect(ownGroupCode(groups(ALL), { id: 11, name: 'Renamed' })).toBe('vendor');
+	});
+
+	it('is null when it cannot tell: several groups and no row, no match, two matches, or none listed', () => {
+		expect(ownGroupCode(groups(ALL), null)).toBeNull();
+		expect(ownGroupCode(groups(ALL), { id: 999, name: 'Nobody' })).toBeNull();
+		expect(ownGroupCode(groups([group('8', 'admin', 'Admin'), group('13', 'admin_copy', 'Admin')]), { id: 999, name: 'Admin' })).toBeNull();
+		expect(ownGroupCode(groups([group('8', 'admin', 'Admin'), group('9', 'manager', 'Manager')]), { id: 8, name: 'Manager' })).toBeNull();
+		expect(ownGroupCode([], { id: 8, name: 'Admin' })).toBeNull();
+	});
+
+	it('refuses a single group that is not the row’s', () => {
+		expect(ownGroupCode(groups([group('11', 'vendor', 'Vendor')]), { id: 8, name: 'Admin' })).toBeNull();
 	});
 });

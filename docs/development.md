@@ -36,6 +36,7 @@ Copy `.env.example` to `.env.local` (gitignored). Every line is optional.
 | `SUPABASE_URL` | the Supabase project, server only |
 | `SUPABASE_SECRET_KEY` | its secret (service role) key, server only |
 | `FPT_SITE_HOSTS` | the Flow PT hosts the server may call, comma separated. Unset: the host of `PUBLIC_FPT_SITE_URL` |
+| `FPT_PRODUCTION_ROLES` | the permission group codes that may act as production, comma separated. Unset: `admin,manager` |
 
 With the three `FPT_API_*` lines set, `POST /live/dev-token` mints a 600 s bearer from the script
 key under `vite dev` only, and the page reads without a sign-in. Signing in through the launcher
@@ -64,6 +65,11 @@ Who may touch what:
 - **Production** sends its Flow PT session (the session token, or a bearer minted from it), the
   site and the project. `src/lib/server/production.ts` calls only a host in `FPT_SITE_HOSTS`,
   mints a bearer, checks it is a person's, and reads the Project row with it: a 404 is a refusal.
+  Seeing the project is not enough, since a Vendor person sees a project they are assigned to. The
+  person's permission group code must be in `FPT_PRODUCTION_ROLES`. It is read with their own
+  bearer: `GET /schema/permission_groups` lists only their own group unless they are an Admin,
+  and their HumanUser row names their group, which picks it out of an Admin's list. When the two
+  answers do not settle the group, the person is refused. The dev key skips this check.
   The tenant is that site host plus that project id. Every row carries it, and every query
   filters on it (`src/lib/pure/access.ts`). A child row's tenant is held to its parent's by a
   composite foreign key.
@@ -119,7 +125,8 @@ builds a preview. `src/lib/deploy.test.ts` holds it to that. The page is a clien
 (`ssr = false`) and the routes under `/live/` are serverless functions.
 
 Set in the Vercel project, value never in the repo: `PUBLIC_FPT_SITE_URL`, `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, and `FPT_SITE_HOSTS` when the site list differs from the default. Never set
+`SUPABASE_SECRET_KEY`, `FPT_SITE_HOSTS` when the site list differs from the default, and
+`FPT_PRODUCTION_ROLES` when production is not `admin,manager`. Never set
 the `FPT_API_*` lines on Vercel.
 
 Deploying your own copy: `docs/deploy.md`.
