@@ -1,6 +1,7 @@
 /**
- * Amounts as people type or paste them: `12,500.00`, `12 500,50 €`, `1'234.50`. Read into a plain
- * decimal string that `money.ts` takes, never a float.
+ * Amounts as people type or paste them: `12,500.00`, `12 500,50 €`, `1'234.50`, and as the app
+ * writes them, `CA$1,234.50`. Read into a plain decimal string that `money.ts` takes, never a float.
+ * A currency written as a word (`kr`, `zł`) is not read.
  *
  * Which mark is the decimal:
  *
@@ -47,10 +48,15 @@ function ungroup(whole: string, mark: string | null): string | null {
 	return groups.join('');
 }
 
+/** A currency sign, with the capitals Intl writes on it: `CA$`, `US$`, `R$`, `$ US`, `£GB`. */
+const SIGN = /(\p{Lu}{0,2})\p{Sc}(?:\s?(\p{Lu}{1,2})(?!\p{L}))?/gu;
+
 export function parseAmount(text: string, currency: string, locale: DecimalMark): ParsedAmount {
 	const digits = minorDigits(currency);
+	// The capitals go with the sign only when each is a letter of the code: `CA$` for CAD, `R$` for BRL.
+	const ofCode = (letters = '') => [...letters].every((c) => currency.includes(c));
 	let t = text
-		.replace(/\p{Sc}/gu, '')
+		.replace(SIGN, (_, before: string, after: string | undefined) => (ofCode(before) ? '' : before) + (ofCode(after) ? '' : (after ?? '')))
 		.replace(/\b[A-Z]{3}\b/g, '')
 		.replace(/[\s   '’]/g, '');
 	if (t === '') return { kind: 'blank' };
