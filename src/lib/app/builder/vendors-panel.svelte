@@ -1,7 +1,7 @@
 <!--
 	The vendors of the draft, as rows typed straight in: a name and an email, both required, the
-	vendor's Flow PT Group (picked from the site's Groups; the award writes it to the Shots it wins),
-	and the bids it answers, every bid by default. Add vendor makes another row; the cross takes one
+	vendor's Flow PT Group (picked from the site's Groups, or created empty beside the picker when the
+	person may create one; the award writes it to the Shots it wins), and the bids it answers, every bid by default. Add vendor makes another row; the cross takes one
 	off. A row is saved as typed; a blank one is not. A row's problem shows once it was left, or the
 	issue asked for it (`revealed`), each on its field (`f-vendor-<id>-name`). Each vendor gets its
 	link at the issue. Rules in `$lib/pure/vendor-rows`.
@@ -14,6 +14,7 @@
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
 	import EntityPicker from '$lib/components/entity-picker.svelte';
+	import GroupCreate from './group-create.svelte';
 	import * as Popover from '$lib/components/ui/popover/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -21,6 +22,7 @@
 	import { cn } from '$lib/utils.js';
 	import type { Id } from '$lib/pure/model';
 	import { controlId } from '$lib/pure/readiness';
+	import { answerWords, type GroupRef } from '$lib/pure/group-create';
 	import { answered, bidsLabel, isBlank, rowProblems, setBids, toggleBid, type VendorRow } from '$lib/pure/vendor-rows';
 	import type { Builder } from '$lib/app/builder.svelte';
 
@@ -41,6 +43,23 @@
 		const id = builder.addVendor();
 		await tick();
 		document.getElementById(controlId(`vendor:${id}:name`))?.focus();
+	}
+
+	/** Whether the person may create a Group, read once before the control shows (recipe 030). */
+	let mayCreate = $state(false);
+	$effect(() => {
+		void builder.groupRight().then((right) => (mayCreate = right.state === 'yes'));
+	});
+
+	/** The Group each row created here, by row, so its line says it starts empty. */
+	let created = $state<ReadonlyMap<string, number>>(new Map());
+
+	function pickGroup(row: VendorRow, group: GroupRef | null, made = false): void {
+		builder.setVendor(row.id, (r) => ({ ...r, group, name: r.name.trim() === '' && group ? group.name : r.name }));
+		const next = new Map(created);
+		if (made && group) next.set(row.id, group.id);
+		else next.delete(row.id);
+		created = next;
 	}
 
 	const typed = $derived(builder.namedVendors.length);
@@ -109,20 +128,19 @@
 					</Button>
 				</div>
 				<div class={cn('grid gap-2', many ? 'grid-cols-[minmax(0,1fr)_10rem]' : 'grid-cols-1')}>
-					<div class="min-w-0" data-slot="vendor-group">
+					<div class="flex min-w-0 gap-1.5" data-slot="vendor-group">
 						<EntityPicker
 							context={liveContext()}
 							entityTypes={['Group']}
 							value={row.group ? { type: 'Group', id: row.group.id, name: row.group.name } : null}
 							placeholder="Flow PT Group"
 							aria-label={`Vendor ${i + 1} Flow PT Group`}
-							onValueChange={(value) =>
-								builder.setVendor(row.id, (r) => ({
-									...r,
-									group: value ? { id: value.id, name: value.name ?? `Group ${value.id}` } : null,
-									name: r.name.trim() === '' && value?.name ? value.name : r.name
-								}))}
+							class="flex-1"
+							onValueChange={(value) => pickGroup(row, value ? { id: value.id, name: value.name ?? `Group ${value.id}` } : null)}
 						/>
+						{#if mayCreate}
+							<GroupCreate {builder} start={row.name} label={row.name.trim() || `vendor ${i + 1}`} onPick={(group, made) => pickGroup(row, group, made)} />
+						{/if}
 					</div>
 					{#if many}
 						<Popover.Root>
@@ -165,6 +183,9 @@
 						</Popover.Root>
 					{/if}
 				</div>
+				{#if row.group && created.get(row.id) === row.group.id}
+					<p class="text-muted-foreground text-xs" data-slot="group-created">{answerWords({ state: 'created', group: row.group })}</p>
+				{/if}
 				{#if nameProblem || emailProblem}
 					<p class="text-destructive flex items-start gap-1.5 text-xs" data-slot="field-problem">
 						<CircleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" /><span>{[nameProblem, emailProblem].filter(Boolean).join(' ')}</span>

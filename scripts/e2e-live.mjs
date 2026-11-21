@@ -20,7 +20,10 @@
 //      into Seq A with Add row, its code then Tab then a count of 120, Enter adding the next row
 //      (taken out again); Add bid, renamed Creature, a breakdown Shot and Asset into it; one Flow PT
 //      Shot moved from Seq A to Creature; the side panel hidden and shown;
-//   3. two vendors typed in their rows: Vendor A on every bid, Vendor B on Creature alone;
+//   3. two vendors typed in their rows: Vendor A on every bid, Vendor B on Creature alone; then a
+//      third row creates an empty Group `zzsgbids_grp_<stamp>` beside its Group picker, read back
+//      from Flow PT, and a fourth row typing the same name is warned and offered that Group rather
+//      than a second; both rows go again, and the Group is retired and read back gone;
 //   4. presses Issue with the due day left blank: the list names it, a press marks the field; the
 //      day set, it issues, and the page shows the links once: Copy all and Email checked;
 //   5. answers as each vendor in its own browser context: A fills its rate card (a rate per
@@ -33,7 +36,8 @@
 //      when the site has the field; the drive creates no field), the Groups on the Shots; undoes from
 //      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
-//   9. deletes what the drive made, in Flow PT and in the database, also on a failure part way.
+//   9. deletes what the drive made, in Flow PT (its Group too) and in the database, also on a
+//      failure part way.
 // Screenshots go to `shots/e2e-live/`. It prints ids and counts, never a token, a key or the site.
 
 import { spawn } from 'node:child_process';
@@ -65,6 +69,8 @@ const STAMP = new Date().toISOString().slice(0, 16).replace(/\D/g, '');
 const NAME = `zzsgbids drive ${STAMP}`;
 /** The row typed by hand, and how many shots it stands for. */
 const COUNTED = { code: 'zzsgbids_SIMPLE', count: 120 };
+/** The Group the drive creates from a vendor row, then retires. */
+const GROUP_NAME = `zzsgbids_grp_${STAMP}`;
 const log = (...parts) => console.log('[e2e]', ...parts);
 const state = {};
 const evidence = [];
@@ -82,7 +88,7 @@ const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // the dev key from the browser, the way production writes from its session.
 const SITE = env.FPT_API_SITE_URL.replace(/\/+$/, '');
 let bearer = null;
-async function fpt(method, path, body, type = 'application/json') {
+async function token() {
 	bearer ??= (
 		await (
 			await fetch(`${SITE}/api/v1/auth/access_token`, {
@@ -92,6 +98,10 @@ async function fpt(method, path, body, type = 'application/json') {
 			})
 		).json()
 	).access_token;
+	return bearer;
+}
+async function fpt(method, path, body, type = 'application/json') {
+	await token();
 	const res = await fetch(`${SITE}/api/v1${path}`, {
 		method,
 		headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', ...(body ? { 'Content-Type': type } : {}) },
@@ -101,6 +111,12 @@ async function fpt(method, path, body, type = 'application/json') {
 	const json = text ? JSON.parse(text) : null;
 	if (!res.ok) throw new Error(`${method} ${path.split('?')[0]}: ${res.status} ${json?.errors?.[0]?.title ?? ''}`);
 	return json;
+}
+/** The status of a GET, as the script key: a retired row answers 404. */
+async function fetchStatus(path) {
+	const res = await fetch(`${SITE}/api/v1${path}`, { headers: { Authorization: `Bearer ${await token()}`, Accept: 'application/json' } });
+	await res.text();
+	return res.status;
 }
 // Filters in the array form, which a `_search` takes with its own content type (004).
 const search = (type, filters, fields) => fpt('POST', `/entity/${type}/_search?page[size]=500`, { filters, fields }, 'application/vnd+shotgun.api3_array+json').then((r) => r.data);
@@ -383,6 +399,59 @@ const stages = {
 		);
 	},
 
+	async groupCreate() {
+		const rows = page.locator('[data-slot=vendor-row]');
+		// A third row: its name, then Create Group beside the picker, shown when the caller may create one.
+		await page.locator('[data-slot=add-vendor]').click();
+		const third = rows.nth(2);
+		await third.locator('[data-slot=vendor-name]').fill(GROUP_NAME);
+		await third.locator('[data-slot=group-create-open]').click();
+		const pop = page.locator('[data-slot=group-create]');
+		await pop.waitFor();
+		const startName = await pop.locator('[data-slot=group-create-name]').inputValue();
+		const emptyLine = await pop.locator('[data-slot=group-create-empty]').innerText();
+		await page.waitForTimeout(800);
+		await shoot(page, 'group-create');
+		await pop.locator('[data-slot=group-create-confirm]').click();
+		await third.locator('[data-slot=group-created]').waitFor({ timeout: 30_000 });
+		const createdLine = await third.locator('[data-slot=group-created]').innerText();
+		const made = await search('Group', [['code', 'is', GROUP_NAME]], ['code', 'users', 'created_by']);
+		state.groupId = made[0]?.id;
+		expect(
+			startName === GROUP_NAME && /starts empty/.test(emptyLine) && made.length === 1 && (made[0].relationships.users?.data ?? []).length === 0 && /empty/.test(createdLine),
+			`Create Group beside the picker made one Group in Flow PT, read back: ${made[0]?.attributes.code} (id ${state.groupId}), ${made[0]?.relationships.users?.data?.length ?? '?'} members, created by ${made[0]?.relationships.created_by?.data?.type}; the row says "${createdLine}"`
+		);
+		// A fourth row typing the same name is warned and offered that Group, and makes no second one.
+		await page.locator('[data-slot=add-vendor]').click();
+		const fourth = rows.nth(3);
+		await fourth.locator('[data-slot=vendor-name]').fill(GROUP_NAME);
+		await fourth.locator('[data-slot=group-create-open]').click();
+		await pop.waitFor();
+		await pop.locator('[data-slot=group-clash]').waitFor({ timeout: 20_000 });
+		const warning = await pop.locator('[data-slot=group-clash]').innerText();
+		const blocked = await pop.locator('[data-slot=group-create-confirm]').isDisabled();
+		await shoot(page, 'group-clash');
+		await pop.locator(`[data-slot=group-use][data-group-id="${state.groupId}"]`).click();
+		await pop.waitFor({ state: 'detached' });
+		await saved();
+		const inv = await sql`select vendor_name, vendor_group_id from public.invitations where request_id = ${state.requestId} and vendor_name = ${GROUP_NAME}`;
+		const still = await search('Group', [['code', 'is', GROUP_NAME]], ['code']);
+		expect(
+			blocked && /already/.test(warning) && still.length === 1 && inv.length === 2 && inv.every((v) => Number(v.vendor_group_id) === state.groupId),
+			`the same name typed again is warned ("${warning.trim()}"), Create Group held back, the Group offered and picked: both rows saved with Group ${state.groupId}, still one Group of the name in Flow PT`
+		);
+		// Both rows go again, and the Group is retired.
+		await fourth.locator('[data-slot=vendor-remove]').click();
+		await third.locator('[data-slot=vendor-remove]').click();
+		await saved();
+		const [{ n }] = await sql`select count(*)::int as n from public.invitations where request_id = ${state.requestId}`;
+		await fpt('DELETE', `/entity/groups/${state.groupId}`);
+		const gone = await fetchStatus(`/entity/groups/${state.groupId}`);
+		const left = await search('Group', [['code', 'is', GROUP_NAME]], ['code']);
+		expect(n === 2 && gone === 404 && left.length === 0, `the two rows taken off (${n} vendors left), the Group retired: GET answers ${gone}, no live Group of the name`);
+		state.groupId = null;
+	},
+
 	async issue() {
 		// The due day is left blank: Issue lists it, and a press on it marks the field.
 		await page.locator('[data-slot=issue]').click();
@@ -651,6 +720,10 @@ async function cleanUp() {
 			log(`deleted ${bids.length} Bids and ${lines.length} Bid Lines left behind`);
 		}
 	}
+	// The drive's Group, if a failure left it.
+	const groups = await search('Group', [['code', 'starts_with', GROUP_NAME]], ['code']);
+	for (const g of groups) await fpt('DELETE', `/entity/groups/${g.id}`);
+	if (groups.length > 0) log(`retired ${groups.length} Group left behind`);
 	if (!state.projectId) return;
 	const made = await search('Shot', [['project', 'is', { type: 'Project', id: state.projectId }], ['code', 'starts_with', 'zzsgbids']], ['code']);
 	const madeAssets = await search('Asset', [['project', 'is', { type: 'Project', id: state.projectId }], ['code', 'starts_with', 'zzsgbids']], ['code']);
@@ -672,7 +745,11 @@ async function cleanUp() {
 	}
 	const [left] = await sql`select (select count(*) from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids drive ${STAMP}%`}) + (select count(*) from public.production_bids where project_id = ${state.projectId} and request_id is null) as n`;
 	const fptLeft = state.requestId && state.bidType ? (await search(state.bidType, [['sg_sgbids_key', 'starts_with', `sgbids/${state.requestId}/`]], ['code'])).length : 0;
-	expect(Number(left.n) === 0 && fptLeft === 0, `clean: ${requests.length} requests deleted in the drive's database, ${made.length + madeAssets.length} zzsgbids rows deleted in Flow PT, no Bid of the drive left in Flow PT`);
+	const groupsLeft = (await search('Group', [['code', 'starts_with', GROUP_NAME]], ['code'])).length;
+	expect(
+		Number(left.n) === 0 && fptLeft === 0 && groupsLeft === 0,
+		`clean: ${requests.length} requests deleted in the drive's database, ${made.length + madeAssets.length} zzsgbids rows deleted in Flow PT, no Bid and no Group of the drive left in Flow PT`
+	);
 }
 
 let failed = null;
@@ -682,7 +759,7 @@ try {
 	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 	page = await ctx.newPage();
 	page.on('pageerror', (e) => log('page error:', e.message.slice(0, 200)));
-	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate']) {
+	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate']) {
 		log('stage', name);
 		await stages[name]();
 	}
