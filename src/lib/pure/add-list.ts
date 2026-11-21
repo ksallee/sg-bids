@@ -53,10 +53,10 @@ export function inRequest(items: readonly { readonly fpt?: { readonly id: number
 	return new Set(items.flatMap((item) => (item.fpt ? [item.fpt.id] : [])));
 }
 
-export interface Ticks {
-	readonly selected: ReadonlySet<number>;
+export interface Ticks<K = number> {
+	readonly selected: ReadonlySet<K>;
 	/** The row the last press landed on, where a Shift range starts. */
-	readonly anchor: number | null;
+	readonly anchor: K | null;
 }
 
 /**
@@ -64,7 +64,7 @@ export interface Ticks {
  * anchor to it, in the order shown, the state the pressed row takes. A row already in the request
  * never changes.
  */
-export function toggle(ticks: Ticks, id: number, options: { order: readonly number[]; blocked: ReadonlySet<number>; shift: boolean }): Ticks {
+export function toggle<K>(ticks: Ticks<K>, id: K, options: { order: readonly K[]; blocked: ReadonlySet<K>; shift: boolean }): Ticks<K> {
 	if (options.blocked.has(id)) return ticks;
 	const on = !ticks.selected.has(id);
 	const next = new Set(ticks.selected);
@@ -80,7 +80,7 @@ export function toggle(ticks: Ticks, id: number, options: { order: readonly numb
 }
 
 /** Whether the rows shown that can be added are all ticked, some, or none. */
-export function shownState(selected: ReadonlySet<number>, shown: readonly number[], blocked: ReadonlySet<number>): 'none' | 'some' | 'all' {
+export function shownState<K>(selected: ReadonlySet<K>, shown: readonly K[], blocked: ReadonlySet<K>): 'none' | 'some' | 'all' {
 	const open = shown.filter((id) => !blocked.has(id));
 	const ticked = open.filter((id) => selected.has(id)).length;
 	if (ticked === 0) return 'none';
@@ -88,7 +88,7 @@ export function shownState(selected: ReadonlySet<number>, shown: readonly number
 }
 
 /** Select all shown: ticks every row shown, or unticks them when all are ticked. Picks not shown stay. */
-export function toggleShown(selected: ReadonlySet<number>, shown: readonly number[], blocked: ReadonlySet<number>): Set<number> {
+export function toggleShown<K>(selected: ReadonlySet<K>, shown: readonly K[], blocked: ReadonlySet<K>): Set<K> {
 	const next = new Set(selected);
 	const clear = shownState(selected, shown, blocked) === 'all';
 	for (const id of shown) {

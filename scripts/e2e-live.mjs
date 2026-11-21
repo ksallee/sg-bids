@@ -36,7 +36,12 @@
 //      when the site has the field; the drive creates no field), the Groups on the Shots; undoes from
 //      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
-//   9. deletes what the drive made, in Flow PT (its Group too) and in the database, also on a
+//   9. on the list: opens the request from its row's link; reads back its Bids, Shots and Assets
+//      (both bids by name, the totals by unit, the counted row as 120) and the copy's; filters to
+//      the drive's rows and ticks them with the header box; duplicates both with their rows and reads
+//      back the two new drafts and their totals; Shift ticks all four and deletes them, a mix of
+//      drafts and the issued request behind the typed word, and reads back that they are gone;
+//  10. deletes what the drive made, in Flow PT (its Group too) and in the database, also on a
 //      failure part way.
 // Screenshots go to `shots/e2e-live/`. It prints ids and counts, never a token, a key or the site.
 
@@ -706,6 +711,104 @@ const stages = {
 			name === `${NAME} copy` && copy?.status === 'draft' && copy.title === name && bids.map((b) => b.name).join() === 'Seq A,Creature' && rows === 0 && inv.length === 2 && inv.every((v) => v.link_pending) && copy.due_on !== null,
 			`duplicated without the rows: "${copy?.title}", a draft with its details, bids ${bids.map((b) => b.name).join(' and ')} empty, and ${inv.length} vendors whose links come at its issue`
 		);
+	},
+
+	async bulk() {
+		const rows = page.locator('[data-slot=requests] tbody tr');
+		const rowOf = (title) => rows.filter({ has: page.locator('a', { hasText: new RegExp(`^${esc(title)}$`) }) });
+		const cells = async (row) => ({
+			bids: (await row.locator('[data-slot=row-bids]').getAttribute('title')) ?? '',
+			shots: Number((await row.locator('[data-slot=row-shots]').innerText()).replace(/,/g, '')),
+			assets: Number((await row.locator('[data-slot=row-assets]').innerText()).replace(/,/g, ''))
+		});
+		const units = async (table, id) =>
+			(
+				await sql`select coalesce(sum(unit_count) filter (where kind = 'shot' and not omitted), 0)::int as shots, coalesce(sum(unit_count) filter (where kind = 'asset' and not omitted), 0)::int as assets,
+					count(*) filter (where kind = 'shot' and not omitted)::int as "shotRows", count(*) filter (where unit_count > 1 and not omitted)::int as counted
+					from ${sql('public.' + table)} where request_id = ${id}`
+			)[0];
+		const mine = async () => (await sql`select id, status, header->>'title' as title from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids drive ${STAMP}%`}`).map((r) => ({ ...r }));
+
+		await page.goto(`${APP}/requests`);
+		await page.waitForLoadState('networkidle');
+		await rowOf(NAME).waitFor({ timeout: 30_000 });
+		// The row's link still opens the request, the box beside it aside.
+		await rowOf(NAME).locator('a').click();
+		await page.waitForURL((url) => url.pathname.endsWith(`/requests/${state.requestId}`), { timeout: 30_000 });
+		prove('the row link opens the request, beside its box');
+		await page.goto(`${APP}/requests`);
+		await page.waitForLoadState('networkidle');
+		await rowOf(NAME).waitFor({ timeout: 30_000 });
+
+		const issued = await cells(rowOf(NAME));
+		const issuedUnits = await units('request_items', state.requestId);
+		expect(
+			issued.bids === 'Seq A, Creature' && issued.shots === issuedUnits.shots && issued.assets === issuedUnits.assets && issuedUnits.counted === 1 && issued.shots === issuedUnits.shotRows - 1 + COUNTED.count,
+			`the list names the issued request's bids "${issued.bids}" and counts ${issued.shots} shots by unit (${issuedUnits.shotRows} rows, one standing for ${COUNTED.count}) and ${issued.assets} asset`
+		);
+		const copy = await cells(rowOf(`${NAME} copy`));
+		expect(copy.bids === 'Seq A, Creature' && copy.shots === 0 && copy.assets === 0, `the draft copy without rows lists "${copy.bids}", 0 shots and 0 assets`);
+
+		// The header box ticks what the filters show, and only that.
+		await page.getByLabel('Find a request').fill(`zzsgbids drive ${STAMP}`);
+		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 2, { timeout: 10_000 });
+		const before = await page.locator('[data-slot=requests]').boundingBox();
+		await page.locator('[data-slot=requests-select-all]').click();
+		const count = await page.locator('[data-slot=requests-bulk-count]').innerText();
+		const after = await page.locator('[data-slot=requests]').boundingBox();
+		const ticked = await page.locator('[data-slot=row-select][aria-checked=true]').count();
+		expect(count === '2 selected' && ticked === 2 && before.y === after.y, `the header box ticks the 2 rows the search shows, the bar says "${count}", and the table does not move`);
+		await shoot(page, 'requests-two-selected');
+
+		// Duplicate both, with their rows.
+		const known = new Set((await mine()).map((r) => r.id));
+		await page.locator('[data-slot=requests-bulk-duplicate]').click();
+		const dup = page.locator('[data-slot=bulk-duplicate]');
+		await dup.waitFor();
+		await dup.locator('[data-slot=duplicate-with-rows]').check();
+		await shoot(page, 'bulk-duplicate');
+		await dup.locator('[data-slot=bulk-duplicate-now]').click();
+		const dupLine = await page.locator('[data-slot=bulk-result]', { hasText: /Made \d+ draft cop|Nothing duplicated/ }).innerText({ timeout: 60_000 });
+		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 4, { timeout: 30_000 });
+		const made = (await mine()).filter((r) => !known.has(r.id));
+		const copyOfIssued = made.find((r) => r.title === `${NAME} copy`);
+		const copyOfCopy = made.find((r) => r.title === `${NAME} copy copy`);
+		const draftUnits = copyOfIssued ? await units('production_bid_items', copyOfIssued.id) : null;
+		const copyBids = copyOfIssued ? (await sql`select name from public.request_packages where request_id = ${copyOfIssued.id} order by position`).map((b) => b.name).join() : '';
+		expect(
+			dupLine.startsWith('Made 2 draft copies.') && made.length === 2 && made.every((r) => r.status === 'draft') && copyOfIssued && copyOfCopy && copyBids === 'Seq A,Creature' && draftUnits.shots === issuedUnits.shots && draftUnits.assets === issuedUnits.assets,
+			`duplicated two at once with their rows: "${dupLine.split('\n')[0]}", 2 new drafts "${copyOfIssued?.title}" and "${copyOfCopy?.title}", the first with bids ${copyBids} and ${draftUnits?.shots} shots and ${draftUnits?.assets} asset as the issued request`
+		);
+		const copies = await rows.filter({ has: page.locator('a', { hasText: new RegExp(`^${esc(`${NAME} copy`)}$`) }) }).all();
+		const totals = await Promise.all(copies.map(cells));
+		expect(
+			totals.length === 2 && totals.some((t) => t.shots === issuedUnits.shots && t.assets === issuedUnits.assets && t.bids === 'Seq A, Creature'),
+			`the list counts the new draft with its rows as the issued request: ${issuedUnits.shots} shots and ${issuedUnits.assets} asset, by unit`
+		);
+		await shoot(page, 'bulk-duplicate-result');
+
+		// Shift ticks all four; delete them: drafts and the issued request, behind the typed word.
+		const boxes = page.locator('[data-slot=row-select]');
+		await boxes.first().click();
+		await boxes.last().click({ modifiers: ['Shift'] });
+		const four = await page.locator('[data-slot=requests-bulk-count]').innerText();
+		await page.locator('[data-slot=requests-bulk-delete]').click();
+		const del = page.locator('[data-slot=bulk-delete]');
+		await del.locator('[data-slot=bulk-delete-lines]').waitFor({ timeout: 30_000 });
+		const lines = await del.locator('[data-slot=bulk-delete-lines]').innerText();
+		const disabled = await del.locator('[data-slot=bulk-delete-now]').isDisabled();
+		await del.locator('[data-slot=bulk-delete-word]').fill('delete');
+		await shoot(page, 'bulk-delete');
+		expect(
+			four === '4 selected' && disabled && lines.includes('3 drafts') && lines.includes('1 request sent to vendors') && (await del.getAttribute('data-typed')) === 'true',
+			`Shift ticks all 4; the one confirm names 3 drafts and 1 request sent to vendors, and stays shut until the word is typed`
+		);
+		await del.locator('[data-slot=bulk-delete-now]').click();
+		const delLine = await page.locator('[data-slot=bulk-result]', { hasText: /Deleted \d+ request|Nothing deleted/ }).innerText({ timeout: 60_000 });
+		await page.locator('[data-slot=requests]').waitFor({ state: 'detached', timeout: 30_000 });
+		await shoot(page, 'bulk-delete-result');
+		const left = await mine();
+		expect(delLine.startsWith('Deleted 4 requests.') && left.length === 0, `deleted 4 at once: "${delLine.split('\n')[0]}", and the database holds none of the drive's requests`);
 	}
 };
 
@@ -759,7 +862,7 @@ try {
 	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 	page = await ctx.newPage();
 	page.on('pageerror', (e) => log('page error:', e.message.slice(0, 200)));
-	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate']) {
+	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate', 'bulk']) {
 		log('stage', name);
 		await stages[name]();
 	}

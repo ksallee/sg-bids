@@ -49,7 +49,10 @@ const ON_SITE: SiteRequestOverview[] = [70, 91, 99].map((projectId, i) => ({
 	dueDate: null,
 	issuedAt: null,
 	invited: 1,
-	submitted: 0
+	submitted: 0,
+	bids: ['Bid 01'],
+	shots: 2,
+	assets: 1
 }));
 
 function endpoint(readable: { id: number; name: string }[], code = 'admin') {

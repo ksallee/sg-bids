@@ -1,8 +1,11 @@
 <!--
-	Requests: the person's requests in every project they may read on the site, newest first, with the
-	project, status, round, due date, the vendors invited and the answers in. The project is a filter,
-	not a gate. New request asks for a name and a project, then opens the request's one page. Each
-	row's menu opens, duplicates or deletes it. The list and its filter are `$lib/pure/request-list`.
+	Requests: the person's requests in every project they may read on the site, newest first, with
+	their bids, shots and assets, the project, status, round, due date, the vendors invited and the
+	answers in. The project is a filter, not a gate. New request asks for a name and a project, then
+	opens the request's one page. Each row's menu opens, duplicates or deletes it. A box per row, and
+	one in the header for every row shown, select several: a bar then deletes or duplicates them, and
+	a line says what went. The list and its filter are `$lib/pure/request-list`, the selection
+	`$lib/pure/request-select`.
 -->
 <script lang="ts">
 	import { goto, replaceState } from '$app/navigation';
@@ -16,6 +19,8 @@
 	import PageHeader from '$lib/app/page-header.svelte';
 	import PageState from '$lib/app/page-state.svelte';
 	import StatusChip from '$lib/app/status-chip.svelte';
+	import BulkDelete from '$lib/app/request/bulk-delete.svelte';
+	import BulkDuplicate from '$lib/app/request/bulk-duplicate.svelte';
 	import DeleteRequest from '$lib/app/request/delete-request.svelte';
 	import DuplicateRequest from '$lib/app/request/duplicate-request.svelte';
 	import NewRequest from '$lib/app/request/new-request.svelte';
@@ -24,12 +29,14 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import ListPicker from '$lib/components/list-picker.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { ApiError, listAcross, type RequestsAcross } from '$lib/api';
 	import { setCurrentProject } from '$lib/current-project';
 	import { liveState } from '$lib/live';
-	import { listView } from '$lib/pure/request-list';
-	import { deletedLine, type Deleted } from '$lib/pure/request-delete';
+	import { bidsCell, listView } from '$lib/pure/request-list';
+	import { deletedLine, requestName, type Deleted } from '$lib/pure/request-delete';
+	import { headerState, NOTHING, picked, press, pressAll, prune, resultLine, type Missed, type Selection } from '$lib/pure/request-select';
 	import { connectHref, requestHref } from '$lib/pure/routes';
 	import { cn } from '$lib/utils.js';
 
@@ -47,6 +54,8 @@
 		);
 	}
 	load();
+	/** The list again, keeping the rows on screen until the new ones come. */
+	const refresh = () => listAcross().then((answer) => (data = answer), load);
 
 	const view = $derived(data ? listView(data.requests, data.projects, { project: project === null ? null : Number(project), query }) : null);
 	const options = $derived(view ? view.projectOptions.map((p) => ({ code: String(p.id), label: p.name })) : []);
@@ -71,8 +80,51 @@
 		deleteOpen = true;
 	}
 	function deleted(gone: Deleted): void {
+		result = null;
 		deletedNote.line = deletedLine(gone);
 		if (data) data = { ...data, requests: data.requests.filter((r) => r.id !== deleting?.id) };
+	}
+
+	// Several at once: the ticks only ever hold rows the filters show.
+	let selection = $state.raw<Selection>(NOTHING);
+	const shown = $derived(view?.rows.map((r) => r.id) ?? []);
+	const header = $derived(headerState(selection, shown));
+	$effect(() => {
+		const kept = prune(selection, shown);
+		if (kept !== selection) selection = kept;
+	});
+	function pressRow(event: MouseEvent, id: string): void {
+		// The box only stops its own toggle; the selection is ours.
+		event.preventDefault();
+		event.stopPropagation();
+		selection = press(selection, id, shown, event.shiftKey);
+	}
+	function pressHeader(event: MouseEvent): void {
+		event.preventDefault();
+		selection = pressAll(selection, shown);
+	}
+
+	// The bar's actions work on the rows ticked when it was pressed.
+	type Picked = { id: string; projectId: number; title: string | null; code: string };
+	let acting = $state.raw<Picked[]>([]);
+	let bulkDeleteOpen = $state(false);
+	let bulkDuplicateOpen = $state(false);
+	let result = $state<{ line: string; tone: 'info' | 'warning' } | null>(null);
+	function act(which: 'delete' | 'duplicate'): void {
+		acting = view ? picked(view.rows, selection).map(({ id, projectId, title, code }) => ({ id, projectId, title, code })) : [];
+		if (which === 'delete') bulkDeleteOpen = true;
+		else bulkDuplicateOpen = true;
+	}
+	function settled(kind: 'delete' | 'duplicate', outcome: { went: string[]; missed: Missed[] }): void {
+		deletedNote.line = null;
+		result = { line: resultLine(kind, { went: outcome.went.length, missed: outcome.missed }), tone: outcome.missed.length > 0 ? 'warning' : 'info' };
+		if (kind === 'delete') {
+			const gone = new Set(outcome.went);
+			if (data) data = { ...data, requests: data.requests.filter((r) => !gone.has(r.id)) };
+		} else {
+			selection = NOTHING;
+			void refresh();
+		}
 	}
 
 	// New request: a dialog, also opened by `?new=1` (the old new request address).
@@ -99,7 +151,7 @@
 		<div class="flex flex-wrap items-center gap-2" data-slot="requests-toolbar">
 			<div class="relative w-full sm:w-72">
 				<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
-				<Input class="h-8 pl-8" type="search" placeholder="Find by name or project" bind:value={query} aria-label="Find a request" />
+				<Input class="h-8 pl-8" type="search" placeholder="Find by name, project or bid" bind:value={query} aria-label="Find a request" />
 			</div>
 			<div class="w-full sm:w-64">
 				<ListPicker
@@ -118,13 +170,29 @@
 				<Button size="sm" variant="ghost" onclick={clear}>Clear</Button>
 				<span class="text-muted-foreground text-xs tabular-nums">{view.counts.shown} of {view.counts.total}</span>
 			{/if}
+			{#if selection.selected.size > 0}
+				<div class="bg-muted ml-auto flex h-8 min-w-0 items-center gap-0.5 rounded-lg pr-0.5 pl-3" role="toolbar" aria-label="Selected requests" data-slot="requests-bulk-bar">
+					<span class="mr-2 text-sm font-medium whitespace-nowrap tabular-nums" aria-live="polite" data-slot="requests-bulk-count">{selection.selected.size} selected</span>
+					<Button size="sm" variant="ghost" onclick={() => act('duplicate')} data-slot="requests-bulk-duplicate">Duplicate…</Button>
+					<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={() => act('delete')} data-slot="requests-bulk-delete">Delete…</Button>
+					<span class="bg-border mx-1 h-4 w-px" aria-hidden="true"></span>
+					<Button size="sm" variant="ghost" class="text-muted-foreground" onclick={() => (selection = NOTHING)} data-slot="requests-bulk-clear">Clear selection</Button>
+				</div>
+			{/if}
 		</div>
 	{/if}
 </PageHeader>
 
 <SetupNotice />
 
-{#if deletedNote.line}
+{#if result}
+	<div class="border-border border-b px-6 py-2.5">
+		<Notice tone={result.tone} data-slot="bulk-result">
+			{result.line}
+			{#snippet action()}<Button size="sm" variant="ghost" onclick={() => (result = null)}>Dismiss</Button>{/snippet}
+		</Notice>
+	</div>
+{:else if deletedNote.line}
 	<div class="border-border border-b px-6 py-2.5">
 		<Notice tone="info" data-slot="deleted-note">
 			{deletedNote.line}
@@ -155,20 +223,37 @@
 	</PageState>
 {:else}
 	<div class="min-h-0 flex-1 overflow-auto" data-slot="requests-scroll">
-		<table class="w-full min-w-[56rem] border-separate border-spacing-0 text-sm" data-slot="requests">
+		<table class="w-full min-w-[64rem] table-fixed border-separate border-spacing-0 text-sm" data-slot="requests">
 			<colgroup>
+				<col class="w-12" />
 				<col />
-				<col class="w-[16%]" />
+				<col class="w-[15%]" />
+				<col class="w-16" />
+				<col class="w-16" />
+				<col class="w-[11%]" />
 				<col class="w-28" />
-				<col class="w-20" />
+				<col class="w-16" />
 				<col class="w-32" />
-				<col class="w-24" />
+				<col class="w-16" />
 				<col class="w-24" />
 				<col class="w-14" />
 			</colgroup>
 			<thead class="bg-background sticky top-0 z-10">
 				<tr>
-					<th class={cn(TH, 'pl-6')}>Request</th>
+					<th class={cn(TH, 'pr-0 pl-6')}>
+						<Checkbox
+							class="align-middle"
+							checked={header === 'all'}
+							indeterminate={header === 'some'}
+							onclick={pressHeader}
+							aria-label={view.filtered ? 'Select every request shown' : 'Select every request'}
+							data-slot="requests-select-all"
+						/>
+					</th>
+					<th class={TH}>Request</th>
+					<th class={TH}>Bids</th>
+					<th class={cn(TH, 'text-right')}>Shots</th>
+					<th class={cn(TH, 'text-right')}>Assets</th>
 					<th class={TH}>Project</th>
 					<th class={TH}>Status</th>
 					<th class={cn(TH, 'text-right')}>Round</th>
@@ -180,8 +265,19 @@
 			</thead>
 			<tbody>
 				{#each view.rows as row (row.id)}
-					<tr class="group hover:bg-muted/60 relative" data-status={row.status}>
-						<td class={cn(TD, 'pl-6')}>
+					{@const on = selection.selected.has(row.id)}
+					{@const bids = bidsCell(row.bids)}
+					<tr class={cn('group hover:bg-muted/60 relative', on && 'bg-primary/5 hover:bg-primary/10')} data-status={row.status} data-selected={on || undefined}>
+						<td class={cn(TD, 'pr-0 pl-6')}>
+							<Checkbox
+								class="relative z-10 align-middle"
+								checked={on}
+								onclick={(e: MouseEvent) => pressRow(e, row.id)}
+								aria-label={`Select ${requestName(row)}`}
+								data-slot="row-select"
+							/>
+						</td>
+						<td class={TD}>
 							<a
 								class="focus-visible:ring-ring flex min-w-0 items-baseline gap-3 rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-2 focus-visible:ring-offset-2"
 								href={requestHref(row)}
@@ -190,6 +286,18 @@
 								<span class={cn('truncate font-medium', !row.title && 'text-muted-foreground')} title={row.title ?? undefined}>{row.title ?? row.code}</span>
 							</a>
 						</td>
+						<td class={TD} title={bids.title || undefined} data-slot="row-bids">
+							{#if bids.shown}
+								<span class="flex min-w-0 items-baseline gap-1.5">
+									<span class="truncate">{bids.shown}</span>
+									{#if bids.more > 0}<span class="text-muted-foreground shrink-0 text-xs tabular-nums">+{bids.more}</span>{/if}
+								</span>
+							{:else}
+								<span class="text-muted-foreground">None</span>
+							{/if}
+						</td>
+						<td class={cn(TD, 'text-right tabular-nums', row.shots === 0 && 'text-muted-foreground')} data-slot="row-shots">{row.shots.toLocaleString('en-US')}</td>
+						<td class={cn(TD, 'text-right tabular-nums', row.assets === 0 && 'text-muted-foreground')} data-slot="row-assets">{row.assets.toLocaleString('en-US')}</td>
 						<td class={cn(TD, 'text-muted-foreground truncate')} title={row.projectName}>{row.projectName}</td>
 						<td class={TD}><StatusChip status={row.status} /></td>
 						<td class={cn(TD, 'text-right tabular-nums')}>{row.round}</td>
@@ -228,6 +336,8 @@
 {#if deleting}
 	<DeleteRequest bind:open={deleteOpen} projectId={deleting.projectId} requestId={deleting.id} ondeleted={deleted} />
 {/if}
+<BulkDelete bind:open={bulkDeleteOpen} rows={acting} ondone={(outcome) => settled('delete', outcome)} />
+<BulkDuplicate bind:open={bulkDuplicateOpen} rows={acting} ondone={(outcome) => settled('duplicate', outcome)} />
 {#if duplicating}
 	<DuplicateRequest bind:open={duplicateOpen} projectId={duplicating.projectId} requestId={duplicating.id} name={duplicating.name} />
 {/if}

@@ -49,6 +49,34 @@ describe('listAcross', () => {
 		expect(list.find((r) => r.id === second.id)).toMatchObject({ projectId: p2, status: 'draft', title: 'Second', invited: 0, submitted: 0 });
 	});
 
+	it('names each request’s bids in order and counts its shots and assets by unit, omitted rows left out, draft or issued', async () => {
+		const s = store();
+		const host = `site-${randomUUID().slice(0, 8)}.example.com`;
+		const p = 3_000_000 + Math.floor(Math.random() * 1_000_000);
+		const at = { kind: 'production' as const, siteHost: host, projectId: p };
+		const bids = [
+			{
+				key: 'seq',
+				name: 'Seq A',
+				shots: [
+					{ id: 's1', code: 'SH010', fpt: { type: 'Shot', id: 11 }, omitted: false, assetIds: [] },
+					{ id: 's2', code: 'SIMPLE', omitted: false, assetIds: [], count: 120 },
+					{ id: 's3', code: 'MEDIUM', omitted: true, assetIds: [], count: 40 }
+				],
+				assets: []
+			},
+			{ key: 'cr', name: 'Creature', shots: [{ id: 's4', code: 'SH020', omitted: false, assetIds: [] }], assets: [{ id: 'a1', name: 'Hero', omitted: false, count: 2 }] }
+		];
+		const drafted = await s.createDraftRequest(at, { code: 'T-1', header: header({ title: 'Draft' }), bids });
+		const sent = await s.createDraftRequest(at, { code: 'T-2', header: header({ title: 'Sent' }), bids });
+		await s.inviteVendor(at, sent.id, vendor('Vendor A'));
+		await s.issueRequest(at, sent.id);
+		const list = await requests().listAcross({ kind: 'production-site', siteHost: host, projectIds: [p] });
+		for (const id of [drafted.id, sent.id]) {
+			expect(list.find((r) => r.id === id)).toMatchObject({ bids: ['Seq A', 'Creature'], shots: 122, assets: 2 });
+		}
+	});
+
 	it('shows nothing of a project the person cannot read, though the site and the database hold it', async () => {
 		const { host, p1, hidden, secret } = await siteWithThreeProjects();
 		const list = await requests().listAcross({ kind: 'production-site', siteHost: host, projectIds: [p1] });

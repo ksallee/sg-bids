@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listView, type ListRow } from './request-list';
+import { bidsCell, listView, type ListRow } from './request-list';
 
 const row = (id: string, projectId: number, extra: Partial<ListRow> = {}): ListRow => ({
 	id,
@@ -58,5 +58,26 @@ describe('listView', () => {
 	it('counts what is shown and what waits on production', () => {
 		const view = listView(rows, projects, { project: null, query: '' });
 		expect(view.counts).toEqual({ shown: 4, total: 4, drafts: 1 });
+	});
+});
+
+describe('search over bids', () => {
+	it('finds a request by one of its bid names', () => {
+		const withBids = [row('a', 70, { bids: ['Seq A', 'Creature'] }), row('b', 70, { bids: ['Bid 01'] })];
+		expect(listView(withBids, projects, { project: null, query: 'creature' }).rows.map((r) => r.id)).toEqual(['a']);
+	});
+});
+
+describe('bidsCell', () => {
+	it('shows every name when they fit, the whole list in the title', () => {
+		expect(bidsCell(['Seq A', 'Creature'])).toEqual({ shown: 'Seq A, Creature', more: 0, title: 'Seq A, Creature' });
+	});
+
+	it('shows the first names and how many more', () => {
+		expect(bidsCell(['A', 'B', 'C', 'D', 'E'])).toEqual({ shown: 'A, B, C', more: 2, title: 'A, B, C, D, E' });
+	});
+
+	it('shows none for a request with no bid', () => {
+		expect(bidsCell([])).toEqual({ shown: '', more: 0, title: '' });
 	});
 });
