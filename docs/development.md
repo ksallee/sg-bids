@@ -387,7 +387,10 @@ the environment) at a throwaway database, not one a running app reads. It writes
 project named, by exact name: it makes a request from the New request dialog, puts 4 of the project's
 Shots and 2 breakdown Shots in the first bid (renamed Seq A), types a row by hand into it with a count of
 120, hides and shows the side panel, adds a bid (Creature) with a breakdown Shot and
-Asset, moves a Shot between the two, types two vendors in their rows (B on Creature alone), presses
+Asset, moves a Shot between the two, types two vendors in their rows (B on Creature alone), creates an empty Group
+`zzsgbids_grp_<stamp>` from a third row and reads it back from Flow PT, types its name again in a
+fourth row and checks the warning offers that Group rather than a second, takes both rows off and
+retires the Group, presses
 Issue with the due day blank and checks the list names it and marks the field, sets it and issues,
 checks Copy all and Email, answers as each vendor in its own browser context (A fills its rate card,
 overrides one row and declines Creature; B prices Creature as one figure in GBP), sets the rate,

@@ -20,7 +20,9 @@ import { applyLocal, changesOf, itemValue, planEdits, readBack, undoPlan, type C
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { fptApi } from '$lib/io/fpt-api';
 import { createField, createMany, readCreateRight } from '$lib/io/fpt-field-create';
+import { createGroup, findGroups, readGroupRight } from '$lib/io/fpt-group';
 import { preflight, readRows, writeFields } from '$lib/io/fpt-write';
+import type { GroupAnswer, GroupRef, GroupRight } from '$lib/pure/group-create';
 import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
@@ -332,6 +334,32 @@ export class Builder {
 			return { state: 'unknown' as const, reason: `The right could not be read: ${message(error)}` };
 		});
 		return this.right;
+	}
+
+	private groupRightRead: Promise<GroupRight> | null = null;
+
+	/** Whether the person may create a Group in Flow PT, read once before the control shows (recipe 030). */
+	groupRight(): Promise<GroupRight> {
+		this.groupRightRead ??= (async () => {
+			const auth = liveAuth();
+			return readGroupRight(fptApi(auth.siteUrl, auth.token), await auth.token());
+		})().catch((error) => {
+			this.groupRightRead = null;
+			return { state: 'no' as const, reason: `The right could not be read: ${message(error)}` };
+		});
+		return this.groupRightRead;
+	}
+
+	/** The live Groups of that name. */
+	findGroups(name: string): Promise<GroupRef[]> {
+		const auth = liveAuth();
+		return findGroups(fptApi(auth.siteUrl, auth.token), name);
+	}
+
+	/** Create an empty Group of that name as the person, unless one holds it. Answers what the site said. */
+	createGroup(name: string): Promise<GroupAnswer> {
+		const auth = liveAuth();
+		return createGroup(fptApi(auth.siteUrl, auth.token), name);
 	}
 
 	/** Create the planned field, read the schema again and map the new field. Answers what the site said. */

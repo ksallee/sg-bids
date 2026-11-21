@@ -55,7 +55,9 @@ The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readines
   between bids from the table's selection. Add from Flow PT and Add from a breakdown add to the bid
   picked.
 - The vendors are rows of the draft: a name and an email (both required to issue), the vendor's
-  Flow PT Group, and the bids it answers, every bid by default, one at least. A row is saved as
+  Flow PT Group, and the bids it answers, every bid by default, one at least. When the person's
+  permission group may create a Group (read first, recipe 030), a Group can be created empty from
+  the row; a live Group of the same name is offered instead (`pure/group-create.ts`). A row is saved as
   typed, a name or an email still missing; a blank row is not saved. Their links are made at the
   issue (`invitations.link_pending`).
 - The page saves as it changes, in one write (`sg_save_draft`). Issue is always in sight: it needs
