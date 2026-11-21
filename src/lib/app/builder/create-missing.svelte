@@ -70,6 +70,9 @@
 		} finally {
 			running = null;
 		}
+		// Every ticked field was created and mapped: nothing left to read here, go back to the fields.
+		const all = creates.map((c) => outcomes[rowKey(c)]);
+		if (!failure && all.length > 0 && all.every((o) => o && o !== 'skipped' && o.state === 'created')) onDone(manySummary(all.map(() => 'created')));
 	}
 
 	const states = $derived(Object.values(outcomes).map((o): ManyState => (o === 'skipped' ? 'skipped' : o.state)));
@@ -129,8 +132,8 @@
 		<ul class="divide-border flex flex-col divide-y">
 			{#each rows as row, i (rowKey(row))}
 				{@const concept = conceptOf(row)}
-				{@const problems = row.checked ? problemsOf(row) : []}
 				{@const outcome = outcomes[rowKey(row)]}
+				{@const problems = row.checked && !outcome && !done ? problemsOf(row) : []}
 				{@const name = row.display.trim() ? fieldName(row.display.trim()) : null}
 				<li class={cn('flex flex-col gap-2 px-3 py-2.5', !row.checked && 'bg-muted/30')} data-row={rowKey(row)}>
 					<div class="grid grid-cols-[1.5rem_minmax(0,9rem)_minmax(0,1fr)_4.5rem_minmax(0,9rem)] items-center gap-x-3">
