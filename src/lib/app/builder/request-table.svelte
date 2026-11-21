@@ -25,6 +25,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import Info from '@lucide/svelte/icons/info';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Radio from '@lucide/svelte/icons/radio';
 	import Search from '@lucide/svelte/icons/search';
@@ -36,6 +37,7 @@
 	import FieldValue from '$lib/components/field-value.svelte';
 	import { createListSource, type BulkEdit, type RowUpdate, type RowWriteResult } from '$lib/components/core-next';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as Popover from '$lib/components/ui/popover/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -547,17 +549,25 @@
 				onChange={(v) => (from = v as SourceFilter)}
 			/>
 		{/if}
-		<p class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-slot="live-legend">
-			<span class="flex items-center gap-1.5"><Radio class="text-info size-3.5" aria-hidden="true" /><span><span class="text-foreground">Live in Flow PT.</span> A change here changes the {type} in Flow PT.</span></span>
-			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this request only.</span>
-			<span>By a code, the mark says where the row comes from.</span>
-			{#if builder.live.state === 'reading'}<span aria-live="polite">Reading Flow PT…</span>{/if}
-		</p>
+		{#if builder.live.state === 'reading'}<p class="text-muted-foreground text-xs" aria-live="polite">Reading Flow PT…</p>{/if}
 		<p class="text-muted-foreground ml-auto flex items-center gap-4 text-xs">
 			{#if difficulty && !difficulty.live}
 				<button type="button" class="hover:text-foreground underline decoration-current/30 underline-offset-2" onclick={onFields} data-slot="difficulty-note">Map Difficulty to a field</button>
 			{/if}
-			<span>{omitted > 0 ? `${omitted} omitted. They go to no vendor.` : 'Select rows, then edit a cell to change them all.'}</span>
+			{#if omitted > 0}<span>{omitted} omitted. They go to no vendor.</span>{/if}
+			<Popover.Root>
+				<Popover.Trigger class="hover:bg-accent hover:text-foreground focus-visible:ring-ring inline-flex size-7 items-center justify-center rounded-md outline-none focus-visible:ring-2" aria-label="How this table works" title="How this table works" data-slot="live-legend">
+					<Info class="size-4" aria-hidden="true" />
+				</Popover.Trigger>
+				<Popover.Content class="w-80 text-sm" align="end">
+					<ul class="flex flex-col gap-2.5">
+						<li class="flex gap-2"><Radio class="text-info mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><span class="font-medium">Live in Flow PT.</span> A change in this column changes the {type} in Flow PT.</span></li>
+						<li class="flex gap-2"><FileText class="text-muted-foreground mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><span class="font-medium">In this request only.</span> Flow PT is not changed.</span></li>
+						<li class="text-muted-foreground">The mark by a code says where the row comes from: Flow PT or a breakdown.</li>
+						<li class="text-muted-foreground">Select rows, then edit a cell to change them all.</li>
+					</ul>
+				</Popover.Content>
+			</Popover.Root>
 		</p>
 	</div>
 
