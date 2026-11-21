@@ -843,6 +843,7 @@ const stages = {
 		const cutRow = vp.locator('[data-row]', { hasText: cut });
 		const cutWords = await cutRow.locator('[data-slot=line-omitted]').innerText();
 		const cutInputs = await cutRow.locator('input[data-price]').count();
+		const cutExclude = await cutRow.locator('input[type=checkbox]').isDisabled();
 		await vp.waitForTimeout(800);
 		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
 		await cutRow.scrollIntoViewIfNeeded();
@@ -853,8 +854,8 @@ const stages = {
 		await vctx.close();
 		const lines = await sql`select i.code from public.bid_lines l join public.bids b on b.id = l.bid_id join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.request_id = ${state.round2Id} and b.status = 'submitted'`;
 		expect(
-			/Cut this round/.test(cutWords) && cutInputs === 0 && lines.length === 5 && !lines.some((l) => l.code === cut),
-			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field; Vendor A submitted ${lines.length} lines, none for the cut row`
+			/Cut this round/.test(cutWords) && cutInputs === 0 && cutExclude && lines.length === 5 && !lines.some((l) => l.code === cut),
+			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field and no Exclude to tick; Vendor A submitted ${lines.length} lines, none for the cut row`
 		);
 		// The comparison hides cut rows by default; shown, it marks the row cut.
 		await page.goto(`${APP}/requests/${state.round2Id}/compare?project=${state.projectId}`);

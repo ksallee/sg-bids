@@ -102,7 +102,7 @@
 		kept =
 			next === 'all'
 				? null
-				: new Set(form.lines.filter((l) => (next === 'excluded' ? l.excluded : !l.excluded && !prices.has(l.key))).map((l) => l.key));
+				: new Set(form.lines.filter((l) => (next === 'excluded' ? l.excluded : !l.omitted && !l.excluded && !prices.has(l.key))).map((l) => l.key));
 	}
 
 	function shows(key: string): boolean {
@@ -156,7 +156,7 @@
 
 	const counts = $derived({
 		all: form.lines.length,
-		open: form.lines.filter((l) => !l.excluded && !prices.has(l.key) && !notBidding(l.key) && !(inFigure(l.key) && figures.has(l.package ?? 'all'))).length,
+		open: form.lines.filter((l) => !l.omitted && !l.excluded && !prices.has(l.key) && !notBidding(l.key) && !(inFigure(l.key) && figures.has(l.package ?? 'all'))).length,
 		excluded: form.lines.filter((l) => l.excluded).length
 	});
 
@@ -498,13 +498,13 @@
 						<input
 							type="checkbox"
 							bind:checked={form.lines[index].excluded}
-							disabled={readOnly || covered || declined}
+							disabled={readOnly || covered || declined || line.omitted}
 							aria-label={`Exclude ${shot?.code ?? item?.name}`}
 							class="accent-primary size-4"
 						/>
 					</span>
 				</div>
-				{#if detailOpen && !covered && !declined}
+				{#if detailOpen && !covered && !declined && !line.omitted}
 					<LineDetail bind:line={form.lines[index]} {errors} currency={form.currency} {mark} {locale} price={prices.get(key) ?? null} {readOnly} listId="departments" />
 				{/if}
 			{/each}
