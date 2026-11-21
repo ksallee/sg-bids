@@ -67,8 +67,7 @@
 			{#snippet context()}
 				<StatusChip status={s!.data!.status} />
 				<span class="text-foreground">{r.header.project}</span>
-				<span class="text-foreground font-mono text-xs">{s!.data!.code}</span>
-				<span>Round {r.header.round}</span>
+				{#if r.header.round > 1}<span>Round {r.header.round}</span>{/if}
 				<span>{s!.grid!.columns.length} {s!.grid!.columns.length === 1 ? 'answer' : 'answers'} in {r.header.baseCurrency}</span>
 			{/snippet}
 			{#if needRates > 0}
@@ -93,7 +92,7 @@
 		{:else}
 			<div class="flex min-h-0 flex-1">
 				<div class="flex min-h-0 min-w-0 flex-1 flex-col">
-					<GridToolbar state={s} code={s.data.code} />
+					<GridToolbar state={s} code={r.header.title?.trim() || s.data.code} />
 					{#if s.view && s.view.shown === 0}
 						<PageState state="empty" title="No row fits the filters" line="Loosen a filter to see rows again.">
 							{#snippet action()}<Button variant="outline" onclick={() => s!.clearFilters()}>Clear the filters</Button>{/snippet}

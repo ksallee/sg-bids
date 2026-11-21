@@ -25,67 +25,58 @@ The "Seen in" column says:
 - A shot or an asset from a breakdown has no Flow PT entity until it is matched, or created at
   the award. Its `source` says so. A vendor sees neither.
 - Each vendor bids in its own currency. Production compares in the request's base currency.
-- A bid's shots and assets picked from Flow PT are live. Each value a mapped field feeds is read
-  from Flow PT when the bid opens and after every write, and an edit to it writes the field. The
-  stored bid holds the values last read, so a reload is safe. The note to vendors, omit, a concept
-  with no mapped field, and every value of a breakdown row are the bid's own. Issuing a request
-  copies its bids' rows as they are and freezes the copy; from then on neither Flow PT edits nor
-  bid edits reach it.
+- A draft's shots and assets picked from Flow PT are live. Each value a mapped field feeds is read
+  from Flow PT when the page opens and after every write, and an edit to it writes the field. The
+  stored draft holds the values last read, so a reload is safe. The note to vendors, omit, a concept
+  with no mapped field, and every value of a breakdown row are the request's own. Issuing copies
+  the rows as they are and freezes them; from then on no Flow PT edit reaches them.
 
 ## Words
 
-In the app a **bid** is what production builds and sends: a named set of rows. A vendor's whole
-submission to a request is its **answer**. In the code a bid is a `ProductionBid` (table
-`production_bids`), a bid of a request is a package (`RequestPackage`, table `request_packages`),
-and an answer is a `VendorBid` (table `bids`): the names from before bids came first stay, to keep
+In the app a **request** is what production makes and sends, on one page: its **bids** (named sets
+of rows), its vendors and its details. A vendor's whole submission to a request is its **answer**.
+In the code a bid of a request is a package (`RequestPackage`, table `request_packages`); while the
+request is a draft, each bid's rows live in `production_bids` and `production_bid_items`, owned by
+the request; an answer is a `VendorBid` (table `bids`). The table names from before stay, to keep
 the risk of the change low.
-
-## Bid
-
-What production builds in a project, before any request. The rules are in
-`src/lib/pure/production-bid.ts` and `src/lib/pure/request-bids.ts`.
-
-| field | what | seen in |
-|---|---|---|
-| id | | sg-bids |
-| name | as production types it, 120 characters at most. Not unique: a clone is `<name> copy` | sg-bids |
-| shots, assets | its rows, each a shot or asset as below, with no package | sg-bids |
-| project | the tenant's project | sg-bids |
-
-- A bid is stored once it has a name or a row. One with rows and no name saves as Untitled bid.
-- It is always editable: the table of the editor, Add from Flow PT, Add from a breakdown, in place
-  and bulk edits live to Flow PT, Undo. Rows move or copy to another bid of the project; a row the
-  other bid holds already stays as it is there.
-- Cloning copies every row under `<name> copy`, then `<name> copy 2`, made free in the project.
-- Deleting a bid takes it out of the draft requests it is in, with each vendor's choice of it, and
-  leaves the requests it went out in as they were. It is refused while a vendor of a draft is
-  invited to it alone.
-- In storage, `production_bids` holds the bid with the counts the Bids list shows, kept by the
-  functions that write its rows, and `production_bid_items` its rows.
 
 ## Bid request
 
-What production sends: one or several bids, the header they share, to the vendors it invites.
+What production sends: one or several bids, the details they share, to the vendors it invites.
+The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readiness.ts`.
 
-- Made from the Bids page: tick bids of one project, then New request. A draft references its bids:
-  one package per bid, keyed `bid:<id>`, named as the bid, and no rows of its own. It reads as its
-  bids are now.
-- Issuing copies each bid's rows into the request under its package, named as the bid then, made
-  unique in the request (`<name> 2`), and freezes the request as before. A bid edited after the
-  issue, sent again or deleted changes nothing issued. A package keeps its bid's id while the bid
-  exists, so a bid lists the requests it went out in.
-- A request takes each row once: a row in two of its bids refuses the issue, named.
-- The send flow wants a vendor before the issue. The vendors added to a draft get their links at
-  the issue, shown once then (`invitations.link_pending`).
-- A new round of an issued request is a draft of the same bids. A bid of the request whose bid is
-  gone, or one from before bids, comes back as a new bid made from what was issued.
+- Made from the Requests list: New request asks for a name and a project, then the request's one
+  page opens with one empty bid, Bid 1. One name: the code is made from it (`header.suggestCode`),
+  kept out of sight, and written to Flow PT's Request Code at the award.
+- A draft owns its bids. Add bid makes the next one, `Bid 2`, `Bid 3`: the first number no bid of
+  the request holds. A bid's name is unique in the request, in any case, 120 characters at most. A
+  request keeps one bid at least. Deleting a bid takes its rows with it or moves them to another bid.
+- Every row sits in exactly one bid of the request (`production_bid_items_one_bid`). Rows move
+  between bids from the table's selection. Add from Flow PT and Add from a breakdown add to the bid
+  picked.
+- The vendors are rows of the draft: a name and an email (both required to issue), the vendor's
+  Flow PT Group, and the bids it answers, every bid by default, one at least. A row is saved as
+  typed, a name or an email still missing; a blank row is not saved. Their links are made at the
+  issue (`invitations.link_pending`).
+- The page saves as it changes, in one write (`sg_save_draft`). Issue is always in sight: it needs
+  the name, the base currency, the day answers are due, a row, a row in every bid, one row not
+  omitted, and a vendor with a name and an email. Pressed with something missing, it lists each
+  problem, and each takes the person to its field.
+- Issuing copies each bid's rows into the request under its package and freezes the request as
+  before (`sg_issue_request`); the draft's bids go. Each vendor's link is shown once, on the page,
+  with Copy, Copy all and Email (a `mailto:`; the app sends nothing). A lost link is made again with
+  New link.
+- Duplicate copies a request, draft or issued, into a new draft: the name with ` copy`, the details,
+  the vendors (their links made at its issue), the bids by name, and their rows when asked.
+- A new round of an issued request is a new draft with the same name and code, the round after,
+  its bids with the rows as issued, and its vendors.
 
 ### Header
 
 | field | what | seen in |
 |---|---|---|
-| code | production's reference for the request | sg-bids |
-| title | the request's title | sg-bids |
+| code | the request's reference, made from its name when it is made; never shown, never typed | sg-bids |
+| title | the request's one name, as production types it, 200 characters at most | sg-bids |
 | project | the show | 2+ |
 | projectRef | the Flow PT Project | sg-bids |
 | studio | the studio | 2+ |
@@ -94,7 +85,7 @@ What production sends: one or several bids, the header they share, to the vendor
 | clientProducer | client VFX producer | 2+ |
 | cutVersion | script or cut version | 2+ |
 | round | bid round, 1 first | 2+ |
-| dueDate | when bids are due | 2+ |
+| dueDate | when answers are due. Required to issue | 2+ |
 | baseCurrency | the currency of the comparison | 2+ |
 | turnoverWeek | turnover week | 2+ |
 | turnoverDate | turnover date | sg-bids |
@@ -156,27 +147,29 @@ one.
 ### The bids of a request
 
 A request's bids, packages in the code: named groups of its rows. Every row sits in exactly one. The
-rules are in `src/lib/pure/packages.ts`.
+rules are in `src/lib/pure/packages.ts` and `request-draft.ts`.
 
 | field | what | seen in |
 |---|---|---|
-| packages | the request's bids, in order: `id`, `name`, and the production bid it comes from | sg-bids |
+| packages | the request's bids, in order: `id`, `name`, and on a draft the bid that holds its rows | sg-bids |
 | shot or asset, package | the bid the row sits in | sg-bids |
 
-- A request made from bids has one per bid. Names are unique in the request, in any case, 120
-  characters at most.
+- A draft has one per bid it owns, keyed `bid:<id>`. Names are unique in the request, in any case,
+  120 characters at most.
 - They freeze with the request at issue, as its rows do.
 - A request stored with rows of its own, before bids, took defaults from sequences: a shot to its
   sequence's package (`seq:<sequence>`), a shot with none to Other shots (`shots`), an asset to
   Assets (`assets`). An issued one reads as it was. A draft one became its bids (below).
 - A request stored before packages has none. It reads as one, All shots and assets (`all`), holding
   every row.
-- In storage, `request_packages` holds a request's bids (`bid_id` names the production bid while it
-  exists) and `request_items.package_key` each row's, held by a foreign key.
-- The drafts stored before bids came first turned into their bids at the migration: one bid per
-  package, named as it, with its rows, or one bid of every row named after the request for a draft
-  from before packages; a row in no package goes to one more bid, Other rows. The draft keeps its
-  packages, now pointing at the bids, so each vendor's choice stands.
+- In storage, `request_packages` holds a request's bids. On a draft, `bid_id` names the bid that
+  holds its rows (`production_bids.request_id` is the draft, and each row of
+  `production_bid_items` carries the request too). Issued, the rows are `request_items` and
+  `package_key` names each row's bid, held by a foreign key; `bid_id` is cleared.
+- The data from before one page turned at the migration (`sg_one_page_convert`): a draft took
+  ownership of the bids it named, a bid named by several drafts was copied into each after the first,
+  a row two bids of one draft held stayed in the first, and a bid no draft named became a draft
+  request of its own, named after it. Issued requests were not touched.
 
 ### Invited vendor
 
@@ -185,6 +178,7 @@ rules are in `src/lib/pure/packages.ts`.
 | id | | sg-bids |
 | name | the vendor | 2+ |
 | fpt | the vendor's Flow PT Group | sg-bids |
+| groupName | the Group's name as picked, for production's page; never sent to a vendor | sg-bids |
 | email | contact email | 2+ |
 | ndaFile, ndaExecuted | NDA file and whether it is signed | 2+ |
 | tpn | Trusted Partner Network status | 2+ |
@@ -195,7 +189,7 @@ A vendor invited to some bids sees and answers their rows alone, in every versio
 no other row for it (`src/lib/pure/access.ts`: the vendor's reads of rows and packages carry the
 invitation's packages), refuses a line or a figure outside them, and the database refuses them too
 (`sg_bid_lines_guard`, `sg_bids_guard`). A request from before packages takes no list. A vendor
-never reads a production bid.
+never reads a draft's bids.
 
 Production changes a vendor's bids while the vendor has submitted no answer, withdrawn or not. After
 that it is refused, with the reason: an answer is for the bids it was made for. A draft saved for
@@ -265,6 +259,20 @@ once. The figures count once in the lines total, so
 the discount, the tax and an `all` rebate base take them. A `labour` rebate base cannot know a
 figure's labour: the estimate says so, as for a line without department detail.
 
+### Rate card
+
+| field | what | seen in |
+|---|---|---|
+| rateCard, rates | a price per difficulty that appears in the vendor's rows: `difficulty`, `amount` | sg-bids |
+| rateCard, fallback | the price for a row with no difficulty | sg-bids |
+| line, fromRate | the line's total came from the card | sg-bids |
+
+The rules are in `src/lib/pure/rate-card.ts`, with property tests. A rate fills every row of its
+difficulty in the bids priced row by row; a bid priced as one figure, or not bid on, takes none. A
+price the vendor types on a row is its own: no rate change touches it, and Use rate puts the rate
+back. Every total, the comparison, the award and the Flow PT write read the lines' amounts, as
+before. The card is kept in the answer's header, `fromRate` in the line's detail.
+
 ### Non-shot costs
 
 | field | what | seen in |
@@ -317,10 +325,11 @@ checked. A user edits the rate per bid.
 
 ## Deleting
 
-A bid is deleted alone: out of its draft requests, kept where it went out (see Bid above).
+A bid is deleted on its request's page, with its rows or moving them to another bid.
 
-A request is deleted whole: its items, invitations, every bid and line, the rates and the
-scenarios. A draft goes after one confirm. An issued, undone or closed request asks for its code.
+A request is deleted whole: its bids and rows, invitations, every answer and line, the rates and
+the scenarios. A draft goes after one confirm. An issued, undone or closed request asks for its
+name.
 While an award is in Flow PT the delete is refused: undo the award first, or its Bids and Groups
 would stay in Flow PT with nothing here to take them back. Deleting writes nothing to Flow PT. The
 hashes of the request's link tokens are kept alone, so a vendor who opens a dead link is told the
@@ -388,9 +397,9 @@ answer, one comparison.
 
 | Bid | key `sg_sgbids_key` | name | total | Bid Lines |
 |---|---|---|---|---|
-| a bid priced row by row | `sgbids/<request>/<vendor>/r<round>/p:<package>` | `<code> <vendor> R<round> <bid name>` | the sum of its rows | one per row, with its amount |
+| a bid priced row by row | `sgbids/<request>/<vendor>/r<round>/p:<package>` | `<request name> <vendor> R<round> <bid name>` | the sum of its rows | one per row, with its amount |
 | a bid priced as one figure | the same | the same | the figure | one per row, no amount |
-| the whole-bid figures | `sgbids/<request>/<vendor>/r<round>/general` | `<code> <vendor> R<round> General costs` | non-shot costs less discount plus tax | none |
+| the whole-bid figures | `sgbids/<request>/<vendor>/r<round>/general` | `<request name> <vendor> R<round> General costs` | non-shot costs less discount plus tax | none |
 
 - A bid the vendor declined, or left unpriced, has no Bid.
 - A vendor's Bids sum to its grand total exactly, in minor units of its currency. In the base
@@ -398,7 +407,9 @@ answer, one comparison.
   too. The rebate estimate and the total after rebate are whole-bid figures: they sit on the General
   costs Bid alone. The General costs Bid is written only when the vendor gave a non-shot cost, a
   discount, a tax or a rebate split. It may be negative: a discount with no non-shot cost.
-- The package id (`bid:<id>` for a request made from bids) is percent-encoded in the key, so any id
+- The request's code goes in the Bid's Request Code; its name, the code when it has none, starts the
+  Bid's name.
+- The package id (`bid:<id>` for a bid of a draft) is percent-encoded in the key, so any id
   finds its row again. A line key is its Bid's key and the row, as before.
 - Award status is per Bid: a bid priced as one figure is awarded whole; a bid priced row by row is
   awarded when any of its rows is, and a split inside it stays per Bid Line as before. The General

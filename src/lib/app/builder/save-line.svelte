@@ -1,6 +1,6 @@
 <!--
-	Where the bid stands against storage, in the page header's context line: saving, saved, what it
-	waits for, or why it failed (then it is kept in this tab).
+	Where the draft stands against storage, in the page header's context line: saving, saved, or why
+	it failed. A failed save is tried again with the next change.
 -->
 <script lang="ts">
 	import type { Builder } from '$lib/app/builder.svelte';
@@ -15,10 +15,9 @@
 		Saving…
 	{:else if s.kind === 'saved'}
 		Saved {time.format(s.at)}
-	{:else if s.kind === 'waiting'}
-		Not saved yet. {s.reason}
 	{:else if s.kind === 'error'}
-		<span class="text-destructive">Not saved. {s.message} Kept in this tab.</span>
+		<span class="text-destructive">Not saved. {s.message}</span>
+		<button type="button" class="hover:text-foreground ml-1 underline decoration-current/30 underline-offset-2" onclick={() => void builder.flush()}>Try again</button>
 	{:else}
 		Not saved yet
 	{/if}

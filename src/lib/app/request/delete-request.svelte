@@ -1,7 +1,7 @@
 <!--
 	Deleting a request, from the list, the request page or the builder. It reads what would go first
 	(`delete-check`), then asks: a draft once, naming it; an issued or closed request with the list
-	of what goes and its code typed to enable the button. While an award is in Flow PT it refuses
+	of what goes and its name typed to enable the button. While an award is in Flow PT it refuses
 	and links to the award, to undo it first. The words are `$lib/pure/request-delete`. Deleting
 	never writes to Flow PT.
 -->
@@ -12,7 +12,7 @@
 	import FieldLabel from '$lib/app/field-label.svelte';
 	import Notice from '$lib/app/notice.svelte';
 	import { api } from '$lib/api';
-	import { codeMatches, deletionPlan, type Deleted, type DeletionFacts } from '$lib/pure/request-delete';
+	import { deletionPlan, nameMatches, requestName, type Deleted, type DeletionFacts } from '$lib/pure/request-delete';
 	import { requestHref } from '$lib/pure/routes';
 
 	let {
@@ -35,7 +35,8 @@
 	const uid = $props.id();
 
 	const plan = $derived(facts ? deletionPlan(facts) : null);
-	const ready = $derived(plan !== null && plan.kind !== 'refused' && (!plan.typed || codeMatches(typed, facts!.code)));
+	const name = $derived(facts ? requestName(facts) : '');
+	const ready = $derived(plan !== null && plan.kind !== 'refused' && (!plan.typed || nameMatches(typed, name)));
 
 	$effect(() => {
 		if (!open) return;
@@ -57,7 +58,7 @@
 		deleting = true;
 		deleteError = null;
 		try {
-			const { deleted } = await api.deleteRequest(projectId, facts.id, plan?.kind === 'issued' ? typed : facts.code);
+			const { deleted } = await api.deleteRequest(projectId, facts.id, plan?.kind === 'issued' ? typed : name);
 			open = false;
 			ondeleted(deleted);
 		} catch (error) {
@@ -89,18 +90,18 @@
 			</Dialog.Footer>
 		{:else if plan.kind === 'refused'}
 			<Dialog.Header>
-				<Dialog.Title>{facts.code} cannot be deleted yet</Dialog.Title>
-				<Dialog.Description>{facts.title ?? 'Untitled request'}, round {facts.round}.</Dialog.Description>
+				<Dialog.Title>{name} cannot be deleted yet</Dialog.Title>
+				<Dialog.Description>Round {facts.round}.</Dialog.Description>
 			</Dialog.Header>
 			<Notice tone="warning" data-slot="delete-refused">{plan.reason}</Notice>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (open = false)}>Close</Button>
-				<Button href={`${requestHref({ id: facts.id, status: facts.status, projectId })}#award`} onclick={() => (open = false)} data-slot="open-award">Open the award</Button>
+				<Button href={`${requestHref({ id: facts.id, projectId })}#award`} onclick={() => (open = false)} data-slot="open-award">Open the award</Button>
 			</Dialog.Footer>
 		{:else}
 			<Dialog.Header>
 				<Dialog.Title>{plan.title}</Dialog.Title>
-				<Dialog.Description>{facts.title ?? 'Untitled request'}. {plan.kind === 'draft' ? 'This goes:' : 'This goes, for good:'}</Dialog.Description>
+				<Dialog.Description>{plan.kind === 'draft' ? 'This goes:' : 'This goes, for good:'}</Dialog.Description>
 			</Dialog.Header>
 			<ul class="flex list-disc flex-col gap-1 pl-5 text-sm" data-slot="delete-lines">
 				{#each plan.lines as line (line)}<li>{line}</li>{/each}
@@ -108,14 +109,13 @@
 			<p class="text-muted-foreground text-sm">This cannot be undone. Nothing in Flow PT changes.</p>
 			{#if plan.typed}
 				<div class="flex flex-col gap-1.5">
-					<FieldLabel for={`${uid}-code`} required>Type <span class="font-mono">{facts.code}</span> to delete it</FieldLabel>
+					<FieldLabel for={`${uid}-code`} required>Type <span class="font-semibold">{name}</span> to delete it</FieldLabel>
 					<Input
 						id={`${uid}-code`}
 						bind:value={typed}
 						autocomplete="off"
 						spellcheck={false}
 						aria-required="true"
-						class="font-mono"
 						onkeydown={(e) => e.key === 'Enter' && ready && void remove()}
 						data-slot="delete-code"
 					/>

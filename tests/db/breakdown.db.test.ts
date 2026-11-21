@@ -46,14 +46,16 @@ describe('a breakdown row', () => {
 		const s = store();
 		const production = tenant();
 		const request = await s.createDraftRequest(production, { code: 'BD-1', header: header(), items: mixed() });
-		expect(request.shots).toEqual(mixed().shots);
-		expect(request.assets).toEqual(mixed().assets);
-		const rows = await sql`select key, source, fpt_id, fpt_linked_at from public.request_items where request_id = ${request.id} order by position`;
-		expect(rows.map((r) => [r.key, r.source, r.fpt_id, r.fpt_linked_at])).toEqual([
-			['shot-1234', 'fpt', '1234', null],
-			['shot-bd-a', 'breakdown', null, null],
-			['shot-bd-c', 'breakdown', null, null],
-			['asset-bd-b', 'breakdown', null, null]
+		const bid = request.packages![0].id;
+		expect(request.shots).toEqual(mixed().shots.map((x) => ({ ...x, package: bid })));
+		expect(request.assets).toEqual(mixed().assets.map((x) => ({ ...x, package: bid })));
+		// A draft's rows are its bid's.
+		const rows = await sql`select key, source, fpt_id from public.production_bid_items where request_id = ${request.id} order by kind desc, position`;
+		expect(rows.map((r) => [r.key, r.source, r.fpt_id])).toEqual([
+			['shot-1234', 'fpt', '1234'],
+			['shot-bd-a', 'breakdown', null],
+			['shot-bd-c', 'breakdown', null],
+			['asset-bd-b', 'breakdown', null]
 		]);
 	});
 
@@ -65,14 +67,15 @@ describe('a breakdown row', () => {
 		expect(error.message).toMatch(/request_items_source|frozen/);
 	});
 
-	it('is linked on a draft by a save, and by the link call', async () => {
+	it('is linked on a draft by a save', async () => {
 		const s = store();
 		const production = tenant();
 		const request = await s.createDraftRequest(production, { code: 'BD-1', header: header(), items: mixed() });
-		const linked = await s.linkItems(production, request.id, [{ kind: 'shot', key: 'shot-bd-a', fpt: { type: 'Shot', id: 501 } }]);
+		const rows = mixed();
+		const shots = rows.shots.map((x) => (x.id === 'shot-bd-a' ? { ...x, fpt: { type: 'Shot', id: 501 } } : x));
+		const linked = await s.updateDraftRequest(production, request.id, { items: { shots, assets: rows.assets } });
 		expect(linked.shots.find((x) => x.id === 'shot-bd-a')?.fpt).toEqual({ type: 'Shot', id: 501 });
-		const [row] = await sql`select fpt_linked_at from public.request_items where request_id = ${request.id} and key = 'shot-bd-a'`;
-		expect(row.fpt_linked_at).toBeNull();
+		expect(linked.shots.find((x) => x.id === 'shot-bd-a')?.source).toBe('breakdown');
 	});
 });
 
@@ -84,8 +87,9 @@ describe('on an issued request', () => {
 			{ kind: 'shot', key: 'shot-bd-a', fpt: { type: 'Shot', id: 501 } },
 			{ kind: 'asset', key: 'asset-bd-b', fpt: { type: 'Asset', id: 77 } }
 		]);
-		expect(out.shots.find((x) => x.id === 'shot-bd-a')).toEqual({ ...mixed().shots[1], fpt: { type: 'Shot', id: 501 } });
-		expect(out.assets[0]).toEqual({ ...mixed().assets[0], fpt: { type: 'Asset', id: 77 } });
+		const bid = request.packages![0].id;
+		expect(out.shots.find((x) => x.id === 'shot-bd-a')).toEqual({ ...mixed().shots[1], fpt: { type: 'Shot', id: 501 }, package: bid });
+		expect(out.assets[0]).toEqual({ ...mixed().assets[0], fpt: { type: 'Asset', id: 77 }, package: bid });
 		const after = await sql`select * from public.request_items where request_id = ${request.id} order by position`;
 		for (const [i, row] of after.entries()) {
 			const { fpt_type, fpt_id, fpt_linked_at, ...rest } = row;

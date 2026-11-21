@@ -12,16 +12,18 @@
  * principal carries the invitation's packages and `scope` filters every read of rows by them. A
  * line or a figure outside them is refused here, and by the database's guards behind it.
  *
- * A request made from bids holds them by reference while it is a draft: it reads as its bids make it
- * now (`request-bids.composeDraft`), and the issue copies their rows into it in one write
- * (`sg_issue_request`), with the links of the vendors added to the draft, answered once.
+ * A draft request owns its bids: each a production bid with its rows, one package of the request
+ * per bid. It reads as its bids make it (`request-bids.composeDraft`); the page saves its bids, rows
+ * and vendors in one write (`sg_save_draft`), and the issue copies the rows into the request in one
+ * write (`sg_issue_request`), with the links of the vendors added to the draft, answered once.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { scope, stamp, type Action, type Principal, type ProductionPrincipal, type Table, type VendorPrincipal } from '$lib/pure/access';
 import type { AwardScenario, BidRequest, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot, ScenarioPick, VendorBid } from '$lib/pure/model';
 import { ANSWER_ONE, packageProblems, resolvePackages } from '$lib/pure/packages';
-import { composeDraft, type Overlap } from '$lib/pure/request-bids';
+import { composeDraft } from '$lib/pure/request-bids';
+import { bidKey, type SavedBid } from '$lib/pure/request-draft';
 import { targetKey } from '$lib/pure/model';
 import { comparePercent, sumPercents } from '$lib/pure/percent';
 import { rangeProblems, submitProblems } from '$lib/pure/bid-limits';
@@ -29,10 +31,9 @@ import { isCurrency } from '$lib/pure/currencies';
 import {
 	bidFromRows,
 	bidToRows,
+	bidItemsToRows,
 	headerToColumns,
-	itemsToRows,
 	packagesFromRows,
-	packagesToRows,
 	requestFromRows,
 	scenarioFromRows,
 	scenarioToRows,
@@ -52,7 +53,7 @@ import { encodeToken, hashToken, parseToken, sameHash, TOKEN_BYTES } from '$lib/
 import type { ItemKey } from '$lib/pure/vendor-keys';
 import type { ItemLink } from '$lib/pure/wire';
 import type { VendorBidRecord } from '$lib/pure/vendor-view';
-import { codeMatches, type Deleted } from '$lib/pure/request-delete';
+import { nameMatches, requestName, type Deleted } from '$lib/pure/request-delete';
 import { fromDatabase, StoreError } from './errors';
 import { createProductionBids } from './production-bids';
 
@@ -62,11 +63,31 @@ export const DEFAULT_INVITATION_DAYS = 60;
 /** The invitation columns anyone reads back. The token hash is never among them. */
 const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, vendor_group_id, contact_email, details, package_keys, expires_at, revoked_at, last_opened_at, created_at';
 
-/** What the builder saves under a draft: its rows and, when it has them, its packages. */
+/**
+ * Rows for a new draft, as a request made before this page held them: each package becomes a bid
+ * with its rows; with no package, one bid, Bid 1, holds them all. The seed and the tests use it.
+ */
 export interface DraftItems {
 	readonly shots: readonly RequestShot[];
 	readonly assets: readonly RequestAsset[];
 	readonly packages?: readonly RequestPackage[];
+}
+
+/** A vendor of a draft as its page saves it: kept as typed, its link made at the issue. */
+export interface DraftVendor {
+	readonly id: Id;
+	readonly name: string;
+	readonly email: string;
+	readonly group: { readonly id: number; readonly name: string } | null;
+	/** The bids it answers, by key. Null: every bid. */
+	readonly bids: readonly Id[] | null;
+}
+
+/** What one save of a draft's page writes. Absent: left as it is. */
+export interface DraftSave {
+	readonly header?: RequestHeader;
+	readonly bids?: readonly SavedBid[];
+	readonly vendors?: readonly DraftVendor[];
 }
 
 type InvitationView = Omit<InvitationRow, 'token_hash'>;
@@ -84,12 +105,6 @@ export interface Invited {
 	/** Shown once. Only its hash is stored. */
 	readonly token: string;
 	readonly expiresAt: string;
-}
-
-/** A draft request as its bids make it now, and the rows that sit in two of them. */
-export interface DraftView {
-	readonly request: BidRequest;
-	readonly overlaps: readonly Overlap[];
 }
 
 export interface VendorView {
@@ -198,11 +213,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	// Production.
 
-	/**
-	 * The request. A draft made from bids reads as its bids make it now: each bid's rows under its
-	 * package, named as the bid; a row in two bids is in the first alone and named in `overlaps`.
-	 */
-	async function getDraftView(principal: ProductionPrincipal, requestId: string): Promise<DraftView> {
+	/** The request. A draft reads as its bids make it: each bid's rows under its package, named as the bid. */
+	async function getRequest(principal: ProductionPrincipal, requestId: string): Promise<BidRequest> {
 		const row = await requestRow(principal, requestId);
 		const [items, packages] = await Promise.all([itemRows(principal, requestId), packageRows(principal, requestId)]);
 		const invitations = await run<InvitationView[]>(
@@ -210,68 +222,108 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		);
 		const vendors = invitations.map(vendorFromRow);
 		const linked = packages.flatMap((p) => (p.bid_id ? [p.bid_id] : []));
-		if (row.status !== 'draft' || linked.length === 0) return { request: requestFromRows(row, items, vendors, packages), overlaps: [] };
+		if (row.status !== 'draft' || linked.length === 0) return requestFromRows(row, items, vendors, packages);
 		const composed = composeDraft(packagesFromRows(packages), await productionBids.rowsOf(principal, linked));
 		const request = requestFromRows(row, [], vendors, []);
-		return { request: { ...request, shots: composed.shots, assets: composed.assets, packages: composed.packages }, overlaps: composed.overlaps };
+		return { ...request, shots: composed.shots, assets: composed.assets, packages: composed.packages };
 	}
 
-	async function getRequest(principal: ProductionPrincipal, requestId: string): Promise<BidRequest> {
-		return (await getDraftView(principal, requestId)).request;
+	/** The bids a draft is made with from rows held as a request before this page held them. */
+	function bidsFromItems(items: DraftItems | undefined): SavedBid[] {
+		const shots = items?.shots ?? [];
+		const assets = items?.assets ?? [];
+		const packages = items?.packages ?? [];
+		if (packages.length === 0) return [{ key: bidKey(crypto.randomUUID()), name: 'Bid 1', shots, assets }];
+		const known = new Set(packages.map((p) => p.id));
+		const first = packages[0].id;
+		const of = (pkg: Id | undefined) => (pkg && known.has(pkg) ? pkg : first);
+		return packages.map((p) => ({ key: p.id, name: p.name, shots: shots.filter((x) => of(x.package) === p.id), assets: assets.filter((x) => of(x.package) === p.id) }));
 	}
 
-	async function saveItems(principal: ProductionPrincipal, requestId: string, items: DraftItems) {
-		const tenant = scope(principal, 'request_items', 'insert').eq;
+	function vendorColumns(vendor: DraftVendor, expires: string) {
+		return {
+			id: vendor.id,
+			vendor_name: vendor.name,
+			contact_email: vendor.email,
+			vendor_group_id: vendor.group?.id ?? null,
+			details: vendor.group ? { ndaExecuted: false, groupName: vendor.group.name } : { ndaExecuted: false },
+			package_keys: vendor.bids ? [...vendor.bids] : null,
+			// A placeholder: no token is answered until the issue, so nothing here opens anything.
+			token_hash: hashToken(encodeToken(random(TOKEN_BYTES))),
+			expires_at: expires
+		};
+	}
+
+	/**
+	 * Saves a draft's page in one write (`sg_save_draft`): the header, then its bids with their rows,
+	 * and its vendors. A bid left out goes with its rows; a vendor added to the draft and left out
+	 * goes. A row sits in one bid of the request.
+	 */
+	async function saveDraft(principal: ProductionPrincipal, requestId: string, input: DraftSave): Promise<void> {
+		if (input.header !== undefined) {
+			const row = await run<{ id: string } | null>(update(principal, 'bid_requests', headerToColumns(input.header)).eq('id', requestId).eq('status', 'draft').select('id').maybeSingle());
+			if (!row) throw new StoreError(404, 'No such draft request.');
+		}
+		if (input.bids === undefined && input.vendors === undefined) return;
+		let bids = input.bids;
+		if (bids === undefined) {
+			const current = await getRequest(principal, requestId);
+			bids = bidsFromItems({ shots: current.shots, assets: current.assets, packages: current.packages });
+		}
+		let rows: { key: string; name: string; items: ReturnType<typeof bidItemsToRows> }[];
+		try {
+			const seen = new Map<string, string>();
+			rows = bids.map((b) => {
+				for (const [kind, id, code] of [...b.shots.map((x) => ['shot', x.id, x.code]), ...b.assets.map((x) => ['asset', x.id, x.name])]) {
+					const before = seen.get(`${kind}:${id}`);
+					if (before !== undefined) throw new Error(`A row sits in one bid. ${code} is in ${before} and in ${b.name}.`);
+					seen.set(`${kind}:${id}`, b.name);
+				}
+				return { key: b.key, name: b.name.trim(), items: bidItemsToRows(b.shots, b.assets) };
+			});
+		} catch (error) {
+			throw new StoreError(422, error instanceof Error ? error.message : String(error));
+		}
+		const expires = new Date(now().getTime() + DEFAULT_INVITATION_DAYS * 86_400_000).toISOString();
+		const tenant = scope(principal, 'request_packages', 'update').eq;
 		await run(
-			db.rpc('sg_save_request_items', {
+			db.rpc('sg_save_draft', {
 				p_request_id: requestId,
 				p_site_host: tenant.site_host,
 				p_project_id: tenant.project_id,
-				p_items: itemsToRows(items.shots, items.assets),
-				p_packages: packagesToRows(items.packages ?? [])
+				p_bids: rows,
+				p_vendors: input.vendors ? input.vendors.map((v) => vendorColumns(v, expires)) : null
 			})
 		);
 	}
 
 	/**
-	 * A new draft. Made from bids (`bids`), it holds them by reference; `items` writes rows of its own,
-	 * as a request made before bids did (the seed and the tests use it).
+	 * A new draft with its bids: `bids` as given, or made from `items` (rows as a request held them
+	 * before this page), or one empty bid, Bid 1. Its vendors as given.
 	 */
-	async function createDraftRequest(principal: ProductionPrincipal, input: { code: string; header: RequestHeader; items?: DraftItems; bids?: readonly Id[] }): Promise<BidRequest> {
+	async function createDraftRequest(
+		principal: ProductionPrincipal,
+		input: { code: string; header: RequestHeader; items?: DraftItems; bids?: readonly SavedBid[]; vendors?: readonly DraftVendor[] }
+	): Promise<BidRequest> {
 		const row = await run<RequestRow>(
 			insert(principal, 'bid_requests', { code: input.code, status: 'draft', ...headerToColumns(input.header) })
 				.select()
 				.single()
 		);
-		if (input.items) await saveItems(principal, row.id, input.items);
-		if (input.bids) await setRequestBids(principal, row.id, input.bids);
+		await saveDraft(principal, row.id, { bids: input.bids ?? bidsFromItems(input.items), vendors: input.vendors ?? [] });
 		return getRequest(principal, row.id);
 	}
 
-	async function updateDraftRequest(
-		principal: ProductionPrincipal,
-		requestId: string,
-		input: { code?: string; header?: RequestHeader; items?: DraftItems; bids?: readonly Id[] }
-	): Promise<BidRequest> {
-		const values: Record<string, unknown> = {};
-		if (input.code !== undefined) values.code = input.code;
-		if (input.header !== undefined) Object.assign(values, headerToColumns(input.header));
-		if (Object.keys(values).length > 0) {
-			const row = await run<RequestRow | null>(update(principal, 'bid_requests', values).eq('id', requestId).eq('status', 'draft').select().maybeSingle());
-			if (!row) throw new StoreError(404, 'No such draft request.');
-		}
-		if (input.items) await saveItems(principal, requestId, input.items);
-		if (input.bids) await setRequestBids(principal, requestId, input.bids);
+	/** A draft's header, and its bids when rows are given, as `createDraftRequest` takes them. */
+	async function updateDraftRequest(principal: ProductionPrincipal, requestId: string, input: { header?: RequestHeader; items?: DraftItems }): Promise<BidRequest> {
+		await saveDraft(principal, requestId, { header: input.header, ...(input.items ? { bids: bidsFromItems(input.items) } : {}) });
 		return getRequest(principal, requestId);
 	}
 
-	/**
-	 * A draft's bids, in order (`sg_set_request_bids`): a bid kept keeps each vendor's choice of it; a
-	 * bid taken out leaves it; refused when a vendor would be left with no bid.
-	 */
-	async function setRequestBids(principal: ProductionPrincipal, requestId: string, bids: readonly Id[]): Promise<void> {
-		const tenant = scope(principal, 'request_packages', 'update').eq;
-		await run(db.rpc('sg_set_request_bids', { p_request_id: requestId, p_site_host: tenant.site_host, p_project_id: tenant.project_id, p_bid_ids: [...bids] }));
+	/** The codes the tenant's requests hold in a round: a new code is made free of them. */
+	async function codesInRound(principal: ProductionPrincipal, round: number): Promise<string[]> {
+		const rows = await run<{ code: string }[]>(from(principal, 'bid_requests', 'read', 'code').eq('round', round));
+		return rows.map((r) => r.code);
 	}
 
 	/**
@@ -322,12 +374,15 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	/**
 	 * Deletes the request and everything under it, in one transaction (`sg_delete_request`): the one
-	 * way past the freezes. `typedCode` must be the request's code. Refused while an award is in Flow
-	 * PT. Another tenant's request and a missing one answer the same 404. Writes nothing to Flow PT.
+	 * way past the freezes. `typedName` must be the request's name (its code when it has none).
+	 * Refused while an award is in Flow PT. Another tenant's request and a missing one answer the same
+	 * 404. Writes nothing to Flow PT.
 	 */
-	async function deleteRequest(principal: ProductionPrincipal, requestId: string, typedCode: string): Promise<Deleted> {
+	async function deleteRequest(principal: ProductionPrincipal, requestId: string, typedName: string): Promise<Deleted> {
 		const row = await requestRow(principal, requestId);
-		if (!codeMatches(typedCode, row.code)) throw new StoreError(422, `Type ${row.code} to delete the request.`);
+		const title = (row.header as { title?: unknown }).title;
+		const name = requestName({ code: row.code, title: typeof title === 'string' ? title : null });
+		if (!nameMatches(typedName, name)) throw new StoreError(422, `Type ${name} to delete the request.`);
 		const tenant = scope(principal, 'bid_requests', 'delete').eq;
 		const gone = await run<Deleted>(db.rpc('sg_delete_request', { p_request_id: requestId, p_site_host: tenant.site_host, p_project_id: tenant.project_id }));
 		return { ...gone, round: Number(gone.round) };
@@ -356,36 +411,6 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 				.single()
 		);
 		return { invitation: vendorFromRow(row), token, expiresAt: row.expires_at };
-	}
-
-	/**
-	 * A vendor added to a draft: its link is made at the issue and answered once then
-	 * (`link_pending`). Its packages, when some, are the draft's bids.
-	 */
-	async function planVendor(principal: ProductionPrincipal, requestId: string, vendor: Omit<InvitedVendor, 'id'>): Promise<InvitedVendor> {
-		const request = await requestRow(principal, requestId);
-		if (request.status !== 'draft') throw new StoreError(409, 'The request is issued. Invite the vendor on its page.');
-		if (vendor.packages) await checkPackageKeys(principal, requestId, vendor.packages);
-		const expires = new Date(now().getTime() + DEFAULT_INVITATION_DAYS * 86_400_000).toISOString();
-		// A placeholder hash: no token is answered until the issue, so nothing here opens anything.
-		const row = await run<InvitationView>(
-			insert(principal, 'invitations', { request_id: requestId, ...vendorToColumns(vendor), token_hash: hashToken(encodeToken(random(TOKEN_BYTES))), expires_at: expires, link_pending: true })
-				.select(INVITATION_COLUMNS)
-				.single()
-		);
-		return vendorFromRow(row);
-	}
-
-	/** A vendor added to a draft goes again: only one whose link was never made. */
-	async function removePlannedVendor(principal: ProductionPrincipal, invitationId: string): Promise<void> {
-		const invitation = await run<{ request_id: string } | null>(from(principal, 'invitations', 'read', 'request_id').eq('id', invitationId).eq('link_pending', true).maybeSingle());
-		if (!invitation) throw new StoreError(404, 'No such vendor on the draft.');
-		const request = await requestRow(principal, invitation.request_id);
-		if (request.status !== 'draft') throw new StoreError(409, 'The request is issued. Revoke the vendor’s link instead.');
-		const row = await run<{ id: string } | null>(
-			filtered(db.from('invitations').delete(), scope(principal, 'invitations', 'delete')).eq('id', invitationId).eq('link_pending', true).select('id').maybeSingle()
-		);
-		if (!row) throw new StoreError(404, 'No such vendor on the draft.');
 	}
 
 	/** Every key a package of the request. A request from before packages takes no list: it has one. */
@@ -690,14 +715,12 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		createDraftRequest,
 		deleteRequest,
 		updateDraftRequest,
-		setRequestBids,
+		saveDraft,
+		codesInRound,
 		linkItems,
 		issue,
 		issueRequest,
 		getRequest,
-		getDraftView,
-		planVendor,
-		removePlannedVendor,
 		listRequests,
 		inviteVendor,
 		setInvitationPackages,

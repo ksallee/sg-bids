@@ -39,17 +39,18 @@ describe('checkHeader', () => {
 		expect(checkHeader(f, TODAY, 'issue')).toEqual([]);
 	});
 
-	it('needs a title, a code, a round and a base currency, each named in words', () => {
-		const p = at(form({ code: '  ', title: '', baseCurrency: '', round: '' }));
-		expect(p.title).toEqual({ field: 'title', label: 'Title', tone: 'error', missing: true, short: 'missing', message: 'Give the request a title.' });
-		expect(p.code.message).toBe('Give the request a code. Vendors quote it back.');
+	it('needs a name, a base currency and the day answers are due, each named in words; the code is the app’s', () => {
+		const p = at(form({ code: '  ', title: '', baseCurrency: '', round: '', dueDate: '' }));
+		expect(p.title).toEqual({ field: 'title', label: 'Name', tone: 'error', missing: true, short: 'missing', message: 'Name the request.' });
+		expect(p.code).toBeUndefined();
 		expect(p.round.message).toBe('The round is a whole number from 1.');
 		expect(p.baseCurrency.message).toBe('Pick a base currency.');
+		expect(p.dueDate).toEqual({ field: 'dueDate', label: 'Answers due', tone: 'error', missing: true, short: 'missing', message: 'Pick the day answers are due.' });
 	});
 
 	it('lists problems in the order of the form', () => {
 		const order = checkHeader(form({ title: '', code: '', materialLink: 'x', dueDate: 'soon' }), TODAY, 'draft').map((p) => p.field);
-		expect(order).toEqual(['title', 'code', 'dueDate', 'materialLink']);
+		expect(order).toEqual(['title', 'dueDate', 'materialLink']);
 	});
 
 	it('refuses a currency off the list', () => {
@@ -92,7 +93,7 @@ describe('checkHeader', () => {
 	});
 
 	it('marks only what cannot be blank as required', () => {
-		expect(REQUIRED).toEqual(['title', 'code', 'round', 'baseCurrency']);
+		expect(REQUIRED).toEqual(['title', 'baseCurrency', 'dueDate']);
 		expect(OPTIONAL_GROUPS).toEqual({ delivery: ['turnoverDate', 'deliveryDate', 'deliveryFormat', 'materialLink'], assumptions: ['assumptions'] });
 	});
 });

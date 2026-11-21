@@ -84,7 +84,7 @@
 			case 'several':
 				return `${m.ids.length} rows in Flow PT carry this code. None is picked.`;
 			case 'taken':
-				return `Already in the ${builder.readOnly ? 'request' : 'bid'}, as ${m.by}.`;
+				return `Already in the request, as ${m.by}.`;
 			case 'none':
 				return 'No row with this code.';
 		}

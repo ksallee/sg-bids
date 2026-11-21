@@ -2,8 +2,8 @@
 	Add rows from a breakdown, for early rounds before the Shots exist in Flow PT. Two stages. First
 	the rows: pasted from a spreadsheet, read from a CSV file, or typed. Then the columns, matched by
 	header name and changeable, with a preview of every row: what is added, what replaces a row
-	already in the bid, what is left out and why, each named by its spreadsheet row. A code
-	already in the bid follows one choice for the batch. Rows go in with no Flow PT row; nothing
+	already in the request, what is left out and why, each named by its spreadsheet row. A code
+	already in the request follows one choice for the batch. Rows go in with no Flow PT row; nothing
 	is written to Flow PT. Parsing and the plan are `$lib/pure/breakdown`.
 -->
 <script lang="ts">
@@ -179,8 +179,8 @@
 		if ((issuesByRow.get(row) ?? []).some((i) => i.level === 'error')) return { word: 'Left out', tone: 'out' };
 		const d = dupRows.get(row);
 		if (d) {
-			if (duplicates === 'skip') return { word: `Skipped, ${d.matches === 'in the bid' ? 'in the bid' : `same as ${d.matches}`}`, tone: 'skip' };
-			if (duplicates === 'replace') return replaced.has(row) || d.matches !== 'in the bid' ? { word: d.matches === 'in the bid' ? 'Replaces the one in the bid' : `Replaces ${d.matches}`, tone: 'replace' } : { word: 'Replaced later', tone: 'skip' };
+			if (duplicates === 'skip') return { word: `Skipped, ${d.matches === 'in the request' ? 'in the request' : `same as ${d.matches}`}`, tone: 'skip' };
+			if (duplicates === 'replace') return replaced.has(row) || d.matches !== 'in the request' ? { word: d.matches === 'in the request' ? 'Replaces the one in the request' : `Replaces ${d.matches}`, tone: 'replace' } : { word: 'Replaced later', tone: 'skip' };
 			return { word: 'New, kept beside it', tone: 'new' };
 		}
 		return { word: 'New', tone: 'new' };
@@ -203,7 +203,7 @@
 <Dialog.Root bind:open onOpenChange={(o) => !o && reset()}>
 	<Dialog.Content class="flex max-h-[min(92dvh,56rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl" data-slot="breakdown-dialog">
 		<Dialog.Header class="border-border border-b px-5 pt-5 pb-4">
-			<Dialog.Title>Add {nouns} from a breakdown</Dialog.Title>
+			<Dialog.Title>Add {nouns} from a breakdown to {builder.bidName(builder.current)}</Dialog.Title>
 			<Dialog.Description>
 				{#if stage === 'rows'}
 					For a round before the {kind === 'shot' ? 'Shots' : 'Assets'} exist in Flow PT. Rows come in with no Flow PT row and mix with the ones you picked. Nothing is written to Flow PT.
@@ -341,7 +341,7 @@
 						<div class="border-warning/60 bg-warning/10 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border px-3 py-2 text-sm" data-slot="breakdown-duplicates">
 							<TriangleAlert class="text-warning size-4 shrink-0" aria-hidden="true" />
 							<p class="min-w-0 flex-1">
-								{plan.duplicates.length === 1 ? '1 code is' : `${plan.duplicates.length} codes are`} already in the bid or repeated:
+								{plan.duplicates.length === 1 ? '1 code is' : `${plan.duplicates.length} codes are`} already in the request or repeated:
 								{plan.duplicates
 									.slice(0, 6)
 									.map((d) => `${d.code} (row ${d.row})`)
@@ -375,7 +375,7 @@
 						<label class="flex items-start gap-2 text-sm">
 							<Switch checked={addAssets} onCheckedChange={(on) => (addAssets = on)} aria-label="Add the assets the shots name" />
 							<span>
-								Add the assets the shots name that the bid lacks{plan.assetsToAdd.length ? `: ${plan.assetsToAdd.map((a) => a.name).join(', ')}` : ''}.
+								Add the assets the shots name that the request lacks{plan.assetsToAdd.length ? `: ${plan.assetsToAdd.map((a) => a.name).join(', ')}` : ''}.
 								<span class="text-muted-foreground block text-xs">Off: those names are left unlinked.</span>
 							</span>
 						</label>

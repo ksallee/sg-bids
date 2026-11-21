@@ -34,7 +34,7 @@
 			</ol>
 
 			<div class="flex flex-wrap items-center justify-center gap-3">
-				<Button href="/bids" size="lg">Build a bid</Button>
+				<Button href="/requests" size="lg">Make a request</Button>
 				<Button href="/how" size="lg" variant="outline">How it works</Button>
 			</div>
 		</header>

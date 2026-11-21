@@ -4,25 +4,29 @@
 //
 //   E2E_SANDBOX_PROJECT="<project name>" E2E_GROUP_A=<id> E2E_GROUP_B=<id> pnpm e2e:live
 //
-// Needs in `.env.local`: the three `FPT_API_*` lines (the dev key: the app signs in with it under
-// `vite dev`), `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `POSTGRES_URL_NON_POOLING`, pointing at a
-// throwaway database, not one a running app reads. And in the environment: `E2E_SANDBOX_PROJECT`,
-// the one Flow PT project it may write to, by name, and `E2E_GROUP_A`, `E2E_GROUP_B`, two Group ids
-// the vendors are linked to.
+// Needs in `.env.local` (or the environment): the three `FPT_API_*` lines (the dev key: the app
+// signs in with it under `vite dev`), `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `POSTGRES_URL_NON_POOLING`,
+// pointing at a throwaway database, not one a running app reads. And in the environment:
+// `E2E_SANDBOX_PROJECT`, the one Flow PT project it may write to, by name, and `E2E_GROUP_A`,
+// `E2E_GROUP_B`, two Group ids the vendors are linked to. `E2E_SCREENS=1` also shoots the main screens
+// at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`.
 //
 // It starts `vite dev` on 5182 (docs/development.md: a drive takes its own port), then:
-//   1. builds a bid from 4 Shots of the sandbox (`zzsgbids_*` fixtures when it has fewer) and one
-//      from a pasted breakdown, and clones the first from the Bids list;
-//   2. ticks the two bids, makes a request: a title, Vendor A invited to both bids, Vendor B to the
-//      breakdown bid alone, issues it, and keeps the two links shown once;
-//   3. takes a row out of the first bid and checks the issued request did not change;
-//   4. answers as each vendor in its own browser context: A declines the breakdown bid and prices
-//      the other row by row; B sees its bid alone and prices it as one figure in GBP;
-//   5. sets B's rate, gives Seq A to A and the breakdown bid whole to B, chooses the scenario;
-//   6. publishes (breakdown rows without a Shot or Asset), reads Flow PT back: the Bids, the Bid
-//      Lines, their sums, the Group on the Shots; undoes from the request page and reads it again;
-//   7. sends the breakdown bid again in a second request, and checks the bid lists both;
-//   8. deletes what the drive made, in Flow PT and in the database, also on a failure part way.
+//   1. makes a request from the Requests list: a name and the project, in the New request dialog;
+//   2. on its one page: 4 Shots of the sandbox from Flow PT (`zzsgbids_*` fixtures when it has
+//      fewer) and 2 breakdown Shots with a difficulty into Bid 1, renamed Seq A; Add bid, renamed
+//      Creature, a breakdown Shot and Asset into it; one Flow PT Shot moved from Seq A to Creature;
+//   3. two vendors typed in their rows: Vendor A on every bid, Vendor B on Creature alone;
+//   4. presses Issue with the due day left blank: the list names it, a press marks the field; the
+//      day set, it issues, and the page shows the links once: Copy all and Email checked;
+//   5. answers as each vendor in its own browser context: A fills its rate card (a rate per
+//      difficulty and one for rows with none), overrides one row, declines Creature; B prices
+//      Creature as one figure in GBP;
+//   6. sets B's rate, gives Seq A to A and Creature whole to B, chooses the scenario;
+//   7. publishes (breakdown rows without a Shot or Asset), reads Flow PT back: the Bids, the Bid
+//      Lines, their sums, the Groups on the Shots; undoes from the request page and reads it again;
+//   8. duplicates the request from the list, without its rows, and checks the copy;
+//   9. deletes what the drive made, in Flow PT and in the database, also on a failure part way.
 // Screenshots go to `shots/e2e-live/`. It prints ids and counts, never a token, a key or the site.
 
 import { spawn } from 'node:child_process';
@@ -36,6 +40,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PORT = 5182;
 const APP = `http://localhost:${PORT}`;
 const OUT = `${ROOT}shots/e2e-live/`;
+const SCREENS = `${ROOT}shots/one-page/`;
 const env = { ...loadEnv('development', ROOT, ''), ...process.env };
 for (const name of ['FPT_API_SITE_URL', 'FPT_API_SCRIPT_NAME', 'FPT_API_API_KEY', 'SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'POSTGRES_URL_NON_POOLING', 'E2E_SANDBOX_PROJECT', 'E2E_GROUP_A', 'E2E_GROUP_B']) {
 	if (!env[name]) {
@@ -44,10 +49,12 @@ for (const name of ['FPT_API_SITE_URL', 'FPT_API_SCRIPT_NAME', 'FPT_API_API_KEY'
 	}
 }
 mkdirSync(OUT, { recursive: true });
+if (env.E2E_SCREENS) mkdirSync(SCREENS, { recursive: true });
 const SANDBOX = env.E2E_SANDBOX_PROJECT;
 const GROUP_A = Number(env.E2E_GROUP_A);
 const GROUP_B = Number(env.E2E_GROUP_B);
 const STAMP = new Date().toISOString().slice(0, 16).replace(/\D/g, '');
+const NAME = `zzsgbids drive ${STAMP}`;
 const log = (...parts) => console.log('[e2e]', ...parts);
 const state = {};
 const evidence = [];
@@ -120,6 +127,35 @@ async function shoot(p, name) {
 	log('shot', file.slice(ROOT.length));
 }
 
+/** With `E2E_SCREENS`, the page at each width, light, and at 1920 dark too. */
+async function screens(p, name) {
+	if (!env.E2E_SCREENS) return;
+	const was = p.viewportSize();
+	// A popover near the bottom can leave the document scrolled: the screens start from the top.
+	await p.evaluate(() => document.scrollingElement?.scrollTo(0, 0));
+	for (const [width, height, dark] of [
+		[1280, 800, false],
+		[1440, 900, false],
+		[1920, 1080, false],
+		[1920, 1080, true],
+		[2560, 1440, false]
+	]) {
+		await p.setViewportSize({ width, height });
+		await p.evaluate((on) => {
+			document.documentElement.classList.toggle('dark', on);
+			document.documentElement.style.colorScheme = on ? 'dark' : 'light';
+		}, dark);
+		await p.waitForTimeout(400);
+		await p.screenshot({ path: `${SCREENS}${name}-${width}${dark ? '-dark' : ''}.png` });
+	}
+	await p.evaluate(() => {
+		document.documentElement.classList.remove('dark');
+		document.documentElement.style.colorScheme = 'light';
+	});
+	await p.setViewportSize(was);
+	await p.waitForTimeout(300);
+}
+
 async function pickEntity(trigger, text) {
 	await trigger.click();
 	await page.keyboard.type(text, { delay: 20 });
@@ -129,7 +165,29 @@ async function pickEntity(trigger, text) {
 }
 
 async function saved() {
+	await page.waitForTimeout(1000);
 	await page.locator('[data-slot=save-line][data-state=saved]').waitFor({ timeout: 30_000 });
+}
+
+/** A breakdown pasted into the bid picked: the dialog, the columns as detected, then Add. */
+async function breakdown(text) {
+	await page.locator('[data-slot=breakdown-open]').click();
+	const dialog = page.locator('[data-slot=breakdown-dialog]');
+	await dialog.waitFor();
+	await dialog.locator('[data-slot=breakdown-paste]').fill(text);
+	await dialog.locator('[data-slot=breakdown-next]').click();
+	await dialog.locator('[data-slot=breakdown-add]').click();
+	await dialog.waitFor({ state: 'detached' });
+}
+
+async function renameBid(from, to) {
+	const chip = page.locator(`[data-slot=bid-chip][data-bid="${from}"]`);
+	await chip.locator('[data-slot=bid-menu]').click();
+	await page.locator('[data-slot=bid-rename-open]').click();
+	const input = page.locator('[data-slot=bid-rename]');
+	await input.fill(to);
+	await input.press('Enter');
+	await page.locator(`[data-slot=bid-chip][data-bid="${to}"]`).waitFor();
 }
 
 const stages = {
@@ -141,7 +199,7 @@ const stages = {
 		const groups = await search('Group', [['id', 'in', [GROUP_A, GROUP_B]]], ['code']);
 		state.groupCode = Object.fromEntries(groups.map((g) => [g.id, g.attributes.code]));
 		if (!state.groupCode[GROUP_A] || !state.groupCode[GROUP_B]) throw new Error('E2E_GROUP_A or E2E_GROUP_B is not a Group.');
-		let shots = (await search('Shot', [['project', 'is', { type: 'Project', id: sb.id }]], ['code', 'sg_vendor_groups']))
+		const shots = (await search('Shot', [['project', 'is', { type: 'Project', id: sb.id }]], ['code', 'sg_vendor_groups']))
 			.filter((s) => typeof s.attributes.code === 'string' && s.attributes.code.trim() !== '' && !s.attributes.code.startsWith('zzsgbids'))
 			.filter((s) => !(s.relationships.sg_vendor_groups?.data ?? []).some((g) => g.id === GROUP_A || g.id === GROUP_B))
 			.sort((a, b) => a.attributes.code.localeCompare(b.attributes.code))
@@ -152,29 +210,42 @@ const stages = {
 			shots.push({ id: made.data.id, code: made.data.attributes.code });
 		}
 		state.shots = shots;
+		state.moved = shots.at(-1);
+		state.seqShots = shots.slice(0, -1);
 		const schema = await fpt('GET', '/schema');
 		const slot = (display) => Object.entries(schema.data).find(([k, v]) => /^CustomEntity\d+$/.test(k) && String(v.name?.value).trim() === display)?.[0];
 		state.bidType = slot('Bid');
 		state.lineType = slot('Bid Line');
-		state.stamp = STAMP;
 		log('sandbox', state.projectId, 'shots', state.shots.length);
 	},
 
-	async bidA() {
-		await page.goto(`${APP}/bids`);
+	async newRequest() {
+		await page.goto(`${APP}/requests`);
 		await page.waitForLoadState('networkidle');
-		await page.locator('[data-slot=new-bid]').first().click();
-		await page.waitForURL(/\/bids\/new/);
-		await page.waitForLoadState('networkidle');
-		// The project: picked by name in the gate, or changed to the sandbox when another was kept.
-		if (await page.locator('[data-slot=project-gate]').count()) {
-			await pickEntity(page.locator('[data-slot=project-picker] button').first(), SANDBOX);
-		} else if (!(await page.locator('[data-slot=page-context]').innerText()).includes(SANDBOX)) {
-			await page.locator('[data-slot=change-project]').click();
-			await pickEntity(page.locator('[role=dialog] [data-slot=project-picker] button').first(), SANDBOX);
-		}
-		await page.locator('[data-slot=bid-name]').waitFor({ timeout: 30_000 });
-		await page.locator('[data-slot=bid-name]').fill(`zzsgbids Seq A ${state.stamp}`);
+		await page.waitForTimeout(1500);
+		if (await page.locator('[data-slot=requests]').count()) await screens(page, 'requests-rows');
+		else await screens(page, 'requests-empty');
+		await page.locator('[data-slot=new-request]').first().click();
+		await page.locator('[data-slot=new-request-name]').fill(NAME);
+		await pickEntity(page.locator('[data-slot=new-request-project] button').first(), SANDBOX);
+		await page.waitForTimeout(400);
+		await shoot(page, 'new-request');
+		await screens(page, 'new-request');
+		await page.locator('[data-slot=new-request-create]').click();
+		await page.waitForURL(/\/requests\/[0-9a-f-]{36}/, { timeout: 30_000 });
+		state.requestId = new URL(page.url()).pathname.split('/').pop();
+		await page.locator('[data-slot=items-panel]').waitFor({ timeout: 60_000 });
+		await page.waitForTimeout(1500);
+		await shoot(page, 'draft-empty');
+		await screens(page, 'draft-empty');
+		const [req] = await sql`select code, status, header->>'title' as title from public.bid_requests where id = ${state.requestId}`;
+		const bids = await sql`select p.name from public.request_packages p where p.request_id = ${state.requestId}`;
+		expect(req?.status === 'draft' && req.title === NAME && bids.map((b) => b.name).join() === 'Bid 1', `a draft made from the New request dialog: "${req?.title}", one bid, Bid 1, its code made from the name (${req?.code}) and shown nowhere`);
+	},
+
+	async bids() {
+		await renameBid('Bid 1', 'Seq A');
+		// Four Shots from Flow PT, into Seq A.
 		await page.locator('[data-slot=fpt-open]').click();
 		const dialog = page.locator('[data-slot=fpt-add-dialog]');
 		await dialog.waitFor();
@@ -187,172 +258,152 @@ const stages = {
 		await page.waitForTimeout(800);
 		await shoot(page, 'fpt-add-dialog');
 		await dialog.locator('[data-slot=fpt-add-submit]').click();
-		await page.waitForURL(/\/bids\/[0-9a-f-]{36}/, { timeout: 30_000 });
-		await saved();
-		state.bidA = new URL(page.url()).pathname.split('/').pop();
-		await page.waitForTimeout(1500);
-		await shoot(page, 'bid-editor-a');
-		const [row] = await sql`select name, shot_count from public.production_bids where id = ${state.bidA}`;
-		expect(row?.shot_count === state.shots.length, `bid A stored with ${row?.shot_count} Shots from Flow PT: ${row?.name}`);
-	},
-
-	async bidB() {
-		await page.goto(`${APP}/bids/new`);
-		await page.waitForLoadState('networkidle');
-		await page.locator('[data-slot=bid-name]').waitFor({ timeout: 30_000 });
-		const context = await page.locator('[data-slot=page-context]').innerText();
-		if (!context.includes(SANDBOX)) throw new Error('The new bid is not in the sandbox.');
-		await page.locator('[data-slot=bid-name]').fill(`zzsgbids Creature ${state.stamp}`);
-		// Shots from a breakdown, pasted.
-		await page.locator('[data-slot=breakdown-open]').click();
-		const dialog = page.locator('[data-slot=breakdown-dialog]');
-		await dialog.waitFor();
-		await dialog.locator('[data-slot=breakdown-paste]').fill(`Shot\tDescription\tFrames\nzzsgbids_CR010\tCreature lands\t100\nzzsgbids_CR020\tCreature roars\t80`);
-		await dialog.locator('[data-slot=breakdown-next]').click();
-		await dialog.locator('[data-slot=breakdown-add]').click();
 		await dialog.waitFor({ state: 'detached' });
-		// An asset too.
+		// Two breakdown Shots with a difficulty, into Seq A too.
+		await breakdown(`Shot\tDescription\tFrames\tDifficulty\nzzsgbids_SQ900\tRooftop wide\t60\tHard\nzzsgbids_SQ910\tRooftop close\t40\tEasy`);
+		// A second bid, Creature: a breakdown Shot and an Asset.
+		await page.locator('[data-slot=add-bid]').click();
+		const rename = page.locator('[data-slot=bid-rename]');
+		await rename.waitFor();
+		await rename.fill('Creature');
+		await rename.press('Enter');
+		await breakdown(`Shot\tDescription\tFrames\nzzsgbids_CR010\tCreature lands\t100`);
+		// No asset yet: a quiet + Assets opens the add dialog for assets; closed, the Assets tab stays.
+		await page.locator('[data-slot=add-assets]').click();
+		const fptDialog = page.locator('[data-slot=fpt-add-dialog]');
+		await fptDialog.waitFor();
+		await page.keyboard.press('Escape');
+		await fptDialog.waitFor({ state: 'detached' });
 		await page.locator('#tab-asset').click();
-		await page.locator('[data-slot=breakdown-open]').click();
-		await dialog.waitFor();
-		await dialog.locator('[data-slot=breakdown-paste]').fill(`Asset\tType\nzzsgbids_Creature\tCharacter`);
-		await dialog.locator('[data-slot=breakdown-next]').click();
-		await dialog.locator('[data-slot=breakdown-add]').click();
-		await dialog.waitFor({ state: 'detached' });
-		await page.waitForURL(/\/bids\/[0-9a-f-]{36}/, { timeout: 30_000 });
-		await saved();
-		state.bidB = new URL(page.url()).pathname.split('/').pop();
+		await breakdown(`Asset\tType\nzzsgbids_Creature\tCharacter`);
 		await page.locator('#tab-shot').click();
-		await page.waitForTimeout(1000);
-		await shoot(page, 'bid-editor-b');
-		const [row] = await sql`select name, shot_count, asset_count from public.production_bids where id = ${state.bidB}`;
-		expect(row?.shot_count === 2 && row?.asset_count === 1, `bid B stored from a breakdown: ${row?.shot_count} Shots and ${row?.asset_count} Asset`);
+		await page.waitForTimeout(800);
+		// One Flow PT Shot moves from Seq A to Creature, from the selection bar.
+		await page.locator('[data-slot=request-table] tr', { hasText: state.moved.code }).getByRole('checkbox').first().click();
+		await page.locator('[data-slot=bulk-move]').click();
+		await page.locator('[data-slot=bulk-move-to][data-bid="Creature"]').click();
+		await saved();
+		await page.waitForTimeout(800);
+		await shoot(page, 'draft-two-bids');
+		const rows = await sql`select b.name, i.kind, i.code from public.production_bid_items i join public.production_bids b on b.id = i.bid_id where i.request_id = ${state.requestId} order by b.name, i.kind desc, i.position`;
+		const of = (name) => rows.filter((r) => r.name === name).map((r) => r.code);
+		const seq = of('Seq A');
+		const creature = of('Creature');
+		expect(seq.length === 5 && creature.length === 3 && creature.includes(state.moved.code) && !seq.includes(state.moved.code), `two bids stored with their rows: Seq A holds ${seq.join(', ')}; Creature holds ${creature.join(', ')}, ${state.moved.code} moved in from Seq A`);
 	},
 
-	async clone() {
-		await page.goto(`${APP}/bids`);
-		await page.waitForLoadState('networkidle');
-		const row = page.locator(`tr[data-bid="${state.bidA}"]`);
-		await row.locator('[data-slot=row-actions]').click();
-		await page.locator('[data-slot=row-clone]').click();
-		await page.locator('[data-slot=edit-toast]').waitFor({ timeout: 20_000 });
-		await page.waitForTimeout(1500);
-		await shoot(page, 'bids-list');
-		const [copy] = await sql`select id, name, shot_count from public.production_bids where name = ${`zzsgbids Seq A ${state.stamp} copy`}`;
-		state.bidCopy = copy?.id;
-		expect(copy?.shot_count === state.shots.length, `clone made: "${copy?.name}" with ${copy?.shot_count} Shots`);
+	async vendors() {
+		const rows = page.locator('[data-slot=vendor-row]');
+		// Vendor A, typed into the empty row: every bid.
+		await rows.nth(0).locator('[data-slot=vendor-name]').fill('Vendor A (drive)');
+		await rows.nth(0).locator('[data-slot=vendor-email]').fill(`${state.groupCode[GROUP_A].toLowerCase()}@e2e.sg-bids.test`);
+		await pickEntity(rows.nth(0).locator('[data-slot=vendor-group] button').first(), state.groupCode[GROUP_A]);
+		// Vendor B, a second row: Creature alone.
+		await page.locator('[data-slot=add-vendor]').click();
+		await rows.nth(1).locator('[data-slot=vendor-name]').fill('Vendor B (drive)');
+		await rows.nth(1).locator('[data-slot=vendor-email]').fill(`${state.groupCode[GROUP_B].toLowerCase()}@e2e.sg-bids.test`);
+		await pickEntity(rows.nth(1).locator('[data-slot=vendor-group] button').first(), state.groupCode[GROUP_B]);
+		await rows.nth(1).locator('[data-slot=vendor-bids]').click();
+		await page.locator('[data-slot=vendor-bid-option][data-bid="Seq A"]').click();
+		await page.keyboard.press('Escape');
+		await saved();
+		await page.waitForTimeout(600);
+		await shoot(page, 'draft-vendors');
+		await screens(page, 'draft-two-bids');
+		const inv = await sql`select vendor_name, vendor_group_id, package_keys, link_pending from public.invitations where request_id = ${state.requestId} order by vendor_name`;
+		const creatureKey = (await sql`select key from public.request_packages where request_id = ${state.requestId} and name = 'Creature'`)[0]?.key;
+		expect(
+			inv.length === 2 && inv.every((v) => v.link_pending) && inv[0].package_keys === null && JSON.stringify(inv[1].package_keys) === JSON.stringify([creatureKey]),
+			`two vendors typed in rows: ${inv[0]?.vendor_name} on every bid, ${inv[1]?.vendor_name} on Creature alone, each with its Group, links made at the issue`
+		);
 	},
 
-	async request() {
-		await page.goto(`${APP}/bids`);
-		await page.waitForLoadState('networkidle');
-		await page.locator(`tr[data-bid="${state.bidA}"] [data-slot=bid-tick]`).click();
-		await page.locator(`tr[data-bid="${state.bidB}"] [data-slot=bid-tick]`).click();
-		await page.waitForTimeout(500);
-		await shoot(page, 'bids-selection');
-		await page.locator('[data-slot=new-request-from-bids]').click();
-		await page.waitForURL(/\/requests\/new\?.*id=[0-9a-f-]{36}/, { timeout: 30_000 });
-		await page.waitForLoadState('networkidle');
-		state.requestId = new URL(page.url()).searchParams.get('id');
-		await page.waitForTimeout(1000);
-		await shoot(page, 'send-bids');
-		await page.locator('[data-slot=step-next]').click();
-		await page.locator('#f-title').first().fill(`zzsgbids drive ${state.stamp}`);
-		await page.waitForTimeout(1500);
-		await shoot(page, 'send-details');
-		await page.locator('[data-slot=step-next]').click();
-		// Vendor A: every bid. Vendor B: the Creature bid alone.
-		for (const [name, group, only] of [
-			['Vendor A (drive)', state.groupCode[GROUP_A], null],
-			['Vendor B (drive)', state.groupCode[GROUP_B], `zzsgbids Creature ${state.stamp}`]
-		]) {
-			await page.locator('#v-name').fill(name);
-			await page.locator('#v-email').fill(`${group.toLowerCase()}@e2e.sg-bids.test`);
-			await pickEntity(page.getByRole('combobox', { name: 'No Group' }).first(), group);
-			await page.locator('#v-name').fill(name);
-			if (only) {
-				await page.locator('[data-slot=invite-packages]').click();
-				const d = page.locator('[data-slot=packages-dialog]');
-				await d.getByText('Some bids', { exact: true }).click();
-				for (const box of await d.getByRole('checkbox').all()) {
-					const label = await box.getAttribute('aria-label');
-					if ((label === only) !== ((await box.getAttribute('data-state')) === 'checked')) await box.click();
-				}
-				await d.locator('[data-slot=packages-save]').click();
-			}
-			await page.locator('[data-slot=invite-submit]').click();
-			await page.locator(`tr[data-vendor="${name}"]`).waitFor({ timeout: 20_000 });
-		}
-		await page.waitForTimeout(1000);
-		await shoot(page, 'send-vendors');
-		await page.locator('[data-slot=step-next]').click();
-		await page.locator('[data-slot=review-ready]').waitFor({ timeout: 20_000 });
-		await shoot(page, 'send-review');
+	async issue() {
+		// The due day is left blank: Issue lists it, and a press on it marks the field.
+		await page.locator('[data-slot=issue]').click();
+		const list = page.locator('[data-slot=readiness-list]');
+		await list.waitFor();
+		const items = await list.locator('[data-slot=readiness-item]').allInnerTexts();
+		await page.waitForTimeout(300);
+		await shoot(page, 'issue-missing');
+		await screens(page, 'draft-missing-list');
+		expect(items.length === 1 && /Answers due/.test(items[0]), `Issue with a field missing lists it: "${items.join(' | ')}"`);
+		await list.locator('[data-slot=readiness-item][data-target=dueDate]').click();
+		const field = page.locator('[data-field="f-dueDate"]');
+		await field.locator('[data-slot=field-problem]').waitFor();
+		const marked = await field.locator('[data-slot=field-problem]').innerText();
+		const focused = await page.evaluate(() => document.activeElement?.closest('[data-field]')?.getAttribute('data-field') ?? '');
+		expect(focused === 'f-dueDate' && /due/.test(marked), `the list took the page to Answers due and marked it: "${marked}"`);
+		// The day set, it issues.
+		const due = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+		await field.locator('[data-slot=date-editor-trigger]').click();
+		await page.locator('[data-slot=date-editor-day]').fill(due);
+		await page.locator('[data-slot=date-editor-day]').press('Enter');
+		await page.keyboard.press('Escape');
+		await saved();
+		await page.locator('[data-slot=readiness-chip]', { hasText: 'Ready to issue' }).waitFor({ timeout: 20_000 });
 		await page.locator('[data-slot=issue]').click();
 		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
-		await page.locator('[data-slot=issued-links]').waitFor({ timeout: 30_000 });
-		await page.waitForTimeout(500);
-		const values = await page.locator('[data-slot=link-value]').evaluateAll((els) => els.map((e) => e.value));
-		state.links = values;
-		await shoot(page, 'send-issued');
+		await page.locator('[data-slot=vendor-links]').waitFor({ timeout: 60_000 });
+		await page.waitForTimeout(800);
+		const links = await page.locator('[data-slot=link-value]').evaluateAll((els) => els.map((e) => e.value));
+		state.links = links;
+		await page.locator('[data-slot=copy-all]').click();
+		const copied = await page.evaluate(() => navigator.clipboard.readText());
+		const mail = await page.locator('[data-slot=email-link]').first().getAttribute('href');
+		await shoot(page, 'issued-links');
+		await screens(page, 'issued-links');
 		const [req] = await sql`select status from public.bid_requests where id = ${state.requestId}`;
-		const items = await sql`select code, package_key from public.request_items where request_id = ${state.requestId} order by position`;
-		state.issuedItems = items.map((i) => i.code);
-		expect(req.status === 'issued' && values.length === 2, `request issued with ${items.length} rows copied (${items.map((i) => i.code).join(', ')}), two links made`);
-	},
-
-	async editAfter() {
-		// Bid A changes after the issue: one row out, a note on another. The issued request does not change.
-		const before = await sql`select kind, key, code, fields, omitted from public.request_items where request_id = ${state.requestId} order by position`;
-		await page.goto(`${APP}/bids/${state.bidA}?project=${state.projectId}`);
-		await page.waitForLoadState('networkidle');
-		await page.locator('[data-slot=request-table] tbody tr').first().waitFor({ timeout: 30_000 });
-		await page.waitForTimeout(1500);
-		const last = state.shots.at(-1).code;
-		await page.locator('tr', { hasText: last }).getByRole('checkbox').first().click();
-		await page.locator('[data-slot=bulk-remove]').click();
-		await page.waitForTimeout(1200);
-		await saved();
-		await page.waitForTimeout(500);
-		await shoot(page, 'bid-a-after-issue');
-		const [bid] = await sql`select shot_count from public.production_bids where id = ${state.bidA}`;
-		const after = await sql`select kind, key, code, fields, omitted from public.request_items where request_id = ${state.requestId} order by position`;
-		expect(bid.shot_count === state.shots.length - 1, `bid A edited after the issue: ${last} taken out, it holds ${bid.shot_count} Shots now`);
-		expect(JSON.stringify(after) === JSON.stringify(before) && after.some((r) => r.code === last), `the issued request is unchanged: still ${after.length} rows, ${last} among them`);
-		const context = await page.locator('[data-slot=bid-requests]').innerText();
-		expect(context.includes('SG_') || context.length > 0, `bid A says it went out in: ${context.replace(/\s+/g, ' ').trim()}`);
+		const items2 = await sql`select code, package_key from public.request_items where request_id = ${state.requestId} order by position`;
+		const [{ n }] = await sql`select count(*)::int as n from public.production_bids where request_id = ${state.requestId}`;
+		expect(req.status === 'issued' && items2.length === 8 && n === 0, `issued: ${items2.length} rows copied into the request under their bids, the draft's bids gone`);
+		expect(links.length === 2 && links.every((l) => copied.includes(l)), 'one link per vendor on the page, shown once; Copy all put both on the clipboard, one per line');
+		expect(mail?.startsWith('mailto:') && mail.includes(encodeURIComponent(links[0])) && mail.includes('subject='), 'Email opens a mailto with the subject and the link in the body; the app sends nothing');
 	},
 
 	async vendorA() {
-		// Vendor A: declines the Creature bid, prices Seq A row by row, an overhead once.
+		// Vendor A: its rate card fills Seq A, one row overridden; Creature declined.
 		const vctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		const vp = await vctx.newPage();
 		vp.on('pageerror', (e) => log('vendor pageerror', e.message.slice(0, 200)));
 		await vp.goto(state.links[0].replace(/^https?:\/\/[^/]+/, APP));
 		await vp.waitForLoadState('networkidle');
 		await vp.locator('[data-slot=package-head]').first().waitFor({ timeout: 30_000 });
-		await vp.waitForTimeout(1000);
-		await shoot(vp, 'vendor-a-open');
+		await vp.waitForTimeout(800);
 		const creature = vp.locator('[data-slot=package-head]', { hasText: 'Creature' });
 		await creature.getByRole('radio', { name: 'Not bidding' }).click();
-		await vp.waitForTimeout(500);
-		const prices = vp.locator('input[data-price]');
-		const n = await prices.count();
-		for (let i = 0; i < n; i++) await prices.nth(i).fill(String(1000 + i * 250));
+		await vp.waitForTimeout(400);
+		// A rate for every difficulty the card offers: Hard 2,500, Easy 800, any other 1,500, none 1,000.
+		const RATES = { '': 1000, Hard: 2500, Easy: 800 };
+		const offered = await vp.locator('[data-slot=rate-input]').evaluateAll((els) => els.map((e) => e.getAttribute('data-difficulty') ?? ''));
+		for (const d of offered) await vp.locator(`[data-slot=rate-input][data-difficulty="${d}"]`).fill(String(RATES[d] ?? 1500));
+		const first = state.seqShots[0].code;
+		await vp.locator('[data-row]', { hasText: first }).locator('input[data-price]').fill('1200');
 		await vp.waitForTimeout(800);
 		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
-		await shoot(vp, 'vendor-a-priced');
+		const useRate = await vp.locator('[data-row]', { hasText: first }).locator('[data-slot=line-use-rate]').count();
+		const fromRate = await vp.locator('[data-slot=line-from-rate]').count();
+		await shoot(vp, 'vendor-a-rates');
+		await screens(vp, 'vendor-rate-card');
 		await vp.getByRole('button', { name: 'Review and submit' }).first().click();
 		await vp.getByRole('button', { name: 'Submit answer' }).click();
 		await vp.getByText('Submitted.').first().waitFor({ timeout: 20_000 });
 		await shoot(vp, 'vendor-a-submitted');
 		await vctx.close();
-		const [b] = await sql`select b.header->'declined' as declined, (select count(*)::int from public.bid_lines l where l.bid_id = b.id) as lines, (select sum(total_minor)::bigint from public.bid_lines l where l.bid_id = b.id) as total from public.bids b join public.invitations i on i.id = b.invitation_id where i.request_id = ${state.requestId} and i.vendor_name = 'Vendor A (drive)' and b.status = 'submitted'`;
-		expect(b && b.lines === n && JSON.stringify(b.declined).includes('bid:'), `Vendor A submitted: ${n} rows priced row by row (sum ${Number(b?.total) / 100} USD), the Creature bid declined`);
+		const [b] = await sql`select b.id, b.header->'declined' as declined, b.header->'rateCard' as card from public.bids b join public.invitations i on i.id = b.invitation_id where i.request_id = ${state.requestId} and i.vendor_name = 'Vendor A (drive)' and b.status = 'submitted'`;
+		const lines = await sql`select l.total_minor, l.detail->>'fromRate' as from_rate, i.code, i.fields->>'difficulty' as difficulty from public.bid_lines l join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.bid_id = ${b.id}`;
+		const total = lines.reduce((n, l) => n + Number(l.total_minor), 0);
+		const want = lines.reduce((n, l) => n + (l.code === first ? 120_000 : (RATES[l.difficulty ?? ''] ?? 1500) * 100), 0);
+		state.totalA = total;
+		expect(useRate === 1 && fromRate === 4, 'the vendor form marks 4 rows as from its rates and the typed row as its own, with Use rate');
+		expect(
+			lines.length === 5 && total === want && lines.filter((l) => l.from_rate === 'true').length === 4 && lines.find((l) => l.code === first)?.from_rate === null && b.card && JSON.stringify(b.declined).includes('bid:'),
+			`Vendor A submitted Seq A from its rate card (${offered.map((d) => `${d || 'no difficulty'} ${RATES[d] ?? 1500}`).join(', ')}), ${first} overridden at 1,200: 5 lines summing to ${total / 100} USD, 4 from the rates, the card kept with the answer; Creature declined`
+		);
 	},
 
 	async vendorB() {
-		// Vendor B: invited to the Creature bid alone, prices it as one figure, in GBP.
+		// Vendor B: invited to Creature alone, prices it as one figure, in GBP.
 		const vctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		const vp = await vctx.newPage();
 		vp.on('pageerror', (e) => log('vendor pageerror', e.message.slice(0, 200)));
@@ -360,12 +411,11 @@ const stages = {
 		await vp.waitForLoadState('networkidle');
 		await vp.locator('[data-slot=package-head]').first().waitFor({ timeout: 30_000 });
 		const heads = await vp.locator('[data-slot=package-head]').count();
-		const seen = await vp.locator('[data-slot=vendor-scroll]').innerText();
-		expect(heads === 1 && !seen.includes('demo_01_roto'), 'Vendor B sees the Creature bid alone: no row of Seq A');
+		const seen = await vp.locator('[data-slot=item-grid]').innerText();
+		expect(heads === 1 && !seen.includes(state.seqShots[0].code), 'Vendor B sees Creature alone: no row of Seq A');
 		await vp.getByLabel('Your currency').selectOption('GBP');
 		await vp.waitForTimeout(500);
-		const head = vp.locator('[data-slot=package-head]').first();
-		await head.getByRole('radio', { name: 'One figure' }).click();
+		await vp.locator('[data-slot=package-head]').first().getByRole('radio', { name: 'One figure' }).click();
 		await vp.waitForTimeout(500);
 		await vp.locator('input[data-package-price]').fill('4200');
 		await vp.waitForTimeout(800);
@@ -376,7 +426,7 @@ const stages = {
 		await vp.getByText('Submitted.').first().waitFor({ timeout: 20_000 });
 		await vctx.close();
 		const [b] = await sql`select b.currency, b.packages from public.bids b join public.invitations i on i.id = b.invitation_id where i.request_id = ${state.requestId} and i.vendor_name = 'Vendor B (drive)' and b.status = 'submitted'`;
-		expect(b?.currency === 'GBP' && b.packages?.[0]?.total?.minor === 420000, `Vendor B submitted the Creature bid as one figure: ${b?.packages?.[0]?.total?.minor / 100} ${b?.currency}`);
+		expect(b?.currency === 'GBP' && b.packages?.[0]?.total?.minor === 420000, `Vendor B submitted Creature as one figure: ${b?.packages?.[0]?.total?.minor / 100} ${b?.currency}`);
 	},
 
 	async compare() {
@@ -384,16 +434,15 @@ const stages = {
 		await page.waitForLoadState('networkidle');
 		await page.locator('[data-slot=rate]').first().waitFor({ timeout: 30_000 });
 		await page.waitForTimeout(1500);
-		await shoot(page, 'compare-open');
 		await page.locator('[data-slot=rate]').first().click();
 		await page.getByPlaceholder('1.2712').fill('1.27');
 		const day = page.locator('input[type=date]').first();
 		if ((await day.count()) && (await day.inputValue()) === '') await day.fill(new Date().toISOString().slice(0, 10));
 		await page.getByRole('button', { name: 'Set the rate' }).click();
 		await page.waitForTimeout(2000);
-		// Seq A's rows to A, one by one; the Creature bid to B, whole, from one of its rows.
-		for (const s of state.shots) {
-			await page.getByRole('gridcell', { name: new RegExp(`^${esc(s.code)}, Vendor A \\(drive\\):`) }).click();
+		// Seq A's rows to A, one by one; Creature to B, whole, from one of its rows.
+		for (const code of [...state.seqShots.map((s) => s.code), 'zzsgbids_SQ900', 'zzsgbids_SQ910']) {
+			await page.getByRole('gridcell', { name: new RegExp(`^${esc(code)}, Vendor A \\(drive\\):`) }).click();
 			await page.waitForTimeout(700);
 		}
 		await page.getByRole('gridcell', { name: /^zzsgbids_CR010, Vendor B \(drive\):/ }).click();
@@ -401,8 +450,9 @@ const stages = {
 		await page.getByRole('button', { name: 'Mark as the chosen scenario' }).click();
 		await page.waitForTimeout(1500);
 		await shoot(page, 'compare-scenario');
+		await screens(page, 'comparison');
 		const [sc] = await sql`select s.id, (select count(*)::int from public.award_scenario_items i where i.scenario_id = s.id) as picks from public.award_scenarios s where s.request_id = ${state.requestId} and s.chosen`;
-		expect(sc?.picks === state.shots.length + 3, `scenario chosen: ${sc?.picks} rows picked, Seq A to Vendor A, the Creature bid whole to Vendor B, B's rate 1.27 GBP to USD`);
+		expect(sc?.picks === 8, `scenario chosen: ${sc?.picks} rows picked, Seq A to Vendor A, Creature whole to Vendor B, B's rate 1.27 GBP to USD`);
 	},
 
 	async publish() {
@@ -430,25 +480,24 @@ const stages = {
 		const prefix = `sgbids/${state.requestId}/`;
 		const bids = await search(state.bidType, [['sg_sgbids_key', 'starts_with', prefix]], ['code', 'sg_vendor', 'sg_total', 'sg_currency', 'sg_total_base', 'sg_exchange_rate', 'sg_status_list', 'sg_sgbids_key']);
 		const lines = await search(state.lineType, [['sg_sgbids_key', 'starts_with', prefix]], ['code', 'sg_item', 'sg_amount', 'sg_currency', 'sg_amount_base', 'sg_bid', 'sg_sgbids_key']);
-		state.fptBids = bids.map((b) => b.id);
 		const minor = (v) => Math.round(Number(v ?? 0) * 100);
 		const line = (b) => `${b.attributes.code}: ${b.attributes.sg_total} ${b.attributes.sg_currency} (base ${b.attributes.sg_total_base} USD)`;
-		expect(bids.length === 2, `Flow PT holds 2 Bids: ${bids.map(line).join('; ')}`);
+		expect(bids.length === 2 && bids.every((b) => b.attributes.code.startsWith(NAME)), `Flow PT holds 2 Bids, named after the request: ${bids.map(line).join('; ')}`);
 		const byBid = new Map(bids.map((b) => [b.id, lines.filter((l) => l.relationships.sg_bid?.data?.id === b.id)]));
 		for (const b of bids) {
 			const ls = byBid.get(b.id);
 			const sum = ls.reduce((n, l) => n + minor(l.attributes.sg_amount), 0);
 			const figure = ls.every((l) => l.attributes.sg_amount === null);
 			expect(
-				figure ? ls.length === 3 && minor(b.attributes.sg_total) === 420000 : sum === minor(b.attributes.sg_total),
+				figure ? ls.length === 3 && minor(b.attributes.sg_total) === 420000 : ls.length === 5 && sum === minor(b.attributes.sg_total) && sum === state.totalA,
 				figure
 					? `${b.attributes.code}: one figure ${b.attributes.sg_total} ${b.attributes.sg_currency} on the Bid, ${ls.length} Bid Lines with no amount`
-					: `${b.attributes.code}: ${ls.length} Bid Lines summing to ${sum / 100}, the Bid's total ${b.attributes.sg_total}`
+					: `${b.attributes.code}: ${ls.length} Bid Lines summing to ${sum / 100}, the Bid's total ${b.attributes.sg_total}, rate card and override as typed`
 			);
 		}
 		const groups = {};
 		for (const r of await search('Shot', [['id', 'in', state.shots.map((s) => s.id)]], ['sg_vendor_groups'])) groups[r.id] = (r.relationships.sg_vendor_groups?.data ?? []).map((g) => g.id);
-		expect(state.shots.every((s) => groups[s.id]?.includes(GROUP_A)), `Vendor A's Group on the ${state.shots.length} Seq A Shots`);
+		expect(state.seqShots.every((s) => groups[s.id]?.includes(GROUP_A)) && groups[state.moved.id]?.includes(GROUP_B), `Vendor A's Group on the ${state.seqShots.length} Seq A Shots, Vendor B's on ${state.moved.code} in Creature`);
 	},
 
 	async undo() {
@@ -464,45 +513,46 @@ const stages = {
 		const groups = {};
 		for (const r of await search('Shot', [['id', 'in', state.shots.map((s) => s.id)]], ['sg_vendor_groups'])) groups[r.id] = (r.relationships.sg_vendor_groups?.data ?? []).map((g) => g.id);
 		expect(bids.length === 0 && lines.length === 0, 'after Undo award Flow PT holds no Bid and no Bid Line of the request');
-		expect(state.shots.every((s) => !(groups[s.id] ?? []).includes(GROUP_A)), "Vendor A's Group is off every Seq A Shot again, as before");
+		expect(state.shots.every((s) => !(groups[s.id] ?? []).some((g) => g === GROUP_A || g === GROUP_B)), 'the vendor Groups are off every Shot again, as before');
 		const [row] = await sql`select status from public.bid_requests where id = ${state.requestId}`;
 		expect(row.status === 'issued', 'the request is issued again');
 	},
 
-	async again() {
-		// Bid B goes out again, in a second request, from its own page.
-		await page.goto(`${APP}/bids/${state.bidB}?project=${state.projectId}`);
+	async duplicate() {
+		await page.goto(`${APP}/requests`);
 		await page.waitForLoadState('networkidle');
-		await page.locator('[data-slot=send-bid]').click();
-		await page.waitForURL(/\/requests\/new\?.*id=[0-9a-f-]{36}/, { timeout: 30_000 });
-		state.secondId = new URL(page.url()).searchParams.get('id');
-		await page.locator('[data-slot=step-next]').click();
-		await page.locator('#f-title').first().fill(`zzsgbids second ${state.stamp}`);
-		await page.waitForTimeout(1200);
-		await page.locator('[data-slot=step-next]').click();
-		await page.locator('#v-name').fill('Vendor C (drive)');
-		await page.locator('#v-email').fill('qa_ch_vendor_c@e2e.sg-bids.test');
-		await page.locator('[data-slot=invite-submit]').click();
-		await page.locator('tr[data-vendor="Vendor C (drive)"]').waitFor({ timeout: 20_000 });
-		await page.locator('[data-slot=step-next]').click();
-		await page.locator('[data-slot=review-ready]').waitFor({ timeout: 20_000 });
-		await page.locator('[data-slot=issue]').click();
-		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
-		await page.locator('[data-slot=issued-links]').waitFor({ timeout: 30_000 });
-		await page.goto(`${APP}/bids/${state.bidB}?project=${state.projectId}`);
-		await page.waitForLoadState('networkidle');
-		await page.locator('[data-slot=bid-requests]').waitFor({ timeout: 30_000 });
-		const text = (await page.locator('[data-slot=bid-requests]').innerText()).replace(/\s+/g, ' ').trim();
-		await shoot(page, 'bid-b-two-requests');
-		const rows = await sql`select r.code, r.status from public.request_packages p join public.bid_requests r on r.id = p.request_id where p.bid_id = ${state.bidB} order by r.created_at`;
-		expect(rows.length === 2 && rows.every((r) => r.status === 'issued'), `bid B went out again: ${text}`);
+		const row = page.locator('[data-slot=requests] tr', { hasText: NAME }).first();
+		await row.waitFor({ timeout: 30_000 });
+		await page.waitForTimeout(800);
+		await screens(page, 'requests-rows');
+		await row.locator('[data-slot=row-actions]').click();
+		await page.locator('[data-slot=row-duplicate]').click();
+		const dialog = page.locator('[data-slot=duplicate-request]');
+		await dialog.waitFor();
+		const name = await dialog.locator('[data-slot=duplicate-name]').inputValue();
+		await dialog.locator('[data-slot=duplicate-without-rows]').check();
+		await shoot(page, 'duplicate-dialog');
+		await dialog.locator('[data-slot=duplicate-now]').click();
+		await page.waitForURL((url) => /\/requests\/[0-9a-f-]{36}/.test(url.pathname) && !url.pathname.includes(state.requestId), { timeout: 30_000 });
+		state.copyId = new URL(page.url()).pathname.split('/').pop();
+		await page.locator('[data-slot=items-panel]').waitFor({ timeout: 60_000 });
+		await page.waitForTimeout(1000);
+		await shoot(page, 'duplicate-draft');
+		const [copy] = await sql`select status, header->>'title' as title, due_on from public.bid_requests where id = ${state.copyId}`;
+		const bids = await sql`select name from public.request_packages where request_id = ${state.copyId} order by position`;
+		const [{ rows }] = await sql`select count(*)::int as rows from public.production_bid_items where request_id = ${state.copyId}`;
+		const inv = await sql`select vendor_name, link_pending from public.invitations where request_id = ${state.copyId} order by vendor_name`;
+		expect(
+			name === `${NAME} copy` && copy?.status === 'draft' && copy.title === name && bids.map((b) => b.name).join() === 'Seq A,Creature' && rows === 0 && inv.length === 2 && inv.every((v) => v.link_pending) && copy.due_on !== null,
+			`duplicated without the rows: "${copy?.title}", a draft with its details, bids ${bids.map((b) => b.name).join(' and ')} empty, and ${inv.length} vendors whose links come at its issue`
+		);
 	}
 };
 
 async function cleanUp() {
-	// Flow PT: anything of the drive's requests left behind. The Shots keep their groups as before.
-	for (const id of [state.requestId, state.secondId].filter(Boolean)) {
-		const prefix = `sgbids/${id}/`;
+	// Flow PT: anything of the drive's request left behind. The Shots keep their groups as before.
+	if (state.requestId && state.bidType) {
+		const prefix = `sgbids/${state.requestId}/`;
 		const bids = await search(state.bidType, [['sg_sgbids_key', 'starts_with', prefix]], ['code']);
 		const lines = await search(state.lineType, [['sg_sgbids_key', 'starts_with', prefix]], ['code']);
 		if (bids.length + lines.length > 0) {
@@ -515,35 +565,33 @@ async function cleanUp() {
 	const madeAssets = await search('Asset', [['project', 'is', { type: 'Project', id: state.projectId }], ['code', 'starts_with', 'zzsgbids']], ['code']);
 	for (const r of made) await fpt('DELETE', `/entity/shots/${r.id}`);
 	for (const r of madeAssets) await fpt('DELETE', `/entity/assets/${r.id}`);
-	// The database: the drive's requests and bids, by name, through the app's own deletes; frozen rows
-	// left by a failure part way go with the triggers off for one transaction.
-	const requests = await sql`select id, code from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids % ${STAMP}`}`;
+	// The database: the drive's requests, by name, through the app's own delete; frozen rows left by
+	// a failure part way go with the triggers off for one transaction.
+	const requests = await sql`select id from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids drive ${STAMP}%`}`;
 	for (const r of requests) {
 		await sql`select public.sg_delete_request(${r.id}, site_host, project_id) from public.bid_requests where id = ${r.id}`.catch(() =>
 			sql.begin(async (tx) => {
 				await tx`set local session_replication_role = replica`;
-				for (const table of ['bid_rates', 'awards', 'award_publications', 'award_scenario_items', 'award_scenarios', 'bid_lines', 'bids', 'invitations', 'request_items', 'request_packages']) {
+				for (const table of ['bid_rates', 'awards', 'award_publications', 'award_scenario_items', 'award_scenarios', 'bid_lines', 'bids', 'invitations', 'request_items', 'request_packages', 'production_bid_items', 'production_bids']) {
 					await tx`delete from ${tx('public.' + table)} where request_id = ${r.id}`;
 				}
 				await tx`delete from public.bid_requests where id = ${r.id}`;
 			})
 		);
 	}
-	const bids = await sql`select id from public.production_bids where project_id = ${state.projectId} and name like ${`zzsgbids % ${STAMP}%`}`;
-	for (const b of bids) await sql`select public.sg_delete_production_bid(${b.id}, site_host, project_id) from public.production_bids where id = ${b.id}`;
-	const [left] = await sql`select (select count(*) from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids % ${STAMP}`}) + (select count(*) from public.production_bids where project_id = ${state.projectId} and name like ${`zzsgbids % ${STAMP}%`}) as n`;
-	const fptLeft = (await search(state.bidType, [['sg_sgbids_key', 'starts_with', `sgbids/${state.requestId}/`]], ['code'])).length;
-	expect(Number(left.n) === 0 && fptLeft === 0 && made.length + madeAssets.length >= 0, `clean: ${requests.length} requests and ${bids.length} bids deleted in the drive's database, ${made.length + madeAssets.length} zzsgbids rows deleted in Flow PT, no Bid of the drive left in Flow PT`);
+	const [left] = await sql`select (select count(*) from public.bid_requests where project_id = ${state.projectId} and header->>'title' like ${`zzsgbids drive ${STAMP}%`}) + (select count(*) from public.production_bids where project_id = ${state.projectId} and request_id is null) as n`;
+	const fptLeft = state.requestId && state.bidType ? (await search(state.bidType, [['sg_sgbids_key', 'starts_with', `sgbids/${state.requestId}/`]], ['code'])).length : 0;
+	expect(Number(left.n) === 0 && fptLeft === 0, `clean: ${requests.length} requests deleted in the drive's database, ${made.length + madeAssets.length} zzsgbids rows deleted in Flow PT, no Bid of the drive left in Flow PT`);
 }
 
 let failed = null;
 try {
 	app = await startApp();
 	browser = await chromium.launch();
-	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 	page = await ctx.newPage();
 	page.on('pageerror', (e) => log('page error:', e.message.slice(0, 200)));
-	for (const name of ['pre', 'bidA', 'bidB', 'clone', 'request', 'editAfter', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'again']) {
+	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate']) {
 		log('stage', name);
 		await stages[name]();
 	}
@@ -553,7 +601,7 @@ try {
 	console.error('[e2e] FAILED:', error.message);
 } finally {
 	try {
-		await cleanUp();
+		if (!env.E2E_KEEP) await cleanUp();
 	} catch (error) {
 		console.error('[e2e] clean-up failed:', error.message);
 		failed ??= error;

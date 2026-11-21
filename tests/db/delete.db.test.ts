@@ -80,7 +80,7 @@ describe('sg_delete_request', () => {
 		expect(before).toMatchObject({ bid_requests: 1, request_items: 3, invitations: 2, bids: 3, bid_lines: 9, award_scenarios: 1, award_scenario_items: 1, bid_rates: 1 });
 
 		const deleted = await s.deleteRequest(production, request.id, 'BR-1');
-		expect(deleted).toEqual({ code: 'BR-1', round: 1, status: 'issued', items: 3, invitations: 2, bids: 2, drafts: 1, lines: 9, scenarios: 1, rates: 1 });
+		expect(deleted).toEqual({ code: 'BR-1', title: null, round: 1, status: 'issued', items: 3, invitations: 2, bids: 2, drafts: 1, lines: 9, scenarios: 1, rates: 1 });
 		expect(Object.values(await counts(request.id)).every((n) => n === 0)).toBe(true);
 
 		// The links are kept as hashes alone, so a dead link can say the request was withdrawn.
@@ -226,7 +226,7 @@ describe('the delete endpoints', () => {
 
 		// Another tenant, verified: the body names this request and this tenant, and reaches nothing.
 		holder.verified = { ...tenant(), user: { type: 'HumanUser', id: 1 }, role: 'admin' };
-		const smuggled = { claim, id: request.id, code: 'BR-1', siteHost: production.siteHost, projectId: production.projectId };
+		const smuggled = { claim, id: request.id, name: 'BR-1', siteHost: production.siteHost, projectId: production.projectId };
 		expect((await post(checkRoute, 'delete-check', smuggled)).status).toBe(404);
 		expect((await post(deleteRoute, 'delete', smuggled)).status).toBe(404);
 		expect((await counts(request.id)).bid_requests).toBe(1);
@@ -250,8 +250,8 @@ describe('the delete endpoints', () => {
 			award: null
 		});
 		expect((await post(deleteRoute, 'delete', { claim, id: request.id })).status).toBe(422);
-		expect((await post(deleteRoute, 'delete', { claim, id: 'nope', code: 'BR-1' })).status).toBe(422);
-		const done = await post(deleteRoute, 'delete', { claim, id: request.id, code: 'BR-1' });
+		expect((await post(deleteRoute, 'delete', { claim, id: 'nope', name: 'BR-1' })).status).toBe(422);
+		const done = await post(deleteRoute, 'delete', { claim, id: request.id, name: 'BR-1' });
 		expect(done.status).toBe(200);
 		expect(done.json.deleted).toMatchObject({ code: 'BR-1', invitations: 2, bids: 2 });
 		expect(Object.values(await counts(request.id)).every((n) => n === 0)).toBe(true);
@@ -261,7 +261,7 @@ describe('the delete endpoints', () => {
 	it('refuse a session the check refuses', async () => {
 		const { StoreError } = await import('$lib/server/errors');
 		holder.verified = new StoreError(403, 'Your Flow PT permission group cannot run bids. Ask your Flow PT admin.');
-		const answer = await post(deleteRoute, 'delete', { claim: {}, id: '00000000-0000-4000-8000-000000000000', code: 'X' });
+		const answer = await post(deleteRoute, 'delete', { claim: {}, id: '00000000-0000-4000-8000-000000000000', name: 'X' });
 		expect(answer.status).toBe(403);
 	});
 });

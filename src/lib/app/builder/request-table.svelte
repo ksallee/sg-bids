@@ -1,20 +1,21 @@
 <!--
-	The Shots or Assets of a bid, in the registry's EntityTable over a list source of the bid's own
-	rows: dense, full width, the rest of the height. A column a Flow PT field feeds is live and says
+	The Shots or Assets of the request, in the registry's EntityTable over a list source of the
+	request's own rows, grouped by bid: one table, a header per bid with its counts, in the bids'
+	order. Dense, full width, the rest of the height. A column a Flow PT field feeds is live and says
 	so in its header: on a row picked from Flow PT, an edit there writes the field as the signed in
 	person and shows the value read back. Every other column, and every cell of a breakdown row, is in
-	this bid only. A cell that cannot be edited says why on hover.
+	this request only. A cell that cannot be edited says why on hover.
 
 	Select rows (a press, Shift for a range) and edit one cell: the value goes to that column in every
 	selected row, after a confirm that says what changes where. The bar over the table omits,
-	includes, takes the selected rows out, or moves or copies them to another bid. Every edit offers
-	Undo; a write Flow PT refused, or one
-	that answered and changed nothing (028), is listed with Retry. Rules in `$lib/pure/live-columns`,
-	`$lib/pure/row-edit` and `$lib/pure/edit-words`.
+	includes, moves the selected rows to another bid, or takes them out. Every edit offers Undo; a
+	write Flow PT refused, or one that answered and changed nothing (028), is listed with Retry. Rules
+	in `$lib/pure/live-columns`, `$lib/pure/row-edit` and `$lib/pure/edit-words`.
 
 	Each code carries where its row comes from, in the columns' marks: live from Flow PT, or from a
-	breakdown and in this bid only. A source filter shows when the bid holds both
-	(`$lib/pure/row-source`).
+	breakdown and in this request only. A source filter shows when the request holds both
+	(`$lib/pure/row-source`). A bid with no row of this kind says so under the table, with a way to
+	add some.
 -->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
@@ -25,10 +26,12 @@
 	import type { CollectionColumn, EntityRef, EntityRow, FieldSchema } from 'sg-widgets-core';
 	import Notice from '$lib/app/notice.svelte';
 	import EditToast, { type Toast } from './edit-toast.svelte';
-	import EntityTable, { type EntityTableCellContext } from '$lib/components/entity-table.svelte';
+	import EntityTable, { type EntityTableCellContext, type EntityTableGroupContext } from '$lib/components/entity-table.svelte';
 	import FieldValue from '$lib/components/field-value.svelte';
 	import { createListSource, type BulkEdit, type RowUpdate, type RowWriteResult } from '$lib/components/core-next';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { liveContext } from '$lib/live';
@@ -39,7 +42,7 @@
 	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
 	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
 	import Segmented from '$lib/app/segmented.svelte';
-	import type { RequestAsset, RequestShot, Target } from '$lib/pure/model';
+	import type { Id, RequestAsset, RequestShot, Target } from '$lib/pure/model';
 	import type { Builder, EditOutcome } from '$lib/app/builder.svelte';
 
 	let {
@@ -48,18 +51,16 @@
 		fresh = new Set(),
 		onAdd,
 		onBreakdown,
-		onFields,
-		onSendRows
+		onFields
 	}: {
 		builder: Builder;
 		kind: ItemKind;
 		/** Rows just added from Flow PT: marked, and the first scrolled into view. */
 		fresh?: ReadonlySet<string>;
-		onAdd: () => void;
-		onBreakdown: () => void;
+		/** Add rows from Flow PT, to the bid named or the one picked. */
+		onAdd: (bid?: Id) => void;
+		onBreakdown: (bid?: Id) => void;
 		onFields: () => void;
-		/** Move or copy the selected rows to another bid. Absent: the bid is not stored yet. */
-		onSendRows?: (rows: Target[], move: boolean) => void;
 	} = $props();
 
 	type Item = RequestShot | RequestAsset;
@@ -94,8 +95,14 @@
 	const pathOf = (key: ColumnKey): string => `c_${key}`;
 	const keyOf = (path: string): ColumnKey => path.slice(2) as ColumnKey;
 
+	/** The bid column: the table groups on it. Its value sorts in the bids' order; the cell shows the name. */
+	const BID = '__bid';
+	const bidOrder = $derived(new Map(builder.bids.map((b, i) => [b.key, i])));
+	const bidValue = (key: Id | undefined) => `${String(bidOrder.get(key ?? '') ?? 9999).padStart(4, '0')}|${key ?? ''}`;
+	const bidOfValue = (value: unknown) => String(value ?? '').split('|').slice(1).join('|');
+
 	function rowOf(item: Item): EntityRow {
-		const attributes: Record<string, unknown> = { __item: item.id };
+		const attributes: Record<string, unknown> = { __item: item.id, [BID]: bidValue(item.package) };
 		for (const column of requestColumns) attributes[pathOf(column.key)] = itemValue(item, column.key);
 		return { ...refOf(item), attributes, relationships: {} };
 	}
@@ -134,22 +141,24 @@
 		return { name: column.key, displayName: column.label, entityType: '', dataType: 'list', editable: true, mandatory: false, unique: false, validValues: [...(column.validValues ?? [])] };
 	}
 
-	const columns = $derived<CollectionColumn[]>(
-		requestColumns.map((column) => ({
+	const columns = $derived<CollectionColumn[]>([
+		{ path: BID, header: 'Bid', dataType: 'text', editable: false, align: 'left' as const, sortable: false, field: null, width: 110 },
+		...requestColumns.map((column) => ({
 			path: pathOf(column.key),
 			header: column.label,
 			dataType: column.dataType,
 			editable: true,
-			align: column.dataType === 'number' ? 'right' : 'left',
+			align: (column.dataType === 'number' ? 'right' : 'left') as 'right' | 'left',
 			sortable: column.key !== 'omitted',
 			field: fieldOf(column),
 			width: column.width,
 			// A description takes the room a popover has; every other cell edits in place, so Tab moves on.
-			editorPlacement: column.key === 'description' ? 'popover' : 'inline'
+			editorPlacement: (column.key === 'description' ? 'popover' : 'inline') as 'popover' | 'inline'
 		}))
-	);
+	]);
 
 	function editLock(row: EntityRow, column: CollectionColumn): string | null {
+		if (column.path === BID) return 'Move a row to another bid: select it, then Move to.';
 		const item = byItem.get(String(row.attributes.__item));
 		const request = requestColumns.find((c) => c.key === keyOf(column.path));
 		if (!item || !request) return null;
@@ -211,9 +220,9 @@
 		const reasons = new Map(outcome.failures.map((f) => [f.itemId, f.reason]));
 		return updates.map((u): RowWriteResult => {
 			const item = itemOfRef(u.ref);
-			const reason = item ? reasons.get(item.id) : 'This row is no longer in the bid.';
+			const reason = item ? reasons.get(item.id) : 'This row is no longer in the request.';
 			const now = item ? builder.itemsOf(kind).find((i) => i.id === item.id) : undefined;
-			if (reason !== undefined || !now) return { ref: u.ref, ok: false, message: reason ?? 'This row is no longer in the bid.' };
+			if (reason !== undefined || !now) return { ref: u.ref, ok: false, message: reason ?? 'This row is no longer in the request.' };
 			return { ref: u.ref, ok: true, row: rowOf(now) };
 		});
 	}
@@ -267,13 +276,36 @@
 		failed = null;
 		toast = {
 			id: ++toastId,
-			line: removed.length === 1 ? `${builder.codeOf(kind, removed[0].item.id) || removed[0].item.id} is out of the bid.` : `${removed.length} rows are out of the bid.`,
+			line: removed.length === 1 ? `${builder.codeOf(kind, removed[0].item.id) || removed[0].item.id} is out of the request.` : `${removed.length} rows are out of the request.`,
 			undo: async () => {
 				builder.restore(kind, removed);
-				return removed.length === 1 ? 'It is back in the bid.' : 'They are back in the bid.';
+				return removed.length === 1 ? 'It is back in its bid.' : 'They are back in their bids.';
 			}
 		};
 	}
+
+	/** The selected rows to another bid, with Undo. */
+	function moveTo(bid: Id): void {
+		const moved = selectedItems.filter((i) => i.package !== bid).map((i) => ({ target: { kind, id: i.id } as Target, from: i.package }));
+		if (moved.length === 0) return;
+		builder.moveRows(
+			moved.map((m) => m.target),
+			bid
+		);
+		selection = [];
+		const name = builder.bidName(bid);
+		toast = {
+			id: ++toastId,
+			line: moved.length === 1 ? `${builder.codeOf(kind, moved[0].target.id)} is in ${name} now.` : `${moved.length} rows are in ${name} now.`,
+			undo: async () => {
+				for (const m of moved) if (m.from) builder.moveRows([m.target], m.from);
+				return moved.length === 1 ? 'It is back in its bid.' : 'They are back in their bids.';
+			}
+		};
+	}
+
+	/** The bids with no row of this kind, under the table. */
+	const emptyBids = $derived(builder.bids.filter((b) => !allItems.some((i) => i.package === b.key)));
 
 	const goneCount = $derived(allItems.filter((item) => builder.gone.has(item.id)).length);
 
@@ -294,8 +326,8 @@
 
 	const SOURCE_WORDS = $derived<Record<RowSource, { label: string; title: string }>>({
 		fpt: { label: 'From Flow PT', title: `From Flow PT. A change in a live column changes the ${type} in Flow PT.` },
-		breakdown: { label: 'From a breakdown', title: 'From a breakdown. Its cells are in this bid only.' },
-		linked: { label: 'From a breakdown, linked to Flow PT', title: `From a breakdown, linked to its ${type} in Flow PT. Its cells are in this bid only.` }
+		breakdown: { label: 'From a breakdown', title: 'From a breakdown. Its cells are in this request only.' },
+		linked: { label: 'From a breakdown, linked to Flow PT', title: `From a breakdown, linked to its ${type} in Flow PT. Its cells are in this request only.` }
 	});
 </script>
 
@@ -306,7 +338,7 @@
 			<Radio class="size-3.5" aria-hidden="true" />
 		</span>
 	{:else}
-		<span class="text-muted-foreground/70 flex shrink-0 items-center pr-2" role="img" aria-label="In this bid only" title="In this bid only. Flow PT is not changed.">
+		<span class="text-muted-foreground/70 flex shrink-0 items-center pr-2" role="img" aria-label="In this request only" title="In this request only. Flow PT is not changed.">
 			<FileText class="size-3.5" aria-hidden="true" />
 		</span>
 	{/if}
@@ -323,9 +355,21 @@
 	</span>
 {/snippet}
 
+{#snippet groupHeader({ value, count }: EntityTableGroupContext)}
+	{@const key = bidOfValue(value)}
+	{@const s = builder.stats.get(key)}
+	<span class="truncate font-semibold" data-slot="bid-group">{builder.bidName(key) || 'No bid'}</span>
+	<span class="text-muted-foreground text-xs font-normal tabular-nums">
+		{count}
+		{count === 1 ? noun : `${noun}s`}{#if kind === 'shot' && s && s.frames > 0}{' '}· {s.frames.toLocaleString()} frames{/if}
+	</span>
+{/snippet}
+
 {#snippet cell({ row, column, value }: EntityTableCellContext)}
 	{@const item = byItem.get(String(row.attributes.__item))}
-	{#if column.path === pathOf('code') && item}
+	{#if column.path === BID}
+		<span class="text-muted-foreground block truncate text-xs">{builder.bidName(bidOfValue(value))}</span>
+	{:else if column.path === pathOf('code') && item}
 		<span class="flex min-w-0 items-center gap-2">
 			{@render sourceMark(rowSource(item))}
 			<span class={cn('truncate font-mono text-xs font-medium', item.omitted && 'text-muted-foreground line-through')} title={String(value ?? '')}>{value}</span>
@@ -345,14 +389,15 @@
 
 {#if allItems.length === 0}
 	<div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center" data-slot="picked-empty">
-		<p class="text-base font-semibold tracking-tight">No {noun}s in the bid yet</p>
+		<p class="text-base font-semibold tracking-tight">No {noun}s in {builder.bids.length === 1 ? builder.bidName(builder.current) : 'the request'} yet</p>
 		<p class="text-muted-foreground max-w-md text-sm text-balance">
 			Add them from Flow PT, or from a breakdown when they are not in Flow PT yet. A {noun} from Flow PT shows its live values, and a change to them changes Flow PT.
 		</p>
 		<div class="flex flex-wrap justify-center gap-2">
-			<Button onclick={onAdd}>Add {noun}s from Flow PT</Button>
-			<Button variant="outline" onclick={onBreakdown}>Add from a breakdown</Button>
+			<Button onclick={() => onAdd()} data-slot="empty-add-fpt">Add {noun}s from Flow PT</Button>
+			<Button variant="outline" onclick={() => onBreakdown()}>Add from a breakdown</Button>
 		</div>
+		{#if builder.bids.length > 1}<p class="text-muted-foreground text-xs">They go to {builder.bidName(builder.current)}. Pick another bid above to fill it.</p>{/if}
 	</div>
 {:else}
 	<div class="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-2 px-6 py-2" data-slot="picked-toolbar">
@@ -361,18 +406,26 @@
 				<span class="mr-2 text-sm font-medium tabular-nums" aria-live="polite">{selection.length} selected</span>
 				<Button size="sm" variant="ghost" onclick={() => void setOmitted(true)} data-slot="bulk-omit">Omit</Button>
 				<Button size="sm" variant="ghost" onclick={() => void setOmitted(false)} data-slot="bulk-include">Include</Button>
-				{#if onSendRows}
-					<Button size="sm" variant="ghost" onclick={() => onSendRows?.(selectedItems.map((i) => ({ kind, id: i.id }) as Target), true)} data-slot="bulk-move">Move to bid…</Button>
-					<Button size="sm" variant="ghost" onclick={() => onSendRows?.(selectedItems.map((i) => ({ kind, id: i.id }) as Target), false)} data-slot="bulk-copy">Copy to bid…</Button>
+				{#if builder.bids.length > 1}
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger class="hover:bg-accent focus-visible:ring-ring/50 inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-2" data-slot="bulk-move">
+							Move to<ChevronDown class="size-3.5" aria-hidden="true" />
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="start">
+							{#each builder.bids as b (b.key)}
+								<DropdownMenu.Item disabled={selectedItems.every((i) => i.package === b.key)} onSelect={() => moveTo(b.key)} data-slot="bulk-move-to" data-bid={b.name}>{b.name}</DropdownMenu.Item>
+							{/each}
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 				{/if}
-				<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={takeOut} data-slot="bulk-remove">Remove from the bid</Button>
+				<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={takeOut} data-slot="bulk-remove">Remove</Button>
 				<span class="bg-border mx-1 h-4 w-px" aria-hidden="true"></span>
 				<Button size="sm" variant="ghost" class="text-muted-foreground" onclick={() => (selection = [])} data-slot="bulk-clear">Clear selection</Button>
 			</div>
 		{:else}
 			<div class="relative w-full sm:w-64">
 				<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
-				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun} in the bid`} bind:value={query} aria-label={`Find a ${noun} in the bid`} />
+				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun}`} bind:value={query} aria-label={`Find a ${noun} in the request`} />
 			</div>
 		{/if}
 		{#if mixed}
@@ -389,7 +442,7 @@
 		{/if}
 		<p class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-slot="live-legend">
 			<span class="flex items-center gap-1.5"><Radio class="text-info size-3.5" aria-hidden="true" /><span><span class="text-foreground">Live in Flow PT.</span> A change here changes the {type} in Flow PT.</span></span>
-			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this bid only.</span>
+			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this request only.</span>
 			<span>By a code, the mark says where the row comes from.</span>
 			{#if builder.live.state === 'reading'}<span aria-live="polite">Reading Flow PT…</span>{/if}
 		</p>
@@ -445,7 +498,9 @@
 				paging="scroll"
 				maxHeight="100%"
 				density="compact"
-				emptyLabel={`No ${noun} in the bid matches.`}
+				emptyLabel={`No ${noun} matches.`}
+				groupBy={BID}
+				{groupHeader}
 				{cell}
 			>
 				{#snippet headerEnd({ column }: { column: CollectionColumn })}
@@ -455,6 +510,15 @@
 			</EntityTable>
 		{/key}
 	</div>
+	{#if emptyBids.length > 0}
+		<div class="border-border flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-6 py-2 text-sm" data-slot="empty-bids">
+			{#each emptyBids as b (b.key)}
+				<span class="text-muted-foreground"><span class="text-foreground font-medium">{b.name}</span> holds no {noun}s yet.</span>
+				<Button size="sm" variant="ghost" onclick={() => onAdd(b.key)} data-slot="empty-bid-add">Add from Flow PT</Button>
+				<Button size="sm" variant="ghost" onclick={() => onBreakdown(b.key)}>Add from a breakdown</Button>
+			{/each}
+		</div>
+	{/if}
 {/if}
 
 <Dialog.Root open={confirming !== null} onOpenChange={(open) => !open && confirming?.answer(false)}>

@@ -322,12 +322,12 @@ export function requestFromRows(
 
 export function vendorToColumns(vendor: Omit<InvitedVendor, 'id'>): VendorColumns {
 	if (vendor.fpt && vendor.fpt.type !== 'Group') throw new Error(`A vendor's Flow PT entity is a Group, not a ${vendor.fpt.type}.`);
-	const { name, fpt, email, ndaExecuted, ndaFile, tpn, capacity, packages } = vendor;
+	const { name, fpt, groupName, email, ndaExecuted, ndaFile, tpn, capacity, packages } = vendor;
 	return {
 		vendor_name: name,
 		vendor_group_id: fpt?.id ?? null,
 		contact_email: email,
-		details: defined({ ndaExecuted, ndaFile, tpn, capacity }),
+		details: defined({ ndaExecuted, ndaFile, tpn, capacity, groupName: fpt ? groupName : undefined }),
 		package_keys: packages ? [...packages] : null
 	};
 }
@@ -339,7 +339,7 @@ export function vendorFromRow(row: Pick<InvitationRow, 'id' | Exclude<keyof Vend
 		name: row.vendor_name,
 		email: row.contact_email,
 		...(row.vendor_group_id !== null ? { fpt: { type: 'Group', id: row.vendor_group_id } } : {}),
-		...defined({ ndaFile: details.ndaFile, tpn: details.tpn, capacity: details.capacity }),
+		...defined({ groupName: row.vendor_group_id !== null ? details.groupName : undefined, ndaFile: details.ndaFile, tpn: details.tpn, capacity: details.capacity }),
 		ndaExecuted: details.ndaExecuted === true,
 		...(row.package_keys ? { packages: [...row.package_keys] } : {})
 	};
@@ -363,6 +363,8 @@ interface StoredBidHeader {
 	tax?: VendorBid['tax'];
 	/** Packages the vendor is not bidding on. */
 	declined?: string[];
+	/** The vendor's rates. */
+	rateCard?: VendorBid['rateCard'];
 }
 
 export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumns; lines: LineColumns[] } {
@@ -383,7 +385,8 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 		milestones: bid.milestones,
 		discount: bid.discount,
 		tax: bid.tax,
-		...(bid.declined?.length ? { declined: [...bid.declined] } : {})
+		...(bid.declined?.length ? { declined: [...bid.declined] } : {}),
+		...(bid.rateCard ? { rateCard: bid.rateCard } : {})
 	};
 	return {
 		bid: {
@@ -395,12 +398,12 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 			rebate_splits: [...bid.rebate],
 			packages: (bid.packages ?? []).map((p) => defined({ package: p.package, total: p.total, notes: p.notes }))
 		},
-		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, inPackage }) => ({
+		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, inPackage, fromRate }) => ({
 			item_kind: target.kind,
 			item_key: target.id,
 			total_minor: total.minor,
 			excluded,
-			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek }),
+			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, fromRate: fromRate === true ? true : undefined }),
 			in_package: inPackage === true
 		}))
 	};
@@ -440,7 +443,8 @@ export function bidFromRows(row: BidRow, lines: readonly BidLineRow[], request: 
 		tax: header.tax ?? null,
 		rebate: row.rebate_splits as VendorBid['rebate'],
 		...(Array.isArray(row.packages) && row.packages.length > 0 ? { packages: row.packages as VendorBid['packages'] } : {}),
-		...(Array.isArray(header.declined) && header.declined.length > 0 ? { declined: [...header.declined] } : {})
+		...(Array.isArray(header.declined) && header.declined.length > 0 ? { declined: [...header.declined] } : {}),
+		...(header.rateCard ? { rateCard: header.rateCard } : {})
 	};
 }
 

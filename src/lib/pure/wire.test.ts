@@ -1,65 +1,136 @@
 import { describe, expect, it } from 'vitest';
-import { parseId, parseInvitationPackages, parseLinks, parseSave, parseVendor } from './wire';
+import { parseCreate, parseDraftSave, parseDuplicate, parseId, parseInvitationPackages, parseLinks, parseVendor } from './wire';
 
 const header = { code: 'DS_R1', title: 'Main', project: 'Demo', round: 1, baseCurrency: 'EUR', assumptions: ['A'], dueDate: '2026-12-01' };
 const shot = { id: 'shot-1', code: 'sh010', fpt: { type: 'Shot', id: 1 }, omitted: false, assetIds: ['asset-9'], frames: 96, description: 'd', notes: 'n' };
 const asset = { id: 'asset-9', name: 'hero', fpt: { type: 'Asset', id: 9 }, type: 'Character', omitted: true };
 
-describe('parseSave', () => {
-	it('takes a draft as the builder sends it', () => {
-		const out = parseSave({ id: null, code: 'DS_R1', header, items: { shots: [shot], assets: [asset] } });
-		expect(out.ok).toBe(true);
-		if (!out.ok) return;
-		expect(out.value.id).toBeNull();
-		expect(out.value.header).toEqual(header);
-		expect(out.value.items!.shots).toEqual([shot]);
-		expect(out.value.items!.assets).toEqual([asset]);
+const ID = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
+const V1 = '11111111-2222-4333-8444-555555555555';
+const draft = (extra: Record<string, unknown> = {}) => ({
+	id: ID,
+	header,
+	bids: [
+		{ key: 'bid:a', name: 'Bid 1', items: { shots: [shot], assets: [] } },
+		{ key: 'bid:b', name: 'Hero', items: { shots: [], assets: [asset] } }
+	],
+	vendors: [{ id: V1, name: 'Studio A', email: 'bids@a.test', group: { id: 4, name: 'Studio A' }, bids: ['bid:b'] }],
+	...extra
+});
+
+describe('parseDraftSave', () => {
+	it('takes a draft page as it saves: the header, the bids with their rows, the vendors', () => {
+		const out = parseDraftSave(draft());
+		expect(out).toEqual({
+			ok: true,
+			value: {
+				id: ID,
+				header,
+				bids: [
+					{ key: 'bid:a', name: 'Bid 1', shots: [shot], assets: [] },
+					{ key: 'bid:b', name: 'Hero', shots: [], assets: [asset] }
+				],
+				vendors: [{ id: V1, name: 'Studio A', email: 'bids@a.test', group: { id: 4, name: 'Studio A' }, bids: ['bid:b'] }]
+			}
+		});
 	});
 
-	it('keeps only the header and item fields the model has', () => {
-		const out = parseSave({
-			code: 'X',
-			header: { ...header, vendorName: 'Leak Inc', projectRef: { type: 'Project', id: 99 } },
-			items: { shots: [{ ...shot, thumbnail: 'https://s3/x', vendor: 'Leak' }], assets: [{ ...asset, group: 7 }] }
-		});
+	it('keeps only the header and item fields the model has, and drops a row’s package: the bid is its group', () => {
+		const out = parseDraftSave(
+			draft({
+				header: { ...header, vendorName: 'Leak Inc', projectRef: { type: 'Project', id: 99 } },
+				bids: [{ key: 'bid:a', name: 'Bid 1', items: { shots: [{ ...shot, thumbnail: 'https://s3/x', vendor: 'Leak', package: 'bid:z' }], assets: [{ ...asset, group: 7 }] } }],
+				vendors: []
+			})
+		);
 		expect(out.ok).toBe(true);
 		if (!out.ok) return;
-		expect('vendorName' in out.value.header).toBe(false);
-		expect('projectRef' in out.value.header).toBe(false);
-		expect('thumbnail' in out.value.items!.shots[0]).toBe(false);
-		expect('vendor' in out.value.items!.shots[0]).toBe(false);
-		expect('group' in out.value.items!.assets[0]).toBe(false);
+		expect('vendorName' in out.value.header!).toBe(false);
+		expect('projectRef' in out.value.header!).toBe(false);
+		const row = out.value.bids![0].shots[0];
+		expect(['thumbnail' in row, 'vendor' in row, 'package' in row]).toEqual([false, false, false]);
+		expect('group' in out.value.bids![0].assets[0]).toBe(false);
 	});
 
 	it('takes a breakdown row, with no Flow PT row, and no other source', () => {
 		const row = { id: 'shot-bd-1', code: 'sh900', source: 'breakdown', omitted: false, assetIds: [], frames: 48 };
-		const one = { id: 'asset-bd-2', name: 'prop', source: 'breakdown' };
-		const out = parseSave({ code: 'X', header, items: { shots: [row], assets: [one] } });
-		expect(out.ok && out.value.items!.shots).toEqual([row]);
-		expect(out.ok && out.value.items!.assets).toEqual([one]);
-		expect(parseSave({ code: 'X', header, items: { shots: [{ ...row, source: 'fpt' }], assets: [] } }).ok).toBe(false);
-		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [{ ...one, source: 7 }] } }).ok).toBe(false);
+		const one = (rows: unknown[]) => parseDraftSave(draft({ bids: [{ key: 'bid:a', name: 'Bid 1', items: { shots: rows, assets: [] } }], vendors: [] }));
+		const out = one([row]);
+		expect(out.ok && out.value.bids![0].shots).toEqual([row]);
+		expect(one([{ ...row, source: 'fpt' }]).ok).toBe(false);
 	});
 
-	it('refuses what is not a draft', () => {
-		expect(parseSave(null).ok).toBe(false);
-		expect(parseSave({ code: '', header, items: { shots: [], assets: [] } })).toEqual({ ok: false, message: 'Give the request a code.' });
-		expect(parseSave({ code: 'X', header: { ...header, round: 0 }, items: { shots: [], assets: [] } })).toEqual({ ok: false, message: 'The header does not fit a request.' });
-		expect(parseSave({ code: 'X', header, items: { shots: [{ code: 'no id' }], assets: [] } })).toEqual({ ok: false, message: 'An item does not fit a request.' });
-		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, assetIds: 'x' }], assets: [] } }).ok).toBe(false);
-		expect(parseSave({ id: 5, code: 'X', header, items: { shots: [], assets: [] } }).ok).toBe(false);
+	it('takes a save of the header alone, or of the vendors alone', () => {
+		expect(parseDraftSave({ id: ID, header })).toEqual({ ok: true, value: { id: ID, header } });
+		expect(parseDraftSave({ id: ID, vendors: [] })).toEqual({ ok: true, value: { id: ID, vendors: [] } });
+	});
+
+	it('takes a vendor half typed: the issue holds it to a name and an email', () => {
+		const out = parseDraftSave(draft({ vendors: [{ id: V1, name: '', email: 'bids@', group: null, bids: null }] }));
+		expect(out.ok && out.value.vendors).toEqual([{ id: V1, name: '', email: 'bids@', group: null, bids: null }]);
+	});
+
+	it('refuses what does not fit, saying what', () => {
+		expect(parseDraftSave(null)).toEqual({ ok: false, message: 'Send a draft.' });
+		expect(parseDraftSave({ ...draft(), id: 'local-1' })).toEqual({ ok: false, message: 'That is not a request id.' });
+		expect(parseDraftSave(draft({ header: { ...header, round: 0 } }))).toEqual({ ok: false, message: 'The details do not fit a request.' });
+		expect(parseDraftSave(draft({ bids: [] }))).toEqual({ ok: false, message: 'A request holds one bid at least.' });
+		expect(parseDraftSave(draft({ bids: [{ key: 'bid:a', name: ' ', items: { shots: [], assets: [] } }] }))).toEqual({ ok: false, message: 'A bid has no name. Give it one.' });
+		expect(
+			parseDraftSave(
+				draft({
+					bids: [
+						{ key: 'bid:a', name: 'Hero', items: { shots: [], assets: [] } },
+						{ key: 'bid:b', name: 'hero', items: { shots: [], assets: [] } }
+					],
+					vendors: []
+				})
+			)
+		).toEqual({ ok: false, message: 'Two bids are named hero. Give each its own name.' });
+		expect(
+			parseDraftSave(
+				draft({
+					bids: [
+						{ key: 'bid:a', name: 'A', items: { shots: [shot], assets: [] } },
+						{ key: 'bid:b', name: 'B', items: { shots: [shot], assets: [] } }
+					],
+					vendors: []
+				})
+			)
+		).toEqual({ ok: false, message: 'A row sits in one bid. sh010 is in A and in B.' });
+		expect(parseDraftSave(draft({ bids: [{ key: 'bid:a', name: 'A', items: { shots: [{ code: 'no id' }], assets: [] } }] }))).toEqual({ ok: false, message: 'A row does not fit a request.' });
+		expect(parseDraftSave(draft({ vendors: [{ id: 'x', name: 'A', email: '', group: null, bids: null }] }))).toEqual({ ok: false, message: 'A vendor does not fit the request.' });
+		expect(parseDraftSave(draft({ vendors: [{ id: V1, name: 'A', email: '', group: null, bids: ['bid:none'] }] }))).toEqual({ ok: false, message: 'A vendor is invited to a bid the request does not have.' });
+		expect(parseDraftSave(draft({ vendors: [{ id: V1, name: 'A', email: '', group: null, bids: [] }] }))).toEqual({ ok: false, message: 'A vendor does not fit the request.' });
+		const twice = { id: V1, name: 'A', email: '', group: null, bids: null };
+		expect(parseDraftSave(draft({ vendors: [twice, twice] }))).toEqual({ ok: false, message: 'A vendor is named twice.' });
 	});
 
 	it('takes a bid material link only when it is http or https', () => {
-		const save = (materialLink: unknown) => parseSave({ code: 'X', header: { ...header, materialLink }, items: { shots: [], assets: [] } });
+		const save = (materialLink: unknown) => parseDraftSave({ id: ID, header: { ...header, materialLink } });
 		const ok = save('https://example.com/cut');
-		expect(ok.ok && ok.value.header.materialLink).toBe('https://example.com/cut');
+		expect(ok.ok && ok.value.header!.materialLink).toBe('https://example.com/cut');
 		for (const link of ['javascript:alert(document.cookie)', ' JAVASCRIPT:alert(1)', 'data:text/html,x', 'ftp://x.example.com', '//evil.example.com', 'cut']) {
-			expect(save(link), link).toEqual({ ok: false, message: 'The header does not fit a request.' });
+			expect(save(link), link).toEqual({ ok: false, message: 'The details do not fit a request.' });
 		}
-		// Blank is no link.
 		const blank = save('');
-		expect(blank.ok && 'materialLink' in blank.value.header).toBe(false);
+		expect(blank.ok && 'materialLink' in blank.value.header!).toBe(false);
+	});
+});
+
+describe('parseCreate and parseDuplicate', () => {
+	it('take a new request’s name and its details', () => {
+		expect(parseCreate({ name: '  Hero shots ', header })).toEqual({ ok: true, value: { name: 'Hero shots', header: { ...header, title: 'Hero shots' } } });
+		expect(parseCreate({ name: ' ', header })).toEqual({ ok: false, message: 'Name the request.' });
+		expect(parseCreate({ name: 'x'.repeat(201), header })).toEqual({ ok: false, message: 'A request name is 200 characters at most.' });
+		expect(parseCreate({ name: 'A', header: { project: 'Demo' } })).toEqual({ ok: false, message: 'The details do not fit a request.' });
+	});
+
+	it('take the request to copy, the copy’s name, and whether its rows go too', () => {
+		expect(parseDuplicate({ id: ID, name: 'Main copy', rows: true })).toEqual({ ok: true, value: { id: ID, name: 'Main copy', rows: true } });
+		expect(parseDuplicate({ id: ID, name: 'Main copy' })).toEqual({ ok: false, message: 'Say whether the rows go too.' });
+		expect(parseDuplicate({ id: 'x', name: 'Main copy', rows: false }).ok).toBe(false);
+		expect(parseDuplicate({ id: ID, name: '', rows: false })).toEqual({ ok: false, message: 'Name the request.' });
 	});
 });
 
@@ -115,30 +186,6 @@ describe('parseId', () => {
 });
 
 describe('packages on the wire', () => {
-	const packages = [
-		{ id: 'seq:SQ1', name: 'SQ1' },
-		{ id: 'assets', name: 'Assets' }
-	];
-
-	it('takes the packages with the rows that sit in them', () => {
-		const out = parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'seq:SQ1' }], assets: [{ ...asset, package: 'assets' }] }, packages });
-		expect(out.ok && out.value.packages).toEqual(packages);
-		expect(out.ok && out.value.items!.shots[0].package).toBe('seq:SQ1');
-	});
-
-	it('takes a save with no packages as before', () => {
-		const out = parseSave({ code: 'X', header, items: { shots: [shot], assets: [] } });
-		expect(out.ok && out.value.packages).toEqual([]);
-	});
-
-	it('refuses a row outside the packages, two packages with one name, a blank name', () => {
-		expect(parseSave({ code: 'X', header, items: { shots: [shot], assets: [] }, packages }).ok).toBe(false);
-		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'nope' }], assets: [] }, packages }).ok).toBe(false);
-		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'seq:SQ1' }], assets: [] } }).ok).toBe(false);
-		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [] }, packages: [packages[0], { id: 'b', name: 'sq1' }] })).toEqual({ ok: false, message: 'Two packages are named sq1.' });
-		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [] }, packages: [{ id: 'b', name: ' ' }] }).ok).toBe(false);
-	});
-
 	it('takes a vendor invited to some packages, or to every one', () => {
 		const some = parseVendor({ name: 'V', email: 'v@x.test', packages: ['seq:SQ1'] });
 		expect(some.ok && some.value.packages).toEqual(['seq:SQ1']);

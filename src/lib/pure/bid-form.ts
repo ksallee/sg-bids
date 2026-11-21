@@ -28,6 +28,7 @@ import { ANSWER_ONE } from './packages';
 import { estimateRebate, type RebateEstimate } from './rebate';
 import type { BidDraft } from './rows';
 import { bidTotals, type BidTotals } from './totals';
+import { applyRates, followsRate, rateForm, type RateForm } from './rate-card';
 
 export interface DepartmentForm {
 	department: string;
@@ -43,7 +44,11 @@ export interface LineForm {
 	readonly package?: Id;
 	/** The row is out of the request: a package figure does not cover it. */
 	readonly omitted?: boolean;
+	/** The row's difficulty, which picks its rate. */
+	readonly difficulty?: string;
 	price: string;
+	/** The vendor typed this price: an override of any rate, kept whatever the rates do. */
+	typed: boolean;
 	excluded: boolean;
 	departments: DepartmentForm[];
 	compute: string;
@@ -107,17 +112,19 @@ export interface BidForm {
 	exclusions: string;
 	/** One per package the vendor may price, in the request's order. */
 	packages: PackageForm[];
+	/** The vendor's rates, which fill the lines it has not typed (`rate-card.ts`). */
+	rates: RateForm;
 }
 
 /** A bid as the form reads it back: a saved one, or a draft. */
-export type BidSource = Pick<VendorBid, 'number' | 'date' | 'currency' | 'validUntil' | 'assumptions' | 'exclusions' | 'milestones' | 'costs' | 'discount' | 'tax' | 'rebate' | 'packages' | 'declined'> & {
+export type BidSource = Pick<VendorBid, 'number' | 'date' | 'currency' | 'validUntil' | 'assumptions' | 'exclusions' | 'milestones' | 'costs' | 'discount' | 'tax' | 'rebate' | 'packages' | 'declined' | 'rateCard'> & {
 	readonly lines: readonly (Omit<BidLine, 'id'> & { readonly id?: string })[];
 };
 
 /** The request as the form reads it: rows with their package, and the packages. */
 export type FormRequest = Pick<BidRequest, 'header'> & {
-	readonly shots: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id }[];
-	readonly assets: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id }[];
+	readonly shots: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }[];
+	readonly assets: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }[];
 	readonly packages?: readonly RequestPackage[];
 };
 
@@ -180,6 +187,9 @@ const SPLIT_WORDS: Readonly<Record<string, string>> = { jurisdiction: 'where', w
 function problemOf(key: string, message: string, form: BidForm, names: ReadonlyMap<string, string>): FormProblem {
 	const base = { key, message, control: vendorControlId(key) };
 	if (FIXED_LABELS[key]) return { ...base, label: FIXED_LABELS[key] };
+	if (key === 'rate:fallback') return { ...base, label: 'Your rate for rows with no difficulty' };
+	const rate = /^rate:(\d+)$/.exec(key);
+	if (rate) return { ...base, label: `Your rate for ${form.rates.tiers[Number(rate[1])]?.difficulty ?? 'a difficulty'}` };
 	const pkg = /^package:(.+):price$/.exec(key);
 	if (pkg) return { ...base, label: `Price for ${names.get(`package:${pkg[1]}`) ?? 'the bid'}` };
 	const line = /^line:((?:shot|asset):[^:]+):(.+)$/.exec(key);
@@ -220,13 +230,15 @@ function isDay(text: string): boolean {
 	return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-function blankLine(target: Target, row: { readonly omitted?: boolean; readonly package?: Id }): LineForm {
+function blankLine(target: Target, row: { readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }): LineForm {
 	return {
 		key: targetKey(target),
 		target,
 		...(row.package !== undefined ? { package: row.package } : {}),
 		...(row.omitted ? { omitted: true } : {}),
+		...(row.difficulty?.trim() ? { difficulty: row.difficulty.trim() } : {}),
 		price: '',
+		typed: false,
 		excluded: false,
 		departments: [],
 		compute: '',
@@ -237,12 +249,13 @@ function blankLine(target: Target, row: { readonly omitted?: boolean; readonly p
 }
 
 export function emptyForm(request: FormRequest, today: Day): BidForm {
+	const lines = [...request.shots.map((s) => blankLine({ kind: 'shot', id: s.id }, s)), ...request.assets.map((a) => blankLine({ kind: 'asset', id: a.id }, a))];
 	return {
 		number: '',
 		date: today,
 		currency: request.header.baseCurrency,
 		validUntil: '',
-		lines: [...request.shots.map((s) => blankLine({ kind: 'shot', id: s.id }, s)), ...request.assets.map((a) => blankLine({ kind: 'asset', id: a.id }, a))],
+		lines,
 		costs: FIXED_COSTS.map(({ kind, label }) => ({ kind, label, amount: '', labour: false })),
 		discount: { kind: 'percent', value: '' },
 		tax: { kind: 'percent', value: '' },
@@ -250,7 +263,8 @@ export function emptyForm(request: FormRequest, today: Day): BidForm {
 		milestones: [],
 		assumptions: '',
 		exclusions: '',
-		packages: (request.packages ?? []).map((p) => ({ id: p.id, name: p.name, bidding: true, mode: 'rows', price: '', notes: '' }))
+		packages: (request.packages ?? []).map((p) => ({ id: p.id, name: p.name, bidding: true, mode: 'rows', price: '', notes: '' })),
+		rates: rateForm(lines)
 	};
 }
 
@@ -277,6 +291,8 @@ export function formFromBid(bid: BidSource, request: FormRequest, mark: DecimalM
 		return {
 			...blank,
 			price: saved.excluded && saved.total.minor === 0 ? '' : shown(saved.total, mark),
+			// A line from before rates, or one the vendor typed, is its own price.
+			typed: saved.fromRate !== true,
 			excluded: saved.excluded,
 			departments: (saved.departments ?? []).map((d) => ({
 				department: d.department,
@@ -311,7 +327,8 @@ export function formFromBid(bid: BidSource, request: FormRequest, mark: DecimalM
 	form.milestones = bid.milestones.map((m) => ({ label: m.label, percent: plainShown(m.percent, mark), due: m.due ?? '' }));
 	form.assumptions = bid.assumptions.join('\n');
 	form.exclusions = bid.exclusions.join('\n');
-	return form;
+	form.rates = rateForm(form.lines, bid.rateCard, mark);
+	return applyRates(form);
 }
 
 type Plain = { kind: 'blank' } | { kind: 'value'; text: string } | { kind: 'error' };
@@ -383,6 +400,17 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 		figures.push({ package: pkg.id, total, ...(notes ? { notes } : {}) });
 	}
 
+	// The vendor's rates. A line that follows a rate that does not read is not bid: the rate is named once.
+	const rates: { difficulty: string; amount: Money }[] = [];
+	const badRates = new Set<string>();
+	for (const [index, tier] of (form.rates?.tiers ?? []).entries()) {
+		const value = amount(tier.price, `rate:${index}`);
+		if (value !== undefined) rates.push({ difficulty: tier.difficulty, amount: value });
+		else if (tier.price.trim() !== '') badRates.add(tier.price);
+	}
+	const fallback = form.rates ? amount(form.rates.fallback, 'rate:fallback') : undefined;
+	if (form.rates && fallback === undefined && form.rates.fallback.trim() !== '') badRates.add(form.rates.fallback);
+
 	const counts = { priced: 0, excluded: 0, open: 0, packaged: 0, declined: 0 };
 	const draftLines: BidDraft['lines'][number][] = [];
 	for (const line of form.lines) {
@@ -400,6 +428,11 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 		}
 		if (blankFigure.has(pkg)) {
 			if (!line.omitted) counts.open++;
+			continue;
+		}
+		const viaRate = form.rates !== undefined && followsRate(form, line);
+		if (viaRate && badRates.has(line.price)) {
+			if (!line.excluded) counts.open++;
 			continue;
 		}
 		const price = amount(line.price, `${at}:price`);
@@ -429,7 +462,8 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 			excluded: line.excluded,
 			...(departments.length > 0 ? { departments } : {}),
 			...(compute !== undefined ? { compute } : {}),
-			...Object.fromEntries(Object.entries(texts).filter(([, v]) => v !== ''))
+			...Object.fromEntries(Object.entries(texts).filter(([, v]) => v !== '')),
+			...(viaRate && price !== undefined ? { fromRate: true } : {})
 		});
 	}
 
@@ -533,7 +567,8 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 		tax,
 		rebate,
 		...(figures.length > 0 ? { packages: figures } : {}),
-		...(declined.size > 0 ? { declined: [...declined] } : {})
+		...(declined.size > 0 ? { declined: [...declined] } : {}),
+		...(rates.length > 0 || fallback !== undefined ? { rateCard: { rates, ...(fallback !== undefined ? { fallback } : {}) } } : {})
 	};
 	if (counts.priced + counts.packaged > 0 && wrong === 0) {
 		for (const message of totalProblems(asBid(draft), currency)) {
@@ -615,11 +650,11 @@ export function typedFor(form: BidForm, id: Id, mode: PackageForm['mode'] | 'dec
 export function setBidding(form: BidForm, id: Id, bidding: boolean): BidForm {
 	const pkg = form.packages.find((p) => p.id === id);
 	if (!pkg || pkg.bidding === bidding) return form;
-	if (bidding) return { ...form, packages: form.packages.map((p) => (p.id === id ? { ...p, bidding: true, mode: 'rows' } : p)) };
+	if (bidding) return applyRates({ ...form, packages: form.packages.map((p) => (p.id === id ? { ...p, bidding: true, mode: 'rows' } : p)) });
 	return {
 		...form,
 		packages: form.packages.map((p) => (p.id === id ? { ...p, bidding: false, mode: 'rows', price: '', notes: '' } : p)),
-		lines: form.lines.map((l) => ((l.package ?? 'all') === id ? { ...l, price: '', excluded: false, departments: [], compute: '', methodology: '', assumptions: '', notes: '' } : l))
+		lines: form.lines.map((l) => ((l.package ?? 'all') === id ? { ...l, price: '', typed: false, excluded: false, departments: [], compute: '', methodology: '', assumptions: '', notes: '' } : l))
 	};
 }
 
@@ -627,13 +662,13 @@ export function setBidding(form: BidForm, id: Id, bidding: boolean): BidForm {
 export function switchMode(form: BidForm, id: Id, mode: PackageForm['mode']): BidForm {
 	const pkg = form.packages.find((p) => p.id === id);
 	if (!pkg || pkg.mode === mode) return form;
-	return {
+	return applyRates({
 		...form,
 		packages: form.packages.map((p) => (p.id === id ? { ...p, mode, price: '', notes: '' } : p)),
 		lines:
 			mode === 'package'
-				? form.lines.map((l) => ((l.package ?? 'all') === id ? { ...l, price: '', excluded: false, departments: [], compute: '', methodology: '', assumptions: '', notes: '' } : l))
+				? form.lines.map((l) => ((l.package ?? 'all') === id ? { ...l, price: '', typed: false, excluded: false, departments: [], compute: '', methodology: '', assumptions: '', notes: '' } : l))
 				: form.lines
-	};
+	});
 }
 

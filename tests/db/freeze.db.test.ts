@@ -114,7 +114,7 @@ describe('an issued request', () => {
 	it('refuses new items and edits through the store', async () => {
 		const { s, request, production } = await issuedWithTwoVendors();
 		expect((await refusal(() => s.updateDraftRequest(production, request.id, { items: items() }))).status).toBe(404);
-		expect((await refusal(() => s.updateDraftRequest(production, request.id, { code: 'NEW' }))).status).toBe(404);
+		expect((await refusal(() => s.updateDraftRequest(production, request.id, { header: header({ title: 'New' }) }))).status).toBe(404);
 	});
 
 	it('keeps its code, round, currency and header, cannot go back to draft or be deleted', async () => {

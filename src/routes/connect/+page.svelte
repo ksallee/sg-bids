@@ -68,7 +68,7 @@
 	>
 		{#snippet actions()}
 			{#if state.problem === null}
-				<Button href={next ?? '/bids'}>{next ? 'Back to the page' : 'Bids'}</Button>
+				<Button href={next ?? '/requests'}>{next ? 'Back to the page' : 'Requests'}</Button>
 			{/if}
 		{/snippet}
 	</PageHeader>

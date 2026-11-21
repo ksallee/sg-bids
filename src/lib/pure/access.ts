@@ -80,7 +80,7 @@ export interface Scope {
 type Grants = Readonly<Partial<Record<Table, readonly Action[]>>>;
 
 const PRODUCTION: Grants = {
-	// Production's bids and their rows, written by `sg_save_production_bid` and its siblings.
+	// A draft request's bids and their rows, written by `sg_save_draft` and read through its request.
 	production_bids: ['read', 'insert', 'update', 'delete'],
 	production_bid_items: ['read', 'insert', 'update', 'delete'],
 	// Delete is whole, through `sg_delete_request`: the request and everything under it.

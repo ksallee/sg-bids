@@ -1,5 +1,5 @@
 <!--
-	The frame of every screen: one h-12 header (wordmark, Bids and Requests, the demo badge, the site and
+	The frame of every screen: one h-12 header (wordmark, Requests, the demo badge, the site and
 	who reads it, the scheme switch), then the page, which takes the rest and scrolls on its own. The
 	header holds who and where; the page holds what this screen is about. On the vendor's side
 	(`vendor`) there is no site and no person: the vendor has no Flow PT sign-in, so the header holds
@@ -22,10 +22,7 @@
 	let { children, vendor = false }: { children: Snippet; vendor?: boolean } = $props();
 
 	const under = (prefix: string) => page.url.pathname === prefix || page.url.pathname.startsWith(`${prefix}/`);
-	const NAV = [
-		{ href: '/bids', label: 'Bids', slot: 'nav-bids' },
-		{ href: '/requests', label: 'Requests', slot: 'nav-requests' }
-	] as const;
+	const NAV = [{ href: '/requests', label: 'Requests', slot: 'nav-requests' }] as const;
 	let live = $state<LiveState | null>(null);
 	// The public pages render at build too (`(public)/+layout.ts`): nothing there reads the browser.
 	// svelte-ignore state_referenced_locally

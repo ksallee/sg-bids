@@ -26,7 +26,7 @@ describe('a tenant', () => {
 			expect(await s.listRequests(other)).toEqual([]);
 			expect((await refusal(() => s.getRequest(other, request.id))).status).toBe(404);
 			expect((await refusal(() => s.listBids(other, request.id))).status).toBe(404);
-			expect((await refusal(() => s.updateDraftRequest(other, draftRequest.id, { code: 'STOLEN' }))).status).toBe(404);
+			expect((await refusal(() => s.updateDraftRequest(other, draftRequest.id, { header: header({ title: 'STOLEN' }) }))).status).toBe(404);
 			expect((await refusal(() => s.updateDraftRequest(other, draftRequest.id, { items: { shots: [], assets: [] } }))).status).toBe(404);
 			expect((await refusal(() => s.issueRequest(other, draftRequest.id))).status).toBe(404);
 			expect((await refusal(() => s.inviteVendor(other, request.id, vendor('Intruder')))).status).toBe(404);

@@ -169,15 +169,17 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 
 	/**
 	 * What deleting the request would take with it, for the confirm (`$lib/pure/request-delete`):
-	 * its items, invitations, the submitted and withdrawn bids and their vendors, scenarios, rates,
+	 * its rows (a draft's are its bids'), invitations, the submitted and withdrawn bids and their vendors, scenarios, rates,
 	 * and the award record while one is in Flow PT. A vendor's draft is not read: it is the vendor's.
 	 */
 	async function deletionFacts(principal: ProductionPrincipal, requestId: string): Promise<DeletionFacts> {
 		const row = await run<RequestRow | null>(read(principal, 'bid_requests', '*').eq('id', requestId).maybeSingle());
 		if (!row) throw new StoreError(404, 'No such request.');
+		// A draft's rows are its bids'; an issued request's are its own.
+		const rows: Table = row.status === 'draft' ? 'production_bid_items' : 'request_items';
 		const [shots, assets, scenarios, rates, invitations, bids, publication] = await Promise.all([
-			count(principal, 'request_items', requestId, { kind: 'shot' }),
-			count(principal, 'request_items', requestId, { kind: 'asset' }),
+			count(principal, rows, requestId, { kind: 'shot' }),
+			count(principal, rows, requestId, { kind: 'asset' }),
 			count(principal, 'award_scenarios', requestId),
 			count(principal, 'bid_rates', requestId),
 			run<{ id: string; vendor_name: string }[]>(read(principal, 'invitations', 'id, vendor_name').eq('request_id', requestId).order('created_at')),

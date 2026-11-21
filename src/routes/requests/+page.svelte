@@ -1,14 +1,15 @@
 <!--
 	Requests: the person's requests in every project they may read on the site, newest first, with the
 	project, status, round, due date, the vendors invited and the answers in. The project is a filter,
-	not a gate. A request is made from the Bids page: tick bids, then New request. Each row's menu
-	deletes it (`$lib/app/request/delete-request`). The list and its filter are `$lib/pure/request-list`.
+	not a gate. New request asks for a name and a project, then opens the request's one page. Each
+	row's menu opens, duplicates or deletes it. The list and its filter are `$lib/pure/request-list`.
 -->
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import FileText from '@lucide/svelte/icons/file-text';
-	import Layers from '@lucide/svelte/icons/layers';
+	import Plus from '@lucide/svelte/icons/plus';
 	import Search from '@lucide/svelte/icons/search';
 	import SearchX from '@lucide/svelte/icons/search-x';
 	import Notice from '$lib/app/notice.svelte';
@@ -16,6 +17,9 @@
 	import PageState from '$lib/app/page-state.svelte';
 	import StatusChip from '$lib/app/status-chip.svelte';
 	import DeleteRequest from '$lib/app/request/delete-request.svelte';
+	import DuplicateRequest from '$lib/app/request/duplicate-request.svelte';
+	import NewRequest from '$lib/app/request/new-request.svelte';
+	import SetupNotice from '$lib/app/setup-notice.svelte';
 	import { deletedNote } from '$lib/app/request/deleted-note.svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import ListPicker from '$lib/components/list-picker.svelte';
@@ -71,6 +75,16 @@
 		if (data) data = { ...data, requests: data.requests.filter((r) => r.id !== deleting?.id) };
 	}
 
+	// New request: a dialog, also opened by `?new=1` (the old new request address).
+	let creating = $state(page.url.searchParams.get('new') === '1');
+	$effect(() => {
+		if (creating && page.url.searchParams.has('new')) replaceState('/requests', {});
+	});
+
+	// Duplicating: the row whose menu asked.
+	let duplicating = $state<{ id: string; projectId: number; name: string } | null>(null);
+	let duplicateOpen = $state(false);
+
 	const TH = 'text-muted-foreground border-border h-9 border-b px-3 text-left text-xs font-medium whitespace-nowrap';
 	const TD = 'border-border border-b px-3 py-2';
 </script>
@@ -79,13 +93,13 @@
 
 <PageHeader title="Requests" {context}>
 	{#snippet actions()}
-		<Button href="/bids" variant="outline" title="A request is made from the Bids page: tick bids, then New request." data-slot="new-request"><Layers data-icon="inline-start" />New request from bids</Button>
+		<Button onclick={() => (creating = true)} data-slot="new-request"><Plus data-icon="inline-start" />New request</Button>
 	{/snippet}
 	{#if view && view.counts.total > 0}
 		<div class="flex flex-wrap items-center gap-2" data-slot="requests-toolbar">
 			<div class="relative w-full sm:w-72">
 				<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
-				<Input class="h-8 pl-8" type="search" placeholder="Find by title, code or project" bind:value={query} aria-label="Find a request" />
+				<Input class="h-8 pl-8" type="search" placeholder="Find by name or project" bind:value={query} aria-label="Find a request" />
 			</div>
 			<div class="w-full sm:w-64">
 				<ListPicker
@@ -107,6 +121,8 @@
 		</div>
 	{/if}
 </PageHeader>
+
+<SetupNotice />
 
 {#if deletedNote.line}
 	<div class="border-border border-b px-6 py-2.5">
@@ -130,8 +146,8 @@
 {:else if !view}
 	<PageState state="loading" title="Reading your requests…" />
 {:else if view.counts.total === 0}
-	<PageState state="empty" icon={FileText} title="No requests yet" line="A request is made from the Bids page: tick one or several bids, then New request. Pick the vendors, issue, and each gets a link.">
-		{#snippet action()}<Button href="/bids"><Layers data-icon="inline-start" />Go to Bids</Button>{/snippet}
+	<PageState state="empty" icon={FileText} title="No requests yet" line="A request asks vendors to bid on shots and assets. Name it, add the rows and the vendors on one page, issue, and each vendor gets a link.">
+		{#snippet action()}<Button onclick={() => (creating = true)} data-slot="empty-new-request"><Plus data-icon="inline-start" />New request</Button>{/snippet}
 	</PageState>
 {:else if view.rows.length === 0}
 	<PageState state="empty" icon={SearchX} title="No request matches" line="Change the search or the project, or clear both.">
@@ -171,8 +187,7 @@
 								href={requestHref(row)}
 								onclick={() => remember(row)}
 							>
-								<span class={cn('truncate font-medium', !row.title && 'text-muted-foreground')} title={row.title ?? undefined}>{row.title ?? 'Untitled request'}</span>
-								<span class="text-muted-foreground shrink-0 font-mono text-xs">{row.code}</span>
+								<span class={cn('truncate font-medium', !row.title && 'text-muted-foreground')} title={row.title ?? undefined}>{row.title ?? row.code}</span>
 							</a>
 						</td>
 						<td class={cn(TD, 'text-muted-foreground truncate')} title={row.projectName}>{row.projectName}</td>
@@ -187,13 +202,17 @@
 							<DropdownMenu.Root>
 								<DropdownMenu.Trigger
 									class="hover:bg-accent focus-visible:ring-ring text-muted-foreground hover:text-foreground relative z-10 inline-flex size-8 items-center justify-center rounded-md outline-none focus-visible:ring-2"
-									aria-label={`More for ${row.code}`}
+									aria-label={`More for ${row.title ?? row.code}`}
 									data-slot="row-actions"
 								>
 									<Ellipsis class="size-4" />
 								</DropdownMenu.Trigger>
 								<DropdownMenu.Content align="end">
 									<DropdownMenu.Item onSelect={() => (remember(row), goto(requestHref(row)))}>Open</DropdownMenu.Item>
+									<DropdownMenu.Item
+										onSelect={() => ((duplicating = { id: row.id, projectId: row.projectId, name: row.title ?? row.code }), (duplicateOpen = true))}
+										data-slot="row-duplicate">Duplicate…</DropdownMenu.Item
+									>
 									<DropdownMenu.Separator />
 									<DropdownMenu.Item class="text-destructive" onSelect={() => ask(row)} data-slot="row-delete">{row.status === 'draft' ? 'Delete draft…' : 'Delete request…'}</DropdownMenu.Item>
 								</DropdownMenu.Content>
@@ -209,3 +228,7 @@
 {#if deleting}
 	<DeleteRequest bind:open={deleteOpen} projectId={deleting.projectId} requestId={deleting.id} ondeleted={deleted} />
 {/if}
+{#if duplicating}
+	<DuplicateRequest bind:open={duplicateOpen} projectId={duplicating.projectId} requestId={duplicating.id} name={duplicating.name} />
+{/if}
+<NewRequest bind:open={creating} />

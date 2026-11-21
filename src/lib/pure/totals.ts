@@ -54,6 +54,8 @@ export function checkBid(bid: VendorBid, base: string): void {
 	for (const cost of bid.costs) check(cost.amount, `the cost '${cost.label}'`);
 	if (bid.discount?.kind === 'amount') check(bid.discount.amount, 'the discount');
 	if (bid.tax?.kind === 'amount') check(bid.tax.amount, 'the tax');
+	for (const rate of bid.rateCard?.rates ?? []) check(rate.amount, `the rate for ${rate.difficulty}`);
+	check(bid.rateCard?.fallback, 'the rate for a row with no difficulty');
 
 	if (want === base) {
 		if (bid.rate !== null) throw new Error(`Bid ${bid.id} is in the base currency ${base}; it takes no rate.`);

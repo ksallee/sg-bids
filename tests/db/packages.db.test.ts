@@ -4,11 +4,13 @@
  * packages change only until it submits; a package priced as one figure covers its rows; a request
  * from before packages still works as one package.
  */
+import { randomUUID } from 'node:crypto';
 import type postgres from 'postgres';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createComparison } from '$lib/server/comparison';
 import { loadBid, loadRequest, saveDraft } from '$lib/server/vendor-api';
 import { compareBids } from '$lib/pure/compare';
+import { copyRequest } from '$lib/pure/request-draft';
 import type { RequestAsset, RequestPackage, RequestShot } from '$lib/pure/model';
 import type { BidDraft } from '$lib/pure/rows';
 import { draft, header, refusal, rest, store, superuser, tenant, vendor, vendorIds } from './helpers';
@@ -77,14 +79,18 @@ describe('a request with packages', () => {
 		expect(read.vendors.map((v) => v.packages)).toEqual([['pkg:creature'], undefined]);
 	});
 
-	it('refuses a row outside every package, in SQL', async () => {
-		const s = store();
-		const production = tenant();
-		const items = packedItems();
-		const error = await refusal(() =>
-			s.createDraftRequest(production, { code: 'PK-2', header: header(), items: { ...items, shots: items.shots.map((x) => ({ ...x, package: undefined })) } })
-		);
-		expect(error.message).toMatch(/Every row of a request with packages sits in one/);
+	it('has every row in one of its packages once issued', async () => {
+		const { request } = await packedRequest();
+		const rows = await sql`select i.key, i.package_key, p.key as known from public.request_items i
+			left join public.request_packages p on p.request_id = i.request_id and p.key = i.package_key
+			where i.request_id = ${request.id} order by i.position`;
+		expect(rows.map((r) => [r.key, r.package_key])).toEqual([
+			['sh010', 'seq:SQ1'],
+			['sh020', 'pkg:creature'],
+			['sh030', 'pkg:creature'],
+			['hero', 'assets']
+		]);
+		expect(rows.every((r) => r.known === r.package_key)).toBe(true);
 	});
 
 	it('freezes its packages and each row in its package at issue', async () => {
@@ -110,16 +116,18 @@ describe('a request with packages', () => {
 		expect(n).toBe(0);
 	});
 
-	it('keeps its packages through a new round', async () => {
+	it('keeps its bids, by name, with their rows, through a new round', async () => {
 		const s = store();
 		const production = tenant();
 		const request = await s.createDraftRequest(production, { code: 'PK-3', header: header(), items: packedItems() });
 		await s.issueRequest(production, request.id);
 		const issued = await s.getRequest(production, request.id);
-		const { nextRound } = await import('$lib/pure/persist');
-		const next = await s.createDraftRequest(production, { ...nextRound(issued), code: 'PK-3' });
-		expect(next.packages).toEqual(PACKAGES);
-		expect(next.shots.map((x) => x.package)).toEqual(['seq:SQ1', 'pkg:creature', 'pkg:creature']);
+		const copy = copyRequest(issued, { rows: true, key: () => randomUUID(), id: () => randomUUID() });
+		const next = await s.createDraftRequest(production, { code: 'PK-3', header: { ...issued.header, round: 2 }, bids: copy.bids, vendors: copy.vendors });
+		expect(next.packages?.map((p) => p.name)).toEqual(PACKAGES.map((p) => p.name));
+		const nameOf = new Map(next.packages!.map((p) => [p.id, p.name]));
+		expect(next.shots.map((x) => nameOf.get(x.package!))).toEqual(['SQ1', 'Creature', 'Creature']);
+		expect(next.assets.map((x) => nameOf.get(x.package!))).toEqual(['Assets']);
 	});
 });
 
@@ -228,7 +236,8 @@ describe('changing a vendor packages', () => {
 });
 
 describe('a request from before packages', () => {
-	it('reads as one package, takes no package list, and lets a vendor price it as one figure', async () => {
+	/** An issued request as it was stored before packages: no package, no row in one. */
+	async function beforePackages() {
 		const s = store();
 		const production = tenant();
 		const plain = packedItems();
@@ -237,11 +246,21 @@ describe('a request from before packages', () => {
 			header: header(),
 			items: { shots: plain.shots.map(({ package: _, ...x }) => x), assets: plain.assets.map(({ package: _, ...x }) => x) }
 		});
-		expect(request.packages).toBeUndefined();
-		const refused = await refusal(() => s.inviteVendor(production, request.id, { ...vendor('Old'), packages: ['all'] }));
-		expect(refused.status).toBe(422);
 		const v = await s.inviteVendor(production, request.id, vendor('Old'));
 		await s.issueRequest(production, request.id);
+		await sql.begin(async (tx) => {
+			await tx`set local session_replication_role = replica`;
+			await tx`update public.request_items set package_key = null where request_id = ${request.id}`;
+			await tx`delete from public.request_packages where request_id = ${request.id}`;
+		});
+		return { s, production, request, v, plain };
+	}
+
+	it('reads as one package, takes no package list, and lets a vendor price it as one figure', async () => {
+		const { s, production, request, v, plain } = await beforePackages();
+		expect((await s.getRequest(production, request.id)).packages).toBeUndefined();
+		const refused = await refusal(() => s.inviteVendor(production, request.id, { ...vendor('Late'), packages: ['all'] }));
+		expect(refused.status).toBe(422);
 		const view = await loadRequest(s, v.token);
 		expect(view.packages).toEqual([{ id: 'all', name: 'All shots and assets' }]);
 		expect(view.shots.every((x) => x.package === 'all')).toBe(true);
@@ -255,17 +274,9 @@ describe('a request from before packages', () => {
 		expect(bid.packages?.[0].total.minor).toBe(900);
 	});
 
-	it('keeps a request saved through the call from before packages whole: its packages go', async () => {
-		const s = store();
-		const production = tenant();
-		const request = await s.createDraftRequest(production, { code: 'OLD-2', header: header(), items: packedItems() });
-		const [{ site_host, project_id }] = await sql`select site_host, project_id from public.bid_requests where id = ${request.id}`;
-		await asService(
-			(tx) => tx`select * from public.sg_save_request_items(${request.id}, ${site_host}, ${project_id}, ${sql.json([{ kind: 'shot', key: 'sh010', code: 'SH010', package_key: 'seq:SQ1' }])})`
-		);
-		const read = await s.getRequest(production, request.id);
-		expect(read.packages).toBeUndefined();
-		expect(read.shots.map((x) => x.package)).toEqual([undefined]);
+	it('is the only kind of request with rows outside a package: the save of a draft’s own rows is gone', async () => {
+		const [{ n }] = await sql`select count(*)::int as n from pg_proc where proname in ('sg_save_request_items', 'sg_save_production_bid', 'sg_set_request_bids', 'sg_bids_first_convert')`;
+		expect(n).toBe(0);
 	});
 });
 

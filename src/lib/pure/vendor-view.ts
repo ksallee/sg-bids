@@ -169,8 +169,8 @@ export function itemMatches(item: Partial<RequestShot> | Partial<RequestAsset>, 
 }
 
 /**
- * What the vendor's "The request" box lists, label and value, each one set: the title, the bids it
- * answers with their rows, then who and when. It always has the bids, so the box is never empty.
+ * What the vendor's "The request" box lists, label and value, each one set: the bids it answers
+ * with their rows, then who and when. The request's name is the page's title. It always has the bids, so the box is never empty.
  * `day` writes a `YYYY-MM-DD` day for the reader.
  */
 export function requestFacts(request: Pick<VendorRequestView, 'header' | 'packages' | 'shots' | 'assets'>, day: (text: string) => string): [string, string][] {
@@ -178,7 +178,6 @@ export function requestFacts(request: Pick<VendorRequestView, 'header' | 'packag
 	const rows = (id: Id) => request.shots.filter((s) => s.package === id && !s.omitted).length + request.assets.filter((a) => a.package === id && !a.omitted).length;
 	const bids = request.packages.map((p) => `${p.name} (${rows(p.id)} ${rows(p.id) === 1 ? 'row' : 'rows'})`).join(', ');
 	const facts: [string, string | undefined][] = [
-		['Title', h.title],
 		[request.packages.length === 1 ? 'Bid' : 'Bids', bids || undefined],
 		['Studio', h.studio],
 		['Director', h.director],

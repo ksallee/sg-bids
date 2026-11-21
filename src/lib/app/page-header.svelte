@@ -20,7 +20,7 @@
 		class: className
 	}: {
 		title: string;
-		/** The way back, over the title: `{ href: '/bids', label: 'Bid requests' }`. */
+		/** The way back, over the title: `{ href: '/requests', label: 'Requests' }`. */
 		back?: { href: string; label: string };
 		/** One line under the title: a string, or a snippet for links and chips. */
 		context?: string | Snippet;
