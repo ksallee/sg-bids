@@ -182,10 +182,10 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 	}
 
 	/** A request's status and stamps, which `store.getRequest`'s model does not carry. */
-	async function requestMeta(principal: ProductionPrincipal, requestId: string): Promise<Pick<RequestOverview, 'status' | 'issuedAt'>> {
-		const row = await run<Pick<RequestRow, 'status' | 'issued_at'> | null>(read(principal, 'bid_requests', 'status, issued_at').eq('id', requestId).maybeSingle());
+	async function requestMeta(principal: ProductionPrincipal, requestId: string): Promise<Pick<RequestOverview, 'status' | 'issuedAt' | 'code'>> {
+		const row = await run<Pick<RequestRow, 'status' | 'issued_at' | 'code'> | null>(read(principal, 'bid_requests', 'status, issued_at, code').eq('id', requestId).maybeSingle());
 		if (!row) throw new StoreError(404, 'No such request.');
-		return { status: row.status, issuedAt: row.issued_at };
+		return { status: row.status, issuedAt: row.issued_at, code: row.code };
 	}
 
 	/** How many rows of `table` the request has, in the principal's tenant. */

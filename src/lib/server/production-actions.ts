@@ -135,7 +135,8 @@ export async function newRound(production: VerifiedProduction, body: Body) {
 	if (meta.status === 'draft') throw new StoreError(409, 'Issue the request before starting a new round.');
 	const copy = copyRequest(issued, { rows: true, key: () => crypto.randomUUID(), id: () => crypto.randomUUID() });
 	const header = { ...issued.header, round: issued.header.round + 1 };
-	const request = await draftWithCode(production, header.title ?? '', header, { ...copy, code: issued.header.code ?? '' });
+	// The code is on the row. The stored header does not carry it, and an empty code is refused.
+	const request = await draftWithCode(production, header.title ?? '', header, { ...copy, code: meta.code });
 	return { request: { id: request.id } };
 }
 
