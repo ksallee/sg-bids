@@ -1,7 +1,7 @@
 /**
  * The requests list across projects: each row named by its project, a project filter that never
- * gates (a pick no row holds is ignored), and a search over title, code and project. Rows keep the
- * server's order, newest first.
+ * gates (a pick no row holds is ignored), and a search over title, code, project and bid names.
+ * Rows keep the server's order, newest first.
  */
 
 export interface ListRow {
@@ -10,6 +10,8 @@ export interface ListRow {
 	readonly code: string;
 	readonly title: string | null;
 	readonly status: string;
+	/** The request's bids, by name, in order. */
+	readonly bids?: readonly string[];
 }
 
 export interface ListFilter {
@@ -50,7 +52,7 @@ export function listView<T extends ListRow>(rows: readonly T[], projects: readon
 	const shown = named.filter((r) => {
 		if (project !== null && r.projectId !== project) return false;
 		if (words.length === 0) return true;
-		const text = `${r.title ?? UNTITLED} ${r.code} ${r.projectName}`.toLowerCase();
+		const text = `${r.title ?? UNTITLED} ${r.code} ${r.projectName} ${(r.bids ?? []).join(' ')}`.toLowerCase();
 		return words.every((w) => text.includes(w));
 	});
 	return {
@@ -60,4 +62,12 @@ export function listView<T extends ListRow>(rows: readonly T[], projects: readon
 		filtered: project !== null || words.length > 0,
 		counts: { shown: shown.length, total: rows.length, drafts: rows.filter((r) => r.status === 'draft').length }
 	};
+}
+
+/** Bid names shown in the list before "+N". */
+export const BIDS_SHOWN = 3;
+
+/** The Bids cell: the first names, how many more, and the whole list for the title. */
+export function bidsCell(bids: readonly string[]): { shown: string; more: number; title: string } {
+	return { shown: bids.slice(0, BIDS_SHOWN).join(', '), more: Math.max(0, bids.length - BIDS_SHOWN), title: bids.join(', ') };
 }

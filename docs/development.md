@@ -184,6 +184,11 @@ does, then lists the projects the person's own bearer may read on that site (`GE
 /entity/projects`, paged to the first empty page; a person reads only their projects, corpus 006,
 027). The tenant filter is that site host and those project ids (`siteScope` in
 `src/lib/pure/access.ts`); a project or a project list in the body is never read.
+Each request's bids and totals come in the same read, one query per table for every request:
+`request_packages` for the bid names in order, a draft's `production_bids` counts (kept by
+`sg_production_bid_counts` at every save: units, omitted rows left out), an issued request's
+`request_items` (each row its `unit_count`, omitted rows left out). The shaping is
+`src/lib/pure/list-totals.ts`.
 `src/lib/server/site-route.test.ts` and `tests/db/across.db.test.ts` hold it. The comparison has its own: `compare` (the
 request, every submitted and withdrawn bid, the latest submitted version per vendor shown unless
 `bids` names others, the rates, the scenarios), `rate`, `scenarios`, `scenario-save`,
@@ -197,7 +202,12 @@ live under `/v/`.
 
 ## Pages
 
-`/requests` lists the requests; New request there asks for a name and a project. `/requests/[id]`
+`/requests` lists the requests with their bids, shots and assets; New request there asks for a name
+and a project. A box per row selects several, Shift a range, the header box every row the filters
+show; a bar then deletes or duplicates them (`src/lib/pure/request-select.ts`). Delete reads each
+request's facts and asks once: drafts on a press, the word `delete` typed when a request sent to
+vendors is in it, a request whose award is in Flow PT skipped and named. Each goes through the
+same `delete` and `duplicate` calls as one alone. `/requests/[id]`
 is a request's one page: a draft is built there (its bids and rows in one table grouped by bid, its
 details and vendors in the side panel, Issue in the header), and once issued it shows the vendors
 with their links, the award and what went out. `/requests/[id]/compare` and

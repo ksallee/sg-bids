@@ -10,6 +10,7 @@ import { invitationState, requestCounts, type BidFacts, type InvitationFacts, ty
 import type { InvitedVendor, RequestHeader } from '$lib/pure/model';
 import { vendorFromRow, type RequestRow, type VendorColumns } from '$lib/pure/rows';
 import type { AwardState, DeletionFacts } from '$lib/pure/request-delete';
+import { listTotals, type TotalsInput } from '$lib/pure/list-totals';
 import { encodeToken, hashToken, TOKEN_BYTES } from '$lib/pure/token';
 import { fromDatabase, StoreError } from './errors';
 import { DEFAULT_INVITATION_DAYS } from './store';
@@ -24,6 +25,11 @@ export interface RequestOverview {
 	readonly issuedAt: string | null;
 	readonly invited: number;
 	readonly submitted: number;
+	/** Its bids by name, in order. */
+	readonly bids: readonly string[];
+	/** Shots and assets in it, by unit, omitted rows left out (`$lib/pure/list-totals`). */
+	readonly shots: number;
+	readonly assets: number;
 }
 
 /** A request in the list across a site: the overview and its project. */
@@ -50,6 +56,18 @@ async function run<T>(query: PromiseLike<{ data: T | null; error: { code?: strin
 	return data as T;
 }
 
+/** Rows per page of a long read. Supabase answers 1000 at most. */
+const PAGE = 1000;
+
+async function paged<T>(make: () => Query): Promise<T[]> {
+	const out: T[] = [];
+	for (let from = 0; ; from += PAGE) {
+		const page = await run<T[]>(make().order('id').range(from, from + PAGE - 1));
+		out.push(...page);
+		if (page.length < PAGE) return out;
+	}
+}
+
 export interface RequestsOptions {
 	readonly now?: () => Date;
 	readonly random?: (length: number) => Uint8Array;
@@ -66,17 +84,29 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 		return query;
 	}
 
-	/** Requests newest first, with how many vendors are invited and have submitted, read through `scoped`. */
+	/**
+	 * Requests newest first, with how many vendors are invited and have submitted, their bids by name
+	 * and their shots and assets, read through `scoped`: one read per table for every request at once.
+	 */
 	async function overview(scoped: (table: Table, columns: string) => Query): Promise<(RequestOverview & { projectId: number })[]> {
 		const rows = await run<RequestRow[]>(scoped('bid_requests', '*').order('created_at', { ascending: false }));
 		if (rows.length === 0) return [];
 		const ids = rows.map((row) => row.id);
-		const invitations = await run<InvitationFacts[]>(scoped('invitations', INVITATION_FACTS).in('request_id', ids));
-		const bids = await run<BidFacts[]>(scoped('bids', BID_FACTS).in('request_id', ids));
+		const drafts = rows.filter((row) => row.status === 'draft').map((row) => row.id);
+		const sent = rows.filter((row) => row.status !== 'draft').map((row) => row.id);
+		const [invitations, bids, packages, draftBids, items] = await Promise.all([
+			run<InvitationFacts[]>(scoped('invitations', INVITATION_FACTS).in('request_id', ids)),
+			run<BidFacts[]>(scoped('bids', BID_FACTS).in('request_id', ids)),
+			paged<TotalsInput['packages'][number]>(() => scoped('request_packages', 'request_id, name, position').in('request_id', ids)),
+			drafts.length === 0 ? [] : paged<TotalsInput['draftBids'][number]>(() => scoped('production_bids', 'request_id, shot_count, asset_count').in('request_id', drafts)),
+			sent.length === 0 ? [] : paged<TotalsInput['items'][number]>(() => scoped('request_items', 'request_id, kind, unit_count, omitted').in('request_id', sent).eq('omitted', false))
+		]);
 		const counts = requestCounts(invitations, bids, now());
+		const totals = listTotals(rows, { packages, draftBids, items });
 		return rows.map((row) => {
 			const header = row.header as Partial<RequestHeader>;
 			const count = counts.get(row.id) ?? { invited: 0, submitted: 0 };
+			const total = totals.get(row.id) ?? { bids: [], shots: 0, assets: 0 };
 			return {
 				id: row.id,
 				projectId: row.project_id,
@@ -86,7 +116,8 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 				status: row.status,
 				dueDate: row.due_on,
 				issuedAt: row.issued_at,
-				...count
+				...count,
+				...total
 			};
 		});
 	}

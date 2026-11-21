@@ -158,9 +158,9 @@ export function scope(principal: Principal, table: Table, action: Action): Scope
 
 /**
  * The tables the lists read across projects: the requests and their counts, the bids and the
- * requests each is in.
+ * requests each is in, and an issued request's rows for its totals (a draft's are on its bids).
  */
-const SITE_READS: readonly Table[] = ['bid_requests', 'invitations', 'bids', 'production_bids', 'request_packages'];
+const SITE_READS: readonly Table[] = ['bid_requests', 'invitations', 'bids', 'production_bids', 'request_packages', 'request_items'];
 
 /**
  * The filter a read across the site carries: its site host, and the project ids it was verified

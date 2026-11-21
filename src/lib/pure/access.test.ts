@@ -138,8 +138,12 @@ describe('production across its readable projects', () => {
 		expect(siteScope(site, 'request_packages')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
 	});
 
-	it('reads nothing else: no rows, no lines, no scenarios, no awards, no rates', () => {
-		for (const table of ['request_items', 'production_bid_items', 'bid_lines', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'] as Table[]) {
+	it('reads an issued request’s rows, for the list’s totals, in its projects only', () => {
+		expect(siteScope(site, 'request_items')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
+	});
+
+	it('reads nothing else: no draft rows, no lines, no scenarios, no awards, no rates', () => {
+		for (const table of ['production_bid_items', 'bid_lines', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'] as Table[]) {
 			expect(() => siteScope(site, table)).toThrow();
 		}
 	});

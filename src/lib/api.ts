@@ -22,6 +22,11 @@ export interface RequestOverview {
 	issuedAt: string | null;
 	invited: number;
 	submitted: number;
+	/** Its bids by name, in order. */
+	bids: string[];
+	/** Shots and assets in it, by unit, omitted rows left out. */
+	shots: number;
+	assets: number;
 }
 
 export interface InvitationView {

@@ -37,6 +37,7 @@ import { minorDigits, money, rate, type Money, type Rate } from './money';
 import type { AwardInput, AwardPlan, Existing, FptSite, Write, Written } from './fpt-award';
 import { resolvePackages } from './packages';
 import { countOf, extend } from './count';
+import type { DeletionFacts } from './request-delete';
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 const seed = env.FC_SEED ? Number(env.FC_SEED) : env.CI ? 40 : undefined;
@@ -449,3 +450,20 @@ export function apply(plan: AwardPlan): { existing: Existing; written: Written; 
 		bidIds: new Map(bids.map((b) => [b.key, b.id]))
 	};
 }
+
+/** What production may know of a request before it deletes it: a draft, issued or closed, with an award or none. */
+export const deletionFactsArb: fc.Arbitrary<DeletionFacts> = fc
+	.record({
+		n: fc.nat({ max: 999 }),
+		title: fc.option(fc.constantFrom('Rooftop', 'Beach', 'Harbour', 'Night', 'Tunnel', ' '), { nil: null }),
+		round: fc.integer({ min: 1, max: 4 }),
+		status: fc.constantFrom<DeletionFacts['status']>('draft', 'issued', 'awarded', 'closed'),
+		shots: fc.nat({ max: 40 }),
+		assets: fc.nat({ max: 10 }),
+		invitations: fc.nat({ max: 4 }),
+		bids: fc.nat({ max: 6 }),
+		scenarios: fc.nat({ max: 3 }),
+		rates: fc.nat({ max: 3 }),
+		award: fc.option(fc.constantFrom<NonNullable<DeletionFacts['award']>>('published', 'partial', 'undo_partial'), { nil: null, freq: 4 })
+	})
+	.map(({ n, ...f }) => ({ ...f, id: uuid(9, n), code: `BR-${n}`, vendors: f.bids > 0 ? VENDOR_NAMES.slice(0, Math.min(f.bids, VENDOR_NAMES.length)) : [] }));
