@@ -209,6 +209,15 @@ describe('applyScenario', () => {
 	it('refuses a scenario for another request', () => {
 		expect(() => applyScenario(req, [bidA], { id: 's', requestId: 'other', name: 'x', picks: [] })).toThrow();
 	});
+
+	// Found by fpt-award.property.test.ts: a package id made from a sequence code holds any character.
+	it('counts a one-figure bid whose package id holds a bar', () => {
+		const pkg = 'seq:SQ|010';
+		const r = request({ shots: [shot('sh010', { package: pkg })], packages: [{ id: pkg, name: 'SQ|010' }] });
+		const b = bid({ id: 'bidA', vendorId: 'vA', currency: 'USD', lines: [line('a1', onShot('sh010'), usd(0), { inPackage: true })], packages: [{ package: pkg, total: usd(1) }] });
+		const result = applyScenario(r, [b], scenario([pick(onShot('sh010'), ['bidA', '100'])]));
+		expect(result.total).toEqual(usd(1));
+	});
 });
 
 describe('compareBids, rows', () => {

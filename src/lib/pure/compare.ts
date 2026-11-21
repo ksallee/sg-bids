@@ -436,7 +436,10 @@ export function applyScenario(request: BidRequest, bids: readonly VendorBid[], s
 	}
 	// A package priced as one figure is awarded whole: every row of it not omitted, to that bid. Its figure counts once.
 	for (const [slot, rows] of wholes) {
-		const [bidId, pkg] = slot.split('|');
+		// At the first bar: a bid id holds none, a package id may (`seq:<sequence code>`).
+		const at = slot.indexOf('|');
+		const bidId = slot.slice(0, at);
+		const pkg = slot.slice(at + 1);
 		const bid = bidsById.get(bidId)!;
 		const pkgName = resolved.packages.find((p) => p.id === pkg)?.name ?? pkg;
 		const every = (resolved.live.get(pkg) ?? []).every((t) => rows.has(targetKey(t)));
