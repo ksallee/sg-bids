@@ -160,7 +160,13 @@
 						<div class="bg-primary h-full" style:width="{awardedPct}%"></div>
 					</div>
 				</div>
-				{#if summary.invalid.length > 0}
+				{#each summary.partial as part (`${part.bidId}|${part.package}`)}
+					{@const column = grid.columns.findIndex((c) => c.bidId === part.bidId)}
+					<Notice tone="warning" title={`Part of ${part.name}.`}>
+						{' '}{s.names[column] ?? 'A vendor'} priced {part.name} as one figure. It is awarded whole or not at all, so these rows count as unawarded. Give it the whole package, or none of it.
+					</Notice>
+				{/each}
+				{#if summary.invalid.length > summary.partial.length && summary.partial.length === 0}
 					<Notice tone="warning">{summary.invalid.length} {summary.invalid.length === 1 ? 'pick no longer fits' : 'picks no longer fit'} the bids shown. They count as unawarded.</Notice>
 				{/if}
 				{#if summary.needsRate.length > 0}

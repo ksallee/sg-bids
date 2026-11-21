@@ -59,7 +59,9 @@ describe('linesByItem', () => {
 		amountBase: money(100, 'USD'),
 		share,
 		awardedBase: null,
-		excluded: false
+		excluded: false,
+		package: null,
+		inPackage: false
 	});
 	it('groups a split item, its vendors together', () => {
 		const out = linesByItem([l('SH010', 1, 'A', '100'), l('SH020', 2, 'A', '60'), l('SH020', 2, 'B', '40'), l('SH030', 3, 'B', null)]);

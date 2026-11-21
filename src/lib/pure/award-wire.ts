@@ -15,7 +15,8 @@ const isObject = (value: unknown): value is Json => typeof value === 'object' &&
 const isId = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const FIELD = /^[a-z][a-z0-9_]{0,99}$/;
 const SLOT = /^CustomEntity\d{2}$/;
-const KEY = /^sgbids\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/r\d{1,4}(\/(shot|asset):[^\s]{1,200})?$/;
+// A Bid's key: the vendor's bid, then a package (percent-encoded) or the general Bid, then a row for a Bid Line (`fpt-award.ts`).
+const KEY = /^sgbids\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/r\d{1,4}(\/(p:[A-Za-z0-9%._~!*'()-]{1,600}|general))?(\/(shot|asset):[^\s]{1,200})?$/;
 const STATUS: readonly AppStatus[] = ['draft', 'submitted', 'awarded', 'not_awarded'];
 
 /** Most rows one record may hold. Far above a real request. */

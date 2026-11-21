@@ -3,6 +3,7 @@ import { compareBids } from './compare';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
 import { groupRows, matchesFilter, offsetsOf, percentToBp, scrollToShow, sortRows, viewGrid, visibleRange, type ViewOptions } from './grid-view';
 import { money, rate } from './money';
+import { byPackage, byRow, packed } from './fixtures/packages';
 
 const usd = (minor: number) => money(minor, 'USD');
 const gbp = (minor: number) => money(minor, 'GBP');
@@ -72,14 +73,14 @@ describe('groupRows', () => {
 
 	it('subtotals each column in both currencies, counting what is excluded and missing', () => {
 		const seqA = groupRows(grid, 'sequence')[0];
-		expect(seqA.subtotals[0]).toEqual({ bid: usd(10_000), base: usd(10_000), priced: 1, excluded: 1, missing: 1 });
-		expect(seqA.subtotals[1]).toEqual({ bid: gbp(22_000), base: usd(27_500), priced: 3, excluded: 0, missing: 0 });
+		expect(seqA.subtotals[0]).toEqual({ bid: usd(10_000), base: usd(10_000), priced: 1, excluded: 1, missing: 1, inPackage: 0, declined: 0 });
+		expect(seqA.subtotals[1]).toEqual({ bid: gbp(22_000), base: usd(27_500), priced: 3, excluded: 0, missing: 0, inPackage: 0, declined: 0 });
 	});
 
 	it('has no base subtotal while a priced cell needs a rate', () => {
 		const noRate = compareBids(req, [one, { ...two, rate: null }]);
 		const seqA = groupRows(noRate, 'sequence')[0];
-		expect(seqA.subtotals[1]).toEqual({ bid: gbp(22_000), base: null, priced: 3, excluded: 0, missing: 0 });
+		expect(seqA.subtotals[1]).toEqual({ bid: gbp(22_000), base: null, priced: 3, excluded: 0, missing: 0, inPackage: 0, declined: 0 });
 	});
 });
 
@@ -216,5 +217,24 @@ describe('windowing', () => {
 		// Row 5 ends at 272; 200 high less a 50 header shows to 150.
 		expect(scrollToShow(offsets, 5, 0, 200, 50)).toBe(122);
 		expect(scrollToShow(offsets, 99, 0, 200)).toBeNull();
+	});
+});
+
+describe('grouped by package', () => {
+	const grid = compareBids(packed, [byPackage, byRow]);
+
+	it('makes a group per package, shots and assets together, each with the package as a unit', () => {
+		const groups = groupRows(grid, 'package');
+		expect(groups.map((g) => [g.key, g.label, g.rows.map((r) => r.target.id)])).toEqual([
+			['pkg:p1', 'Creature', ['a', 'b', 'd']],
+			['pkg:p2', 'Comp', ['c', 'x']]
+		]);
+		expect(groups[0].unit?.cells[0]).toMatchObject({ kind: 'package', amount: { base: usd(100_000) } });
+		expect(groups[0].subtotals[0]).toEqual({ bid: usd(0), base: usd(0), priced: 0, excluded: 0, missing: 1, inPackage: 2, declined: 0 });
+	});
+
+	it('counts the cells in a package price apart in any grouping', () => {
+		const groups = groupRows(grid, 'none');
+		expect(groups[0].subtotals[0].inPackage).toBe(2);
 	});
 });

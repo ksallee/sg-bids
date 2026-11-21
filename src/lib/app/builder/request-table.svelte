@@ -64,9 +64,14 @@
 	const nouns = $derived(kind === 'shot' ? 'Shots' : 'Assets');
 	const context = liveContext();
 
-	const items = $derived(builder.itemsOf(kind));
-	const byItem = $derived(new Map(items.map((item) => [item.id, item])));
+	const allItems = $derived(builder.itemsOf(kind));
+	const byItem = $derived(new Map(allItems.map((item) => [item.id, item])));
 	const requestColumns = $derived(builder.columns(kind));
+	const packages = $derived(builder.packages());
+	const packageNames = $derived(new Map(packages.map((p) => [p.id, p.name])));
+	/** Show the rows of one package, or every row. */
+	let inPackage = $state<string>('');
+	const items = $derived(inPackage === '' ? allItems : allItems.filter((item) => item.package === inPackage));
 
 	/* rows ----------------------------------------------------------------- */
 
@@ -91,13 +96,13 @@
 
 	function rowOf(item: Item): EntityRow {
 		const attributes: Record<string, unknown> = { __item: item.id };
-		for (const column of requestColumns) attributes[pathOf(column.key)] = itemValue(item, column.key);
+		for (const column of requestColumns) attributes[pathOf(column.key)] = itemValue(item, column.key, packageNames);
 		return { ...refOf(item), attributes, relationships: {} };
 	}
 
 	let query = $state('');
 	let from = $state<SourceFilter>('all');
-	const mixed = $derived(hasBothSources(items));
+	const mixed = $derived(hasBothSources(allItems));
 	const sourced = $derived(mixed ? bySource(items, from) : items);
 	const words = $derived(query.trim().toLowerCase().split(/\s+/).filter(Boolean));
 	const shown = $derived(
@@ -110,7 +115,7 @@
 	);
 	const rows = $derived(shown.map(rowOf));
 	const itemOfRef = (ref: EntityRef): Item | undefined => {
-		for (const item of items) {
+		for (const item of allItems) {
 			const mine = refOf(item);
 			if (mine.type === ref.type && mine.id === ref.id) return item;
 		}
@@ -252,7 +257,7 @@
 	}
 
 	function takeOut(): void {
-		const removed = items.flatMap((item, index) => (selectedItems.some((s) => s.id === item.id) ? [{ index, item }] : []));
+		const removed = allItems.flatMap((item, index) => (selectedItems.some((s) => s.id === item.id) ? [{ index, item }] : []));
 		if (removed.length === 0) return;
 		builder.remove(
 			kind,
@@ -270,22 +275,22 @@
 		};
 	}
 
-	const goneCount = $derived(items.filter((item) => builder.gone.has(item.id)).length);
+	const goneCount = $derived(allItems.filter((item) => builder.gone.has(item.id)).length);
 
 	function selectGone(): void {
-		selection = items.filter((item) => builder.gone.has(item.id)).map(refOf);
+		selection = allItems.filter((item) => builder.gone.has(item.id)).map(refOf);
 	}
 
 	// Rows just added from Flow PT: the first one scrolled into view.
 	$effect(() => {
 		const marked = fresh;
-		const first = untrack(() => items.find((item) => marked.has(item.id)));
+		const first = untrack(() => allItems.find((item) => marked.has(item.id)));
 		if (!first) return;
 		const ref = refOf(first);
 		void tick().then(() => document.querySelector(`tr[data-row-key="${CSS.escape(`${ref.type}:${ref.id}`)}"]`)?.scrollIntoView({ block: 'nearest' }));
 	});
 
-	const omitted = $derived(items.filter((item) => item.omitted).length);
+	const omitted = $derived(allItems.filter((item) => item.omitted).length);
 
 	const SOURCE_WORDS = $derived<Record<RowSource, { label: string; title: string }>>({
 		fpt: { label: 'From Flow PT', title: `From Flow PT. A change in a live column changes the ${type} in Flow PT.` },
@@ -338,7 +343,7 @@
 	{/if}
 {/snippet}
 
-{#if items.length === 0}
+{#if allItems.length === 0}
 	<div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center" data-slot="picked-empty">
 		<p class="text-base font-semibold tracking-tight">No {noun}s in the request yet</p>
 		<p class="text-muted-foreground max-w-md text-sm text-balance">
@@ -365,6 +370,17 @@
 				<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
 				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun} in the request`} bind:value={query} aria-label={`Find a ${noun} in the request`} />
 			</div>
+			<label class="text-muted-foreground flex items-center gap-2 text-xs">
+				<span>Package</span>
+				<select
+					class="border-input dark:bg-input/30 text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 max-w-56 rounded-lg border bg-transparent px-2 text-sm outline-none focus-visible:ring-3"
+					bind:value={inPackage}
+					data-slot="package-filter"
+				>
+					<option value="">Every package</option>
+					{#each packages as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+				</select>
+			</label>
 		{/if}
 		{#if mixed}
 			<Segmented

@@ -33,7 +33,8 @@ export function serverDraftStore(remote: DraftApi): DraftStore {
 				id: isLocalId(request.id) ? null : request.id,
 				code,
 				header: request.header,
-				items: { shots: request.shots, assets: request.assets }
+				items: { shots: request.shots, assets: request.assets },
+				packages: request.packages ?? []
 			});
 			return stored;
 		},

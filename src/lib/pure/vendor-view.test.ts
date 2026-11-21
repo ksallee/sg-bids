@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { asset, bid, line, onShot, request, shot } from './fixtures';
 import { money } from './money';
 import { vendorKeys } from './vendor-keys';
-import { groupItems, groupings, itemMatches, vendorBidView, vendorRequestView } from './vendor-view';
+import { groupItems, groupings, itemMatches, packageSections, vendorBidView, vendorRequestView } from './vendor-view';
 
 const SHOT = '11111111-1111-4111-8111-111111111111';
 const HERO = '22222222-2222-4222-8222-222222222222';
@@ -38,8 +38,9 @@ describe('vendorRequestView', () => {
 			issuedAt: '2026-11-20T10:00:00Z',
 			expiresAt: '2027-01-19T10:00:00Z',
 			header: { project: 'Show', round: 1, baseCurrency: 'USD', assumptions: ['4K'] },
-			shots: [{ id: SHOT, code: 'SH010', omitted: false, assetIds: [HERO], sequence: 'SQ1', frames: 96 }],
-			assets: [{ id: HERO, name: 'hero' }]
+			packages: [{ id: 'all', name: 'All shots and assets' }],
+			shots: [{ id: SHOT, code: 'SH010', omitted: false, assetIds: [HERO], sequence: 'SQ1', frames: 96, package: 'all' }],
+			assets: [{ id: HERO, name: 'hero', package: 'all' }]
 		});
 		const text = JSON.stringify(view);
 		for (const secret of ['inv-a', 'Vendor A', 'a@example.com', 'own@example.com', 'req-uuid', '918273645', '564738291', 'asset-1', '"vendors"']) {
@@ -62,10 +63,34 @@ describe('vendorRequestView of a breakdown row', () => {
 			{ kind: 'asset', key: 'asset-bd-2', id: HERO }
 		]);
 		const view = vendorRequestView({ invitation: { id: 'inv-own', name: 'Own' }, request: req, code: 'BR-1', status: 'issued', issuedAt: null, expiresAt: '2027-01-19T10:00:00Z', keys: own });
-		expect(view.shots).toEqual([{ id: SHOT, code: 'SH900', omitted: false, assetIds: [], frames: 48 }]);
-		expect(view.assets).toEqual([{ id: HERO, name: 'prop' }]);
+		expect(view.shots).toEqual([{ id: SHOT, code: 'SH900', omitted: false, assetIds: [], frames: 48, package: 'all' }]);
+		expect(view.assets).toEqual([{ id: HERO, name: 'prop', package: 'all' }]);
 		const text = JSON.stringify(view);
 		for (const secret of ['breakdown', 'source', '4242', 'shot-bd-1']) expect(text).not.toContain(secret);
+	});
+});
+
+describe('vendorRequestView with packages', () => {
+	it('sends each row with its package, and the packages that have a row, in order', () => {
+		const req = request({
+			packages: [
+				{ id: 'p1', name: 'Creature' },
+				{ id: 'p2', name: 'Empty' },
+				{ id: 'p3', name: 'Comp' }
+			],
+			shots: [shot('shot-918273645', { code: 'SH010', package: 'p3' })],
+			assets: [asset('asset-564738291', { name: 'hero', package: 'p1' })]
+		});
+		const view = vendorRequestView({ invitation: { id: 'i', name: 'V' }, request: req, code: 'C', status: 'issued', issuedAt: null, expiresAt: '2027-01-01T00:00:00Z', keys });
+		expect(view.packages).toEqual([
+			{ id: 'p1', name: 'Creature' },
+			{ id: 'p3', name: 'Comp' }
+		]);
+		expect(view.shots[0].package).toBe('p3');
+		expect(packageSections(view)).toEqual([
+			{ id: 'p1', label: 'Creature', keys: [`asset:${HERO}`] },
+			{ id: 'p3', label: 'Comp', keys: [`shot:${SHOT}`] }
+		]);
 	});
 });
 

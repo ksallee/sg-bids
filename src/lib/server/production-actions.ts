@@ -5,7 +5,7 @@
  */
 
 import { nextRound } from '$lib/pure/persist';
-import { parseId, parseLinks, parseSave, parseVendor } from '$lib/pure/wire';
+import { parseId, parseInvitationPackages, parseLinks, parseSave, parseVendor } from '$lib/pure/wire';
 import { loadPublication } from './award-actions';
 import { database, serverStore } from './env';
 import { StoreError } from './errors';
@@ -54,9 +54,10 @@ export async function getRequest(production: VerifiedProduction, body: Body) {
 export async function saveRequest(production: VerifiedProduction, body: Body) {
 	const parsed = parseSave(body);
 	if (!parsed.ok) throw new StoreError(422, parsed.message);
-	const { id: requestId, code, header, items } = parsed.value;
+	const { id: requestId, code, header, items, packages } = parsed.value;
+	const rows = { ...items, packages };
 	const request = await storing(() =>
-		requestId ? serverStore().updateDraftRequest(production, requestId, { code, header, items }) : serverStore().createDraftRequest(production, { code, header, items })
+		requestId ? serverStore().updateDraftRequest(production, requestId, { code, header, items: rows }) : serverStore().createDraftRequest(production, { code, header, items: rows })
 	);
 	return { request };
 }
@@ -85,6 +86,16 @@ export async function invite(production: VerifiedProduction, body: Body) {
 	const vendor = parseVendor(body.vendor);
 	if (!vendor.ok) throw new StoreError(422, vendor.message);
 	return storing(() => serverStore().inviteVendor(production, id(body.requestId), vendor.value));
+}
+
+/**
+ * A vendor's packages: some, or null for every one. Refused once the vendor has submitted a bid,
+ * withdrawn or not, with the reason.
+ */
+export async function invitePackages(production: VerifiedProduction, body: Body) {
+	const parsed = parseInvitationPackages(body);
+	if (!parsed.ok) throw new StoreError(422, parsed.message);
+	return { invitation: await serverStore().setInvitationPackages(production, parsed.value.invitationId, parsed.value.packages) };
 }
 
 export async function revoke(production: VerifiedProduction, body: Body) {

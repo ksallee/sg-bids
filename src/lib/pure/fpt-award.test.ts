@@ -1,15 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { bid, line, onAsset, onShot, request, shot, asset } from './fixtures';
+import { bidTotals } from './totals';
 import {
 	attachmentOf,
 	awardedTotals,
 	awardedTotalsQuery,
 	bidKey,
+	bidRowKeys,
 	chunk,
+	generalBidKey,
 	isClean,
 	lineKey,
 	mergeWritten,
 	NOTHING_WRITTEN,
+	packageBidKey,
 	planAward,
 	planUndo,
 	toBatchRequest,
@@ -24,6 +28,7 @@ import {
 } from './fpt-award';
 import type { AwardScenario, InvitedVendor } from './model';
 import { money, rate } from './money';
+import { byPackage, byRow, inPounds, packed } from './fixtures/packages';
 
 const SITE: FptSite = {
 	projectId: 1180,
@@ -267,7 +272,9 @@ describe('planAward, the preview', () => {
 			amountBase: money(198000, 'USD'),
 			share: '50',
 			awardedBase: money(99000, 'USD'),
-			excluded: false
+			excluded: false,
+			package: null,
+			inPackage: false
 		});
 		expect(plan.preview.bids[1]).toMatchObject({ vendor: 'Vendor B', currency: 'EUR', rate: rate('EUR', 'USD', '1.1', '2026-11-15'), group: 39 });
 		expect(plan.preview.removed).toEqual({ bids: [], lines: [], groups: [], items: [] });
@@ -565,5 +572,159 @@ describe('awarded totals', () => {
 		});
 		expect(awardedTotals([{ groupValue: { type: 'Shot', id: 1 }, summaries: { sg_awarded_base: 1500, id: 1 } }], 'JPY')['Shot:1'].total).toEqual(money(1500, 'JPY'));
 		expect(awardedTotals([{ groupValue: { type: 'Shot', id: 1 }, summaries: { sg_awarded_base: 12.35, id: 1 } }], 'KWD')['Shot:1'].total).toEqual(money(12350, 'KWD'));
+	});
+});
+
+describe('planAward with packages: one Bid per vendor per package', () => {
+	const fpt = (id: number) => ({ type: 'Shot', id });
+	const PACKED = {
+		...packed,
+		shots: packed.shots.map((s, i) => ({ ...s, fpt: fpt(300 + i) })),
+		assets: packed.assets.map((a) => ({ ...a, fpt: { type: 'Asset', id: 400 } })),
+		vendors: [vendor('vA', 'Vendor A', 38), vendor('vB', 'Vendor B', 39), vendor('vC', 'Vendor C', 40)]
+	};
+	const whole = (id: string, bidId: string) => ({ target: onShot(id), shares: [{ bidId, percent: '100' }] });
+	const PICKS = [whole('a', 'C'), whole('b', 'C'), whole('c', 'B'), { target: onAsset('x'), shares: [{ bidId: 'A', percent: '100' }] }];
+	const plan = (bids = [byPackage, byRow, inPounds], allLines = false, picks = PICKS) =>
+		planAward({
+			request: PACKED,
+			bids,
+			scenario: { id: 's', requestId: packed.id, name: 'S', picks },
+			options: { date: '2026-11-20', requestCode: 'PKG', allLines },
+			site: SITE,
+			existing: NOTHING
+		});
+	const creates = (p: ReturnType<typeof planAward>, entity: 'bid' | 'line') =>
+		p.steps.flatMap((s) => s.writes).filter((w): w is Extract<Write, { kind: 'create' }> => w.kind === 'create' && w.entity === entity);
+	const baseOf = (vendorId: string) => bidKey(packed.id, vendorId, 1);
+	const creature = (vendorId: string) => packageBidKey(baseOf(vendorId), 'p1');
+	const comp = (vendorId: string) => packageBidKey(baseOf(vendorId), 'p2');
+	const cents = (v: unknown) => Math.round(Number(v ?? 0) * 100);
+
+	it('writes a Bid per package each vendor bid on, keyed with the package, named with it', () => {
+		const bids = creates(plan(), 'bid');
+		expect(bids.map((b) => b.key)).toEqual([creature('vA'), comp('vA'), generalBidKey(baseOf('vA')), creature('vB'), comp('vB'), creature('vC'), comp('vC')]);
+		expect(bids[0].data).toMatchObject({ code: 'PKG Vendor A R1 Creature', sg_total: '1000.00', sg_awarded_date: null });
+		expect(packageBidKey(baseOf('vA'), 'seq:a/b')).toBe(`${baseOf('vA')}/p:seq%3Aa%2Fb`);
+	});
+
+	it('puts a package figure on its Bid, and links its rows on Bid Lines with no amount', () => {
+		const p = plan();
+		const bidC = creates(p, 'bid').find((b) => b.key === creature('vC'))!;
+		expect(bidC.data).toMatchObject({ sg_total: '600.00', sg_currency: 'GBP', sg_total_base: '750.00', sg_status_list: 'fin', sg_awarded_date: '2026-11-20' });
+		const lines = creates(p, 'line').filter((l) => l.key.startsWith(`${creature('vC')}/`));
+		expect(lines.map((l) => [l.key, l.data.sg_bid, l.data.sg_item, l.data.sg_amount, l.data.sg_amount_base, l.data.sg_awarded_base, l.data.sg_awarded, l.data.sg_share_percent])).toEqual([
+			[lineKey(creature('vC'), onShot('a')), { pendingBid: creature('vC') }, { type: 'Shot', id: 300 }, null, null, null, true, '100.0'],
+			[lineKey(creature('vC'), onShot('b')), { pendingBid: creature('vC') }, { type: 'Shot', id: 301 }, null, null, null, true, '100.0']
+		]);
+		expect(p.preview.lines.find((l) => l.key === lineKey(creature('vC'), onShot('a')))).toMatchObject({ package: 'Creature', inPackage: true, amount: null });
+	});
+
+	it('puts the row amounts of a package priced row by row on its Bid Lines, their sum on its Bid', () => {
+		const p = plan(undefined, true);
+		const bidB = creates(p, 'bid').find((b) => b.key === creature('vB'))!;
+		expect(bidB.data.sg_total).toBe('900.00');
+		const lines = creates(p, 'line').filter((l) => l.key.startsWith(`${creature('vB')}/`));
+		expect(lines.reduce((n, l) => n + cents(l.data.sg_amount), 0)).toBe(90_000);
+	});
+
+	it('puts the whole-bid figures on one more Bid with no line, so the Bids sum to the bid total exactly', () => {
+		const withCosts = {
+			...byPackage,
+			costs: [{ kind: 'overhead' as const, label: 'Overhead', amount: money(12_345, 'USD'), labour: false }],
+			discount: { kind: 'percent' as const, percent: '3' },
+			tax: { kind: 'percent' as const, percent: '7.5' }
+		};
+		const p = plan([withCosts, byRow, inPounds], true);
+		const vendorBids = creates(p, 'bid').filter((b) => b.key.startsWith(`${baseOf('vA')}/`));
+		const general = vendorBids.find((b) => b.key === generalBidKey(baseOf('vA')))!;
+		expect(general.data).toMatchObject({ code: 'PKG Vendor A R1 General costs', sg_status_list: 'fin' });
+		expect(creates(p, 'line').some((l) => l.key.startsWith(`${generalBidKey(baseOf('vA'))}/`))).toBe(false);
+		const grand = bidTotals(withCosts, 'USD').grand.bid.minor;
+		expect(vendorBids.reduce((n, b) => n + cents(b.data.sg_total), 0)).toBe(grand);
+		expect(vendorBids.reduce((n, b) => n + cents(b.data.sg_total_base), 0)).toBe(grand);
+		// The rebate estimate is a whole-bid figure: on the general Bid alone.
+		expect(general.data.sg_rebate_estimate).not.toBeNull();
+		expect(vendorBids.filter((b) => b !== general).every((b) => b.data.sg_rebate_estimate === null)).toBe(true);
+	});
+
+	it('sums a vendor Bids to its base total exactly, the last taking the rounding', () => {
+		const odd = { ...inPounds, rate: rate('GBP', 'USD', '1.33333', '2026-11-20'), lines: [...inPounds.lines.slice(0, 2), line('Cc', onShot('c'), money(33_333, 'GBP'))] };
+		const p = plan([odd], true, [whole('a', 'C'), whole('b', 'C')]);
+		const vendorBids = creates(p, 'bid');
+		expect(vendorBids.reduce((n, b) => n + cents(b.data.sg_total_base), 0)).toBe(bidTotals(odd, 'USD').grand.base.minor);
+	});
+
+	it('writes no Bid for a package the vendor declined', () => {
+		const declining = bid({ id: 'D', vendorId: 'vD', currency: 'USD', lines: [line('Dc', onShot('c'), money(10_000, 'USD')), line('Dx', onAsset('x'), money(10_000, 'USD'))], declined: ['p1'] });
+		const p = planAward({
+			request: { ...PACKED, vendors: [...PACKED.vendors, vendor('vD', 'Vendor D', 41)] },
+			bids: [declining],
+			scenario: { id: 's', requestId: packed.id, name: 'S', picks: [{ target: onShot('c'), shares: [{ bidId: 'D', percent: '100' }] }] },
+			options: { date: '2026-11-20', requestCode: 'PKG' },
+			site: SITE,
+			existing: NOTHING
+		});
+		expect(creates(p, 'bid').map((b) => b.key)).toEqual([comp('vD')]);
+	});
+
+	it('marks a package Bid awarded by its own rows, a split inside a row-priced package per Bid Line', () => {
+		const other = bid({ ...byRow, id: 'B2', vendorId: 'vC' });
+		const split = {
+			target: onShot('c'),
+			shares: [
+				{ bidId: 'B', percent: '60' },
+				{ bidId: 'B2', percent: '40' }
+			]
+		};
+		const p = plan([byRow, other], false, [split]);
+		const bidsB = creates(p, 'bid').filter((b) => b.key.startsWith(`${baseOf('vB')}/`));
+		expect(bidsB.map((b) => [b.key, b.data.sg_awarded_date])).toEqual([
+			[creature('vB'), null],
+			[comp('vB'), '2026-11-20']
+		]);
+		expect(creates(p, 'line').map((l) => [l.key, l.data.sg_share_percent])).toEqual([
+			[lineKey(comp('vB'), onShot('c')), '60.0'],
+			[lineKey(comp('vC'), onShot('c')), '40.0']
+		]);
+	});
+
+	it('keeps a request from before packages as it was, one Bid per vendor, the general Bid only with whole-bid figures', () => {
+		const plain = planAward(input());
+		expect(creates(plain, 'bid').map((b) => b.key)).toEqual([KEY_A, KEY_B]);
+		const withCosts = { ...BID_A, costs: [{ kind: 'overhead' as const, label: 'Overhead', amount: money(50_000, 'USD'), labour: false }] };
+		const p = planAward(input({ bids: [withCosts, BID_B] }));
+		const bids = creates(p, 'bid');
+		expect(bids.map((b) => b.key)).toEqual([KEY_A, generalBidKey(KEY_A), KEY_B]);
+		expect(bids.map((b) => b.data.sg_total)).toEqual(['4500.00', '500.00', '2700.00']);
+		expect(creates(p, 'line').every((l) => !l.key.startsWith(`${generalBidKey(KEY_A)}/`))).toBe(true);
+	});
+
+	it('finds every Bid and Bid Line an earlier run may have made, by key', () => {
+		expect(bidRowKeys(PACKED, byPackage)).toEqual({
+			bids: [creature('vA'), comp('vA'), generalBidKey(baseOf('vA'))],
+			lines: [lineKey(creature('vA'), onShot('a')), lineKey(creature('vA'), onShot('b')), lineKey(comp('vA'), onShot('c')), lineKey(comp('vA'), onAsset('x'))]
+		});
+	});
+
+	it('undoes every Bid and Bid Line of the award', () => {
+		const written: Written = {
+			bids: [creature('vC'), comp('vC'), generalBidKey(baseOf('vC'))].map((key, i) => ({ key, id: 10 + i, created: true })),
+			lines: [lineKey(creature('vC'), onShot('a')), lineKey(creature('vC'), onShot('b'))].map((key, i) => ({ key, id: 20 + i, created: true })),
+			groups: [],
+			attachments: []
+		};
+		const undo = planUndo(written, SITE);
+		expect(undo.writes).toEqual([
+			{ kind: 'delete', entityType: 'CustomEntity15', id: 20 },
+			{ kind: 'delete', entityType: 'CustomEntity15', id: 21 },
+			{ kind: 'delete', entityType: 'CustomEntity14', id: 10 },
+			{ kind: 'delete', entityType: 'CustomEntity14', id: 11 },
+			{ kind: 'delete', entityType: 'CustomEntity14', id: 12 }
+		]);
+	});
+
+	it('refuses a scenario that gives part of a package priced as one figure', () => {
+		expect(() => plan([inPounds], false, [whole('a', 'C')])).toThrow(/whole or not at all/);
 	});
 });

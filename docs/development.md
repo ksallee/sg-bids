@@ -123,13 +123,27 @@ setting a client names, and each call is its own transaction. The hashes of the 
 tokens, live and former, go to `withdrawn_links`, alone, so a dead link can say the request was
 withdrawn. Deleting never writes to Flow PT.
 
+Packages (`20261125100000_packages.sql`). `request_packages` holds a request's packages in order;
+`request_items.package_key` names each row's package by a foreign key, and a request with packages
+has every row in one. `invitations.package_keys` lists the packages a vendor is invited to, null for
+every one, keys of the request's own packages only. `bids.packages` holds the figures of packages
+priced as one figure and `bid_lines.in_package` marks the rows they cover; the packages a vendor
+declines are in the bid's header. `sg_save_request_items` takes the packages with the items in one
+write; the call without them clears a request's packages, so no request is half packaged. Packages
+freeze with the request (`sg_request_packages_guard`). A vendor's packages change only while it has
+no submitted or withdrawn bid (`sg_invitations_packages_guard`). A line for a row outside the
+vendor's packages, or a figure for a package outside them, is refused (`sg_bid_lines_guard`,
+`sg_bids_guard`). `sg_delete_request` deletes the packages with the rest. The migration is additive:
+no existing row changes, and code from before it runs on it unchanged.
+
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
 
 ### Production endpoints
 
 The browser reaches the data layer through `src/routes/api/production/<action>`: `list`, `get`,
-`save`, `issue`, `new-round`, `invite`, `revoke`, `reissue`, `delete-check` (what deleting the
+`save`, `issue`, `new-round`, `invite`, `invite-packages` (a vendor's packages, refused once it has
+submitted a bid), `revoke`, `reissue`, `delete-check` (what deleting the
 request would take with it, or the award that stops it) and `delete` (`{id, code}`, the request's
 code as typed). Each is a POST whose body carries
 `claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
@@ -299,6 +313,12 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
 - a vendor whose request was deleted is told it was withdrawn and nothing more, and a vendor
   discards its draft back to empty or to the last submitted version (`vendor-endpoints.db.test.ts`,
   `vendor.db.test.ts`);
+- packages save with the rows, freeze at issue and go with the request; a vendor invited to some
+  packages reads their rows alone and cannot write a line or a figure outside them, through the
+  store and in SQL; its packages change until it submits and are refused after; a figure covers its
+  rows; a declined package takes no price and one package is bid on at least; a request from before
+  packages works as one; a scenario giving part of a package priced as one figure is refused
+  (`packages.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.

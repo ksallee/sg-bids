@@ -52,6 +52,18 @@ export interface BidRequest {
 	readonly shots: readonly RequestShot[];
 	readonly assets: readonly RequestAsset[];
 	readonly vendors: readonly InvitedVendor[];
+	/**
+	 * Named groups of rows. Every row sits in one, named by its `package`. Absent or empty: a request
+	 * from before packages, read as one package holding every row (`packages.ts`).
+	 */
+	readonly packages?: readonly RequestPackage[];
+}
+
+/** A named group of rows a vendor is invited to, and may price as one figure. */
+export interface RequestPackage {
+	/** Stable: `seq:SEQ010`, `shots`, `assets`, or `pkg:<random>` for one production adds. */
+	readonly id: Id;
+	readonly name: string;
 }
 
 export interface RequestHeader {
@@ -105,6 +117,8 @@ export interface RequestShot {
 	readonly notes?: string;
 	/** Tech requirements by department name. */
 	readonly techRequirements?: Readonly<Record<string, string>>;
+	/** The package the shot sits in. Absent: the default (`packages.ts`). */
+	readonly package?: Id;
 }
 
 export interface RequestAsset {
@@ -121,6 +135,8 @@ export interface RequestAsset {
 	readonly omitted?: boolean;
 	/** Production's note to the vendors on this asset. */
 	readonly notes?: string;
+	/** The package the asset sits in. Absent: the default (`packages.ts`). */
+	readonly package?: Id;
 }
 
 export interface InvitedVendor {
@@ -134,6 +150,8 @@ export interface InvitedVendor {
 	/** Trusted Partner Network status, as typed. */
 	readonly tpn?: string;
 	readonly capacity?: string;
+	/** The packages the vendor is invited to. Absent: every package. */
+	readonly packages?: readonly Id[];
 }
 
 // The vendor bid: what a vendor answers, once per round.
@@ -166,6 +184,17 @@ export interface VendorBid {
 	readonly discount: Adjustment | null;
 	readonly tax: Adjustment | null;
 	readonly rebate: readonly RebateSplit[];
+	/** Packages priced as one figure. Their rows carry lines marked `inPackage`. Absent: none. */
+	readonly packages?: readonly PackagePrice[];
+	/** Packages the vendor is not bidding on: no line, no figure. Absent: it bids on every one. */
+	readonly declined?: readonly Id[];
+}
+
+/** One figure for a whole package: every row of it not omitted, all in. */
+export interface PackagePrice {
+	readonly package: Id;
+	readonly total: Money;
+	readonly notes?: string;
 }
 
 export interface PaymentMilestone {
@@ -196,6 +225,8 @@ export interface BidLine {
 	readonly startWeek?: string;
 	/** The vendor will not do this shot or asset. */
 	readonly excluded: boolean;
+	/** Covered by its package's one figure (`VendorBid.packages`). Its total is zero, never its price. */
+	readonly inPackage?: boolean;
 }
 
 export interface DepartmentCost {

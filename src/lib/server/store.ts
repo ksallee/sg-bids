@@ -7,11 +7,16 @@
  *
  * Writes that must land whole are SQL functions (`supabase/migrations/`); the freezes are
  * triggers there too, so a bug here cannot thaw a submitted bid or an issued request.
+ *
+ * A vendor invited to some packages reads the rows and packages of those alone: the token's
+ * principal carries the invitation's packages and `scope` filters every read of rows by them. A
+ * line or a figure outside them is refused here, and by the database's guards behind it.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { scope, stamp, type Action, type Principal, type ProductionPrincipal, type Table, type VendorPrincipal } from '$lib/pure/access';
-import type { AwardScenario, BidRequest, InvitedVendor, RequestAsset, RequestHeader, RequestShot, ScenarioPick, VendorBid } from '$lib/pure/model';
+import type { AwardScenario, BidRequest, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot, ScenarioPick, VendorBid } from '$lib/pure/model';
+import { packageProblems, resolvePackages } from '$lib/pure/packages';
 import { targetKey } from '$lib/pure/model';
 import { comparePercent, sumPercents } from '$lib/pure/percent';
 import { rangeProblems, submitProblems } from '$lib/pure/bid-limits';
@@ -21,6 +26,7 @@ import {
 	bidToRows,
 	headerToColumns,
 	itemsToRows,
+	packagesToRows,
 	requestFromRows,
 	scenarioFromRows,
 	scenarioToRows,
@@ -31,6 +37,7 @@ import {
 	type BidRow,
 	type InvitationRow,
 	type RequestItemRow,
+	type RequestPackageRow,
 	type RequestRow,
 	type ScenarioItemRow,
 	type ScenarioRow
@@ -46,7 +53,14 @@ import { fromDatabase, StoreError } from './errors';
 export const DEFAULT_INVITATION_DAYS = 60;
 
 /** The invitation columns anyone reads back. The token hash is never among them. */
-const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, vendor_group_id, contact_email, details, expires_at, revoked_at, last_opened_at, created_at';
+const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, vendor_group_id, contact_email, details, package_keys, expires_at, revoked_at, last_opened_at, created_at';
+
+/** What the builder saves under a draft: its rows and, when it has them, its packages. */
+export interface DraftItems {
+	readonly shots: readonly RequestShot[];
+	readonly assets: readonly RequestAsset[];
+	readonly packages?: readonly RequestPackage[];
+}
 
 type InvitationView = Omit<InvitationRow, 'token_hash'>;
 
@@ -144,6 +158,10 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		return run<RequestItemRow[]>(from(principal, 'request_items', 'read').eq('request_id', requestId).order('position'));
 	}
 
+	async function packageRows(principal: Principal, requestId: string): Promise<RequestPackageRow[]> {
+		return run<RequestPackageRow[]>(from(principal, 'request_packages', 'read').eq('request_id', requestId).order('position'));
+	}
+
 	async function bidsWithLines(principal: Principal, bids: BidRow[], request: RequestRow): Promise<VendorBid[]> {
 		if (bids.length === 0) return [];
 		const lines = await run<BidLineRow[]>(
@@ -168,29 +186,27 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	async function getRequest(principal: ProductionPrincipal, requestId: string): Promise<BidRequest> {
 		const row = await requestRow(principal, requestId);
-		const items = await itemRows(principal, requestId);
+		const [items, packages] = await Promise.all([itemRows(principal, requestId), packageRows(principal, requestId)]);
 		const invitations = await run<InvitationView[]>(
 			from(principal, 'invitations', 'read', INVITATION_COLUMNS).eq('request_id', requestId).order('created_at')
 		);
-		return requestFromRows(row, items, invitations.map(vendorFromRow));
+		return requestFromRows(row, items, invitations.map(vendorFromRow), packages);
 	}
 
-	async function saveItems(principal: ProductionPrincipal, requestId: string, items: { shots: readonly RequestShot[]; assets: readonly RequestAsset[] }) {
+	async function saveItems(principal: ProductionPrincipal, requestId: string, items: DraftItems) {
 		const tenant = scope(principal, 'request_items', 'insert').eq;
 		await run(
 			db.rpc('sg_save_request_items', {
 				p_request_id: requestId,
 				p_site_host: tenant.site_host,
 				p_project_id: tenant.project_id,
-				p_items: itemsToRows(items.shots, items.assets)
+				p_items: itemsToRows(items.shots, items.assets),
+				p_packages: packagesToRows(items.packages ?? [])
 			})
 		);
 	}
 
-	async function createDraftRequest(
-		principal: ProductionPrincipal,
-		input: { code: string; header: RequestHeader; items?: { shots: readonly RequestShot[]; assets: readonly RequestAsset[] } }
-	): Promise<BidRequest> {
+	async function createDraftRequest(principal: ProductionPrincipal, input: { code: string; header: RequestHeader; items?: DraftItems }): Promise<BidRequest> {
 		const row = await run<RequestRow>(
 			insert(principal, 'bid_requests', { code: input.code, status: 'draft', ...headerToColumns(input.header) })
 				.select()
@@ -203,7 +219,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	async function updateDraftRequest(
 		principal: ProductionPrincipal,
 		requestId: string,
-		input: { code?: string; header?: RequestHeader; items?: { shots: readonly RequestShot[]; assets: readonly RequestAsset[] } }
+		input: { code?: string; header?: RequestHeader; items?: DraftItems }
 	): Promise<BidRequest> {
 		const values: Record<string, unknown> = {};
 		if (input.code !== undefined) values.code = input.code;
@@ -269,6 +285,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		const request = await requestRow(principal, requestId);
 		if (request.status === 'closed') throw new StoreError(409, 'The request is closed.');
 		if (request.status === 'awarded') throw new StoreError(409, 'The request is awarded. Undo the award to invite another vendor.');
+		if (vendor.packages) await checkPackageKeys(principal, requestId, vendor.packages);
 		const token = encodeToken(random(TOKEN_BYTES));
 		const expires = (expiresAt ?? new Date(now().getTime() + DEFAULT_INVITATION_DAYS * 86_400_000)).toISOString();
 		const row = await run<InvitationView>(
@@ -277,6 +294,35 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 				.single()
 		);
 		return { invitation: vendorFromRow(row), token, expiresAt: row.expires_at };
+	}
+
+	/** Every key a package of the request. A request from before packages takes no list: it has one. */
+	async function checkPackageKeys(principal: ProductionPrincipal, requestId: string, keys: readonly Id[]): Promise<void> {
+		const known = new Set((await packageRows(principal, requestId)).map((p) => p.key));
+		if (known.size === 0) throw new StoreError(422, 'This request has one package. Invite the vendor to all of it.');
+		if (keys.length === 0) throw new StoreError(422, 'Pick at least one package, or every package.');
+		if (keys.some((k) => !known.has(k))) throw new StoreError(422, 'A package is not in the request. Reload the page.');
+	}
+
+	/**
+	 * The packages a vendor is invited to, or null for every one. Allowed while the request takes bids
+	 * and the vendor has submitted no bid, withdrawn or not: a bid answers the packages it was made for.
+	 */
+	async function setInvitationPackages(principal: ProductionPrincipal, invitationId: string, packages: readonly Id[] | null): Promise<InvitedVendor> {
+		const invitation = await run<InvitationView | null>(from(principal, 'invitations', 'read', INVITATION_COLUMNS).eq('id', invitationId).maybeSingle());
+		if (!invitation) throw new StoreError(404, 'No such invitation.');
+		const request = await requestRow(principal, invitation.request_id);
+		if (request.status !== 'draft' && request.status !== 'issued') throw new StoreError(409, 'The request no longer takes bids. Its vendors keep their packages.', { reason: 'closed' });
+		const bids = await run<{ status: string }[]>(from(principal, 'bids', 'read', 'status').eq('invitation_id', invitationId));
+		if (bids.length > 0) {
+			throw new StoreError(409, `${invitation.vendor_name} has submitted a bid. Its packages are fixed: a bid answers the packages it was made for.`, { reason: 'submitted' });
+		}
+		if (packages) await checkPackageKeys(principal, invitation.request_id, packages);
+		const row = await run<InvitationView | null>(
+			update(principal, 'invitations', { package_keys: packages ? [...packages] : null }).eq('id', invitationId).select(INVITATION_COLUMNS).maybeSingle()
+		);
+		if (!row) throw new StoreError(404, 'No such invitation.');
+		return vendorFromRow(row);
 	}
 
 	async function revokeInvitation(principal: ProductionPrincipal, invitationId: string): Promise<void> {
@@ -349,7 +395,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		if (row.revoked_at !== null || new Date(row.expires_at).getTime() <= now().getTime()) {
 			throw new StoreError(403, 'This link has expired or was withdrawn.');
 		}
-		return { principal: { kind: 'vendor', invitationId: row.id, requestId: row.request_id }, row };
+		return { principal: { kind: 'vendor', invitationId: row.id, requestId: row.request_id, packages: row.package_keys ?? null }, row };
 	}
 
 	/**
@@ -414,7 +460,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		const request = await vendorRequest(principal);
 		await run(update(principal, 'invitations', { last_opened_at: now().toISOString() }));
 		const vendor = vendorFromRow(row);
-		const items = await itemRows(principal, request.id);
+		// The rows and packages of the vendor's packages alone (`scope`).
+		const [items, packages] = await Promise.all([itemRows(principal, request.id), packageRows(principal, request.id)]);
 		return {
 			invitation: vendor,
 			code: request.code,
@@ -422,10 +469,33 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 			status: request.status === 'issued' ? 'issued' : 'closed',
 			issuedAt: request.issued_at,
 			expiresAt: row.expires_at,
-			request: requestFromRows(request, items, [vendor]),
+			request: requestFromRows(request, items, [vendor], packages),
 			bids: await vendorBids(principal, request),
 			itemKeys: items.map(itemKey)
 		};
+	}
+
+	/** The request as the vendor may see it: its packages' rows and packages, for the checks on a write. */
+	async function vendorRows(principal: VendorPrincipal, request: RequestRow): Promise<BidRequest> {
+		const [items, packages] = await Promise.all([itemRows(principal, request.id), packageRows(principal, request.id)]);
+		return requestFromRows(request, items, [], packages);
+	}
+
+	/**
+	 * What breaks the package rules in a bid of this vendor: a line for a row it may not see, a figure
+	 * for a package it may not price, or a figure that does not cover its rows.
+	 */
+	function packageRefusals(
+		visible: BidRequest,
+		bid: Pick<VendorBid, 'packages' | 'declined'> & { readonly lines: readonly Pick<VendorBid['lines'][number], 'target' | 'inPackage' | 'excluded'>[] },
+		submitting = false
+	): string[] {
+		const seen = new Set([...visible.shots.map((s) => `shot:${s.id}`), ...visible.assets.map((a) => `asset:${a.id}`)]);
+		if (bid.lines.some((l) => !seen.has(`${l.target.kind}:${l.target.id}`))) return ['A line names a row outside your packages. Reload the page.'];
+		const resolved = resolvePackages(visible);
+		const problems = packageProblems(resolved, visible, bid, new Set(resolved.packages.map((p) => p.id)));
+		// A draft may decline every package for a while; a submit bids on one at least.
+		return submitting ? problems : problems.filter((p) => p !== 'Bid on one package at least.');
 	}
 
 	/** The vendor's own bids, oldest version first, with their version and stamps. */
@@ -462,6 +532,8 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		if (!isCurrency(draft.currency)) throw new StoreError(422, `${draft.currency} is not a currency on the ISO 4217 list.`);
 		const ranges = rangeProblems(draft);
 		if (ranges.length > 0) throw new StoreError(422, ranges.join(' '));
+		const refusals = packageRefusals(await vendorRows(principal, request), draft);
+		if (refusals.length > 0) throw new StoreError(422, refusals.join(' '));
 		let rows: ReturnType<typeof bidToRows>;
 		try {
 			rows = bidToRows({ ...draft, rate: null }, draft.currency);
@@ -479,6 +551,10 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		if (request.status !== 'issued') throw new StoreError(409, 'The request is closed.');
 		const bid = await vendorBid(principal, request, bidId);
 		if (bid.status !== 'draft') throw new StoreError(409, 'That bid is already submitted. A change is a new version.');
+		// The vendor's packages may have changed since the draft was saved: it answers the ones it has now.
+		const refusals = packageRefusals(await vendorRows(principal, request), bid, true);
+		if (refusals.includes('Bid on one package at least.')) throw new StoreError(422, 'Bid on one package at least.');
+		if (refusals.length > 0) throw new StoreError(409, `Your packages changed since this draft was saved. Reload the page. ${refusals[0]}`, { reason: 'packages' });
 		let problems: string[];
 		try {
 			problems = submitProblems(bid, bid.currency);
@@ -527,6 +603,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 		getRequest,
 		listRequests,
 		inviteVendor,
+		setInvitationPackages,
 		revokeInvitation,
 		listBids,
 		saveScenario,

@@ -12,7 +12,7 @@
 import { isCurrency } from './currencies';
 import { isDay, suggestCode, toHeader } from './header';
 import { isWebLink } from './safe-href';
-import type { BidRequest, RequestAsset, RequestHeader, RequestShot } from './model';
+import type { BidRequest, RequestAsset, RequestHeader, RequestPackage, RequestShot } from './model';
 import { buildRequest, type BuilderState } from './request';
 
 const LOCAL = 'local-';
@@ -29,6 +29,8 @@ export function isLocalId(id: string): boolean {
 export interface Items {
 	readonly shots: readonly RequestShot[];
 	readonly assets: readonly RequestAsset[];
+	/** Every row sits in one. Absent or empty: a request from before packages. */
+	readonly packages?: readonly RequestPackage[];
 }
 
 export type Savable = { readonly ok: true; readonly code: string; readonly header: RequestHeader; readonly items: Items } | { readonly ok: false; readonly reason: string };
@@ -63,15 +65,15 @@ export function savable(state: BuilderState, fallbackCode?: string): Savable {
 		ok: true,
 		code,
 		header: toHeader(form, state.project),
-		items: { shots: request.shots.map(withoutThumbnail), assets: request.assets.map(({ timesUsed, ...rest }) => (void timesUsed, rest)) }
+		items: { shots: request.shots.map(withoutThumbnail), assets: request.assets.map(({ timesUsed, ...rest }) => (void timesUsed, rest)), packages: request.packages ?? [] }
 	};
 }
 
-/** The next round of an issued request: same code, the round after, the items as they were. */
+/** The next round of an issued request: same code, the round after, the items and packages as they were. */
 export function nextRound(request: BidRequest): { code: string; header: RequestHeader; items: Items } {
 	return {
 		code: request.header.code ?? '',
 		header: { ...request.header, round: request.header.round + 1 },
-		items: { shots: request.shots.map(withoutThumbnail), assets: request.assets.map(({ timesUsed, ...rest }) => (void timesUsed, rest)) }
+		items: { shots: request.shots.map(withoutThumbnail), assets: request.assets.map(({ timesUsed, ...rest }) => (void timesUsed, rest)), packages: request.packages ?? [] }
 	};
 }

@@ -4,6 +4,7 @@ import { bid, line, onAsset, onShot, request, shot, asset } from './fixtures';
 import { bidKey, lineKey, type Written } from './fpt-award';
 import type { AwardScenario, InvitedVendor } from './model';
 import { money, rate } from './money';
+import { inPounds, packed } from './fixtures/packages';
 
 const vendor = (id: string, name: string): InvitedVendor => ({ id, name, email: `${id}@x.test`, ndaExecuted: true });
 const REQUEST = request({
@@ -84,15 +85,53 @@ describe('awardSummary', () => {
 	it('refuses a bid with no rate', () => {
 		expect(() => awardSummary(REQUEST, [BID_A, { ...BID_B, rate: null }], SCENARIO)).toThrow();
 	});
+
+	it('counts a package priced as one figure once, its rows in it', () => {
+		const picks = ['a', 'b'].map((id) => ({ target: onShot(id), shares: [{ bidId: 'C', percent: '100' }] }));
+		const summary = awardSummary({ ...packed, vendors: [vendor('vC', 'Vendor C')] }, [inPounds], { id: 's', requestId: packed.id, name: 'S', picks });
+		expect(summary.total).toEqual(money(75_000, 'USD'));
+		expect(summary.vendors).toEqual([{ vendorId: 'vC', name: 'Vendor C', shots: 2, assets: 0, split: 0, total: money(75_000, 'USD') }]);
+	});
+
+	it('refuses part of a package priced as one figure', () => {
+		const picks = [{ target: onShot('a'), shares: [{ bidId: 'C', percent: '100' }] }];
+		expect(() => awardSummary(packed, [inPounds], { id: 's', requestId: packed.id, name: 'S', picks })).toThrow(/whole or not at all/);
+	});
+});
+
+describe('awardRows with packages', () => {
+	it('records each row of a package awarded whole on its own line', () => {
+		const picks = ['a', 'b'].map((id) => ({ target: onShot(id), shares: [{ bidId: 'C', percent: '100' }] }));
+		const rows = awardRows(packed, [inPounds], { id: 's', requestId: packed.id, name: 'S', picks }, { bids: [], lines: [], groups: [], attachments: [] });
+		expect(rows.map((r) => [r.item_key, r.bid_line_id, r.share_percent])).toEqual([
+			['a', 'Ca', '100'],
+			['b', 'Cb', '100']
+		]);
+	});
 });
 
 describe('bidLinks', () => {
 	it('links each Bid to its page on the site', () => {
 		expect(bidLinks('https://site.test/', { bidType: 'CustomEntity14' }, WRITTEN, REQUEST)).toEqual([
-			{ vendorId: 'va', name: 'Vendor A', id: 5001, url: 'https://site.test/detail/CustomEntity14/5001' },
-			{ vendorId: 'vb', name: 'Vendor B', id: 5002, url: 'https://site.test/detail/CustomEntity14/5002' }
+			{ vendorId: 'va', name: 'Vendor A', label: null, id: 5001, url: 'https://site.test/detail/CustomEntity14/5001' },
+			{ vendorId: 'vb', name: 'Vendor B', label: null, id: 5002, url: 'https://site.test/detail/CustomEntity14/5002' }
 		]);
 		expect(detailUrl('https://site.test', 'CustomEntity14', 7)).toBe('https://site.test/detail/CustomEntity14/7');
+	});
+
+	it('names the package of each Bid, and the general one', () => {
+		const written = {
+			...WRITTEN,
+			bids: [
+				{ key: 'sgbids/req1/va/r1/p:seq%3ASQ1', id: 1, created: true },
+				{ key: 'sgbids/req1/va/r1/general', id: 2, created: true }
+			]
+		};
+		const links = bidLinks('https://site.test', { bidType: 'CustomEntity14' }, written, { ...REQUEST, packages: [{ id: 'seq:SQ1', name: 'SQ1' }] });
+		expect(links.map((l) => [l.name, l.label])).toEqual([
+			['Vendor A', 'SQ1'],
+			['Vendor A', 'General costs']
+		]);
 	});
 
 	it('skips a key of another request', () => {

@@ -22,6 +22,10 @@
 	import StatusChip from '$lib/app/status-chip.svelte';
 	import LinkOnce from '$lib/app/request/link-once.svelte';
 	import InviteForm from '$lib/app/request/invite-form.svelte';
+	import PackagesDialog from '$lib/app/request/packages-dialog.svelte';
+	import Package from '@lucide/svelte/icons/package';
+	import { packageStats } from '$lib/pure/packages';
+	import type { InvitationView } from '$lib/api';
 	import AwardPanel from '$lib/app/award/award-panel.svelte';
 	import UndoNote from '$lib/app/award/undo-note.svelte';
 	import VendorSheet from '$lib/app/builder/vendor-sheet.svelte';
@@ -88,6 +92,47 @@
 
 	let deleteOpen = $state(false);
 
+	// A vendor's packages: changed until it submits a bid.
+	let editing = $state<InvitationView | null>(null);
+	let editingOpen = $state(false);
+	let packageError = $state<string | null>(null);
+	let savingPackages = $state(false);
+
+	function editPackages(inv: InvitationView): void {
+		editing = inv;
+		packageError = null;
+		editingOpen = true;
+	}
+
+	async function savePackages(next: string[] | null): Promise<void> {
+		if (!editing) return;
+		savingPackages = true;
+		packageError = null;
+		try {
+			await api.invitePackages(projectId!, editing.vendor.id, next);
+			loaded = await api.get(projectId!, id);
+			editingOpen = false;
+		} catch (error) {
+			packageError = error instanceof Error ? error.message : String(error);
+		} finally {
+			savingPackages = false;
+		}
+	}
+
+	/** Why a vendor's packages are fixed, or null. */
+	function lockedWhy(inv: InvitationView): string | null {
+		if (inv.state.kind === 'submitted' || inv.state.kind === 'withdrawn') return `${inv.vendor.name} has submitted a bid. Its packages are fixed: a bid answers the packages it was made for.`;
+		if (loaded && loaded.status !== 'draft' && loaded.status !== 'issued') return 'The request no longer takes bids.';
+		return null;
+	}
+
+	function packagesLabel(inv: InvitationView, names: ReadonlyMap<string, string>): string {
+		if (!inv.vendor.packages) return 'Every package';
+		const known = inv.vendor.packages.filter((p) => names.has(p));
+		if (known.length === 0) return 'No package';
+		return known.length <= 2 ? known.map((p) => names.get(p)).join(', ') : `${known.length} of ${names.size} packages`;
+	}
+
 	const time = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 	const day = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -113,6 +158,9 @@
 		{@const counts = summarize(r)}
 		{@const submitted = loaded.invitations.filter((inv) => inv.state.kind === 'submitted').length}
 		{@const comparing = loaded.status !== 'draft' && submitted > 0}
+		{@const packages = r.packages ?? []}
+		{@const stats = packageStats(r)}
+		{@const names = new Map(packages.map((p) => [p.id, p.name]))}
 		<PageHeader measure="wide" title={r.header.title ?? 'Untitled request'} back={{ href: '/bids', label: 'Bid requests' }}>
 			{#snippet context()}
 				<StatusChip status={loaded!.status} />
@@ -157,7 +205,7 @@
 
 			<Section title="Vendors" meta={`${loaded.invitations.length} invited, ${submitted} ${submitted === 1 ? 'bid' : 'bids'} in`}>
 				{#if loaded.status === 'draft' || loaded.status === 'issued'}
-					<InviteForm projectId={projectId!} requestId={r.id} onInvited={invited} primary={!comparing} />
+					<InviteForm projectId={projectId!} requestId={r.id} onInvited={invited} primary={!comparing} {packages} {stats} />
 				{/if}
 				{#if loaded.invitations.length === 0}
 					<p class="text-muted-foreground text-sm">Nobody is invited yet.</p>
@@ -167,6 +215,7 @@
 							<thead>
 								<tr>
 									<th class={cn(TH, 'pl-0')}>Vendor</th>
+									{#if packages.length > 0}<th class={TH}>Packages</th>{/if}
 									<th class={TH}>Where it stands</th>
 									<th class={TH}>Link works until</th>
 									<th class={cn(TH, 'pr-0 text-right')}><span class="sr-only">Actions</span></th>
@@ -183,6 +232,20 @@
 												<span class="text-muted-foreground truncate text-xs">{inv.vendor.email}{inv.vendor.fpt ? ', linked to a Flow PT Group' : ''}</span>
 											</div>
 										</td>
+										{#if packages.length > 0}
+											{@const why = lockedWhy(inv)}
+											<td class={TD} data-slot="invitation-packages">
+												<button
+													type="button"
+													class="hover:text-foreground text-muted-foreground inline-flex max-w-64 items-center gap-1.5 text-left underline-offset-2 hover:underline disabled:no-underline"
+													onclick={() => editPackages(inv)}
+													title={why ?? 'Change the packages'}
+												>
+													<Package class="size-3.5 shrink-0" aria-hidden="true" />
+													<span class="text-foreground truncate">{packagesLabel(inv, names)}</span>
+												</button>
+											</td>
+										{/if}
 										<td class={TD}>
 											<span class="inline-flex flex-wrap items-center gap-x-2">
 												<span class={cn('size-1.5 rounded-full', TONE[s.kind])} aria-hidden="true"></span>
@@ -216,6 +279,20 @@
 				<VendorSheet request={r} />
 			</Section>
 		</PageBody>
+
+		{#if editing}
+			<PackagesDialog
+				bind:open={editingOpen}
+				vendor={editing.vendor.name}
+				{packages}
+				{stats}
+				value={editing.vendor.packages ?? null}
+				locked={lockedWhy(editing)}
+				busy={savingPackages}
+				error={packageError}
+				onSave={(next) => void savePackages(next)}
+			/>
+		{/if}
 
 		<DeleteRequest
 			bind:open={deleteOpen}

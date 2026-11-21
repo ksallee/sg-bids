@@ -12,6 +12,8 @@
 	import RequestTable from './request-table.svelte';
 	import SummaryBar from './summary-bar.svelte';
 	import BreakdownDialog from './breakdown-dialog.svelte';
+	import PackagesDialog from './packages-dialog.svelte';
+	import Package from '@lucide/svelte/icons/package';
 	import MatchLine from './match-line.svelte';
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
@@ -39,6 +41,7 @@
 	const ids = (k: ItemKind) => (k === 'shot' ? builder.state.shots : builder.state.assets).map((row) => row.id);
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
 	let breakdownOpen = $state(false);
+	let packagesOpen = $state(false);
 
 	/** The rows there were when the dialog opened, and the rows it added, marked once it closes. */
 	let before = $state<ReadonlySet<string>>(new Set());
@@ -102,6 +105,10 @@
 			<div class="flex items-center gap-2">
 				<Button id="add-from-fpt" size="sm" variant="secondary" onclick={openPicker} data-slot="fpt-open"><ListPlus data-icon="inline-start" />Add from Flow PT</Button>
 				<Button size="sm" variant="secondary" onclick={() => (breakdownOpen = true)} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+				<Button size="sm" variant="outline" onclick={() => (packagesOpen = true)} data-slot="packages-open" disabled={builder.readOnly}>
+					<Package data-icon="inline-start" />Packages
+					<span class="text-muted-foreground tabular-nums">{builder.packages().length}</span>
+				</Button>
 			</div>
 			<div class="ml-auto flex min-w-0 items-center py-2"><SummaryBar {builder} {onFocus} /></div>
 		</div>
@@ -113,4 +120,5 @@
 		</div>
 	{#if adding}<FptAddDialog {builder} kind={adding} onclose={() => void done()} />{/if}
 	<BreakdownDialog {builder} {kind} bind:open={breakdownOpen} />
+	<PackagesDialog {builder} bind:open={packagesOpen} />
 </section>

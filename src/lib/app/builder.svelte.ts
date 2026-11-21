@@ -8,6 +8,9 @@
  * kind, and an edit to a column a Flow PT field feeds writes that field as the signed in person,
  * then reads it back (`$lib/pure/row-edit`, `$lib/io/fpt-write`). The issue freezes what is on
  * screen.
+ *
+ * Every row sits in a package (`$lib/pure/packages`): its sequence's by default. Production adds,
+ * renames and deletes packages here, and moves rows with the Package column, in place or in bulk.
  */
 
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
@@ -34,7 +37,8 @@ import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
 import type { ItemLink } from '$lib/pure/wire';
 import { readiness, type OtherRequest, type Readiness } from '$lib/pure/readiness';
 import { buildRequest, removeItems, restoreState, tiersFor, type BuilderState } from '$lib/pure/request';
-import type { RequestAsset, RequestShot } from '$lib/pure/model';
+import type { Id, RequestAsset, RequestPackage, RequestShot, Target } from '$lib/pure/model';
+import { addPackage, deletePackage, duplicatePackage, moveRows, packageStats, renamePackage, withDefaults, type PackageRows, type PackageStats } from '$lib/pure/packages';
 import { today } from '$lib/app/today';
 
 /** The table column a mapping slot fills. */
@@ -134,6 +138,8 @@ export class Builder {
 			const loaded = await drafts.loadDraft(requestId, project.id);
 			this.state = restoreState(loaded.request);
 			this.status = loaded.status;
+			// A draft from before packages, or with rows that name none: each row to its default.
+			if (this.status === 'draft') this.state = { ...this.state, ...withDefaults({ shots: this.state.shots, assets: this.state.assets, packages: this.state.packages ?? [] }) };
 			if (this.state.project) this.state = { ...this.state, project: { ...this.state.project, name: this.state.project.name || project.name } };
 			this.saving = { kind: 'saved', at: new Date() };
 		} else {
@@ -179,7 +185,7 @@ export class Builder {
 		this.saving = { kind: 'saving' };
 		const wasLocal = isLocalId(this.state.id);
 		this.inFlight = drafts
-			.saveDraft({ id: this.state.id, header: ready.header, shots: [...ready.items.shots], assets: [...ready.items.assets], vendors: [] })
+			.saveDraft({ id: this.state.id, header: ready.header, shots: [...ready.items.shots], assets: [...ready.items.assets], vendors: [], packages: [...(ready.items.packages ?? [])] })
 			.then((stored) => {
 				if (wasLocal) {
 					this.state = { ...this.state, id: stored.id };
@@ -383,7 +389,9 @@ export class Builder {
 
 	private setItems(kind: ItemKind, items: RequestShot[] | RequestAsset[]): void {
 		if (this.readOnly) return;
-		this.state = kind === 'shot' ? { ...this.state, shots: items as RequestShot[] } : { ...this.state, assets: items as RequestAsset[] };
+		const next = kind === 'shot' ? { ...this.state, shots: items as RequestShot[] } : { ...this.state, assets: items as RequestAsset[] };
+		// A new row goes to its default package.
+		this.state = { ...next, ...withDefaults({ shots: next.shots, assets: next.assets, packages: next.packages ?? [] }) };
 		this.save();
 	}
 
@@ -408,7 +416,99 @@ export class Builder {
 	/** The table's columns for a kind: live where a field feeds them, locked where the person may not write. */
 	columns(kind: ItemKind): RequestColumn[] {
 		if (!this.mapping) return [];
-		return requestColumns(kind, this.mapping[kind], this.schemaOf(kind), this.denied[kind]);
+		return requestColumns(kind, this.mapping[kind], this.schemaOf(kind), this.denied[kind], this.packages().map((p) => p.name));
+	}
+
+	/* packages ------------------------------------------------------------- */
+
+	/** The rows and packages as they go out: every row in one, its default when it named none. */
+	private packed(): PackageRows {
+		return withDefaults({ shots: this.state.shots, assets: this.state.assets, packages: this.state.packages ?? [] });
+	}
+
+	packages(): readonly RequestPackage[] {
+		return this.packed().packages;
+	}
+
+	/** Each package's rows and frames. */
+	packageStats(): Map<Id, PackageStats> {
+		return packageStats(this.packed());
+	}
+
+	/** A package's name by its id. */
+	packageNames(): Map<Id, string> {
+		return new Map(this.packages().map((p) => [p.id, p.name]));
+	}
+
+	private setPacked(rows: PackageRows): void {
+		if (this.readOnly) return;
+		this.state = { ...this.state, shots: [...rows.shots], assets: [...rows.assets], packages: [...rows.packages] };
+		this.save();
+	}
+
+	/** Each edit answers null when it landed, else why not. */
+	private edit(result: { ok: true; rows: PackageRows } | { ok: false; message: string }): string | null {
+		if (!result.ok) return result.message;
+		this.setPacked(result.rows);
+		return null;
+	}
+
+	addPackage(name: string): string | null {
+		const seed = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : String(Date.now());
+		return this.edit(addPackage(this.packed(), name, `pkg:${seed}`));
+	}
+
+	duplicatePackage(id: Id): string | null {
+		const seed = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID().slice(0, 8) : String(Date.now());
+		return this.edit(duplicatePackage(this.packed(), id, `pkg:${seed}`));
+	}
+
+	renamePackage(id: Id, name: string): string | null {
+		return this.edit(renamePackage(this.packed(), id, name));
+	}
+
+	deletePackage(id: Id): string | null {
+		return this.edit(deletePackage(this.packed(), id));
+	}
+
+	moveToPackage(targets: readonly Target[], id: Id): string | null {
+		return this.edit(moveRows(this.packed(), targets, id));
+	}
+
+	/**
+	 * The Package column's edits: each row named goes to the package of the name given. Changes are
+	 * the request's own, so the toast's undo puts the rows back.
+	 */
+	private movePackages(kind: ItemKind, changes: readonly CellChange[]): EditOutcome {
+		const packed = this.packed();
+		const byName = new Map(packed.packages.map((p) => [p.name, p.id]));
+		const names = new Map(packed.packages.map((p) => [p.id, p.name]));
+		const items = kind === 'shot' ? packed.shots : packed.assets;
+		const failures: Refusal[] = [];
+		const done: Change[] = [];
+		let rows: PackageRows = packed;
+		for (const change of changes) {
+			const item = items.find((i) => i.id === change.itemId);
+			const to = typeof change.value === 'string' ? byName.get(change.value) : undefined;
+			if (!item) {
+				failures.push({ itemId: change.itemId, key: 'package', reason: 'This row is no longer in the request.' });
+				continue;
+			}
+			if (to === undefined) {
+				failures.push({ itemId: change.itemId, key: 'package', reason: 'Pick one of the request’s packages.' });
+				continue;
+			}
+			if (item.package === to) continue;
+			const moved = moveRows(rows, [{ kind, id: item.id } as Target], to);
+			if (!moved.ok) {
+				failures.push({ itemId: change.itemId, key: 'package', reason: moved.message });
+				continue;
+			}
+			rows = moved.rows;
+			done.push({ itemId: item.id, key: 'package', target: null, before: names.get(item.package!) ?? null, after: names.get(to) ?? null });
+		}
+		if (done.length > 0) this.setPacked(rows);
+		return { kind, key: 'package', changes: done, failures };
 	}
 
 	private keysOf(kind: ItemKind): ReadonlySet<string> {
@@ -496,6 +596,7 @@ export class Builder {
 	 * refused or silent write leaves the row as Flow PT holds it.
 	 */
 	async editCells(kind: ItemKind, key: ColumnKey, changes: readonly CellChange[]): Promise<EditOutcome> {
+		if (key === 'package') return this.movePackages(kind, changes);
 		const plan = planEdits(changes, this.itemsOf(kind), this.columns(kind), this.gone);
 		if (plan.local.length > 0) this.setItems(kind, applyLocal(this.itemsOf(kind), plan.local) as RequestShot[] | RequestAsset[]);
 		let outcomes: WriteOutcome[];
@@ -520,6 +621,12 @@ export class Builder {
 	 * was changed by someone since, and is left. Answers the plan and the writes it could not make.
 	 */
 	async undo(kind: ItemKind, changes: readonly Change[]): Promise<{ plan: ReturnType<typeof undoPlan>; failures: Refusal[] }> {
+		if (changes.length > 0 && changes.every((c) => c.key === 'package')) {
+			const back = changes.map((c) => ({ itemId: c.itemId, key: 'package' as const, value: c.before }));
+			const outcome = this.movePackages(kind, back);
+			const plan = undoPlan(changes, []);
+			return { plan, failures: outcome.failures.map((f) => ({ itemId: f.itemId, key: f.key, reason: f.reason })) };
+		}
 		const client = liveWriter();
 		const live = changes.flatMap((c) => (c.target ? [c.target] : []));
 		const rows = live.length > 0 ? await readRows(client, live, () => this.fieldsFor(kind)) : [];
@@ -562,7 +669,7 @@ export class Builder {
 	addBreakdown(kind: ItemKind, plan: BreakdownPlan<RequestShot> | BreakdownPlan<RequestAsset>): void {
 		if (this.readOnly) return;
 		const next = applyBreakdown({ shots: this.state.shots, assets: this.state.assets }, plan, kind);
-		this.state = { ...this.state, shots: next.shots, assets: next.assets };
+		this.state = { ...this.state, ...withDefaults({ shots: next.shots, assets: next.assets, packages: this.state.packages ?? [] }) };
 		this.save();
 	}
 
