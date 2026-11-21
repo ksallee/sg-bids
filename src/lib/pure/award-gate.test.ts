@@ -144,7 +144,7 @@ describe('gate', () => {
 		const g = gate(input({ groups: {}, bids: [BID_A, BID_B, BID_C] }));
 		expect(g.problems.map((p) => [p.target, p.href ?? null])).toEqual([
 			['gate-vendor-vb', null],
-			['gate-rates', '/bids/req1/compare']
+			['gate-rates', '/requests/req1/compare']
 		]);
 		const partial = site({ fields: { ...site().fields, CustomEntity15: { code: { dataType: 'text' } } } });
 		const fields = gate(input({ report: setupReport(partial) })).problems.find((p) => p.target === 'gate-site')!;

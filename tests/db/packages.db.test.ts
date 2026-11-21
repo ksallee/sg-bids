@@ -148,7 +148,7 @@ describe('a vendor invited to some packages', () => {
 		// Straight to the store with the stored key: refused too.
 		const direct = await refusal(() => s.saveDraftBid(a.token, { ...draft(1), lines: [{ target: { kind: 'shot', id: 'sh010' }, total: { minor: 1, currency: 'USD' }, excluded: false }] }));
 		expect(direct.status).toBe(422);
-		expect(direct.message).toMatch(/outside your packages/);
+		expect(direct.message).toMatch(/outside your bids/);
 	});
 
 	it('cannot price a package it is not invited to', async () => {
@@ -203,7 +203,7 @@ describe('changing a vendor packages', () => {
 		await s.submitBid(a.token, bid.id);
 		const error = await refusal(() => s.setInvitationPackages(production, a.invitation.id, null));
 		expect(error.status).toBe(409);
-		expect(error.message).toMatch(/Vendor A has submitted a bid. Its packages are fixed/);
+		expect(error.message).toMatch(/Vendor A has submitted an answer. Its bids are fixed/);
 		const inSql = await refusal(() => asService((tx) => tx`update public.invitations set package_keys = null where id = ${a.invitation.id}`));
 		expect(inSql.message).toMatch(/packages are fixed/);
 	});
@@ -221,7 +221,7 @@ describe('changing a vendor packages', () => {
 		await s.setInvitationPackages(production, b.invitation.id, ['pkg:creature']);
 		const error = await refusal(() => s.submitBid(b.token, all.id));
 		expect(error.status).toBe(409);
-		expect(error.message).toMatch(/Your packages changed/);
+		expect(error.message).toMatch(/Your bids changed/);
 		// Its reads hold the rows of its packages alone now: the line outside them is not shown.
 		expect((await loadBid(s, b.token)).bid?.lines).toEqual([]);
 	});
@@ -322,7 +322,7 @@ describe('a package the vendor is not bidding on', () => {
 		const none = await s.saveDraftBid(b.token, { ...declining, lines: [], declined: ['seq:SQ1', 'pkg:creature', 'assets'] });
 		const error = await refusal(() => s.submitBid(b.token, none.id));
 		expect(error.status).toBe(422);
-		expect(error.message).toBe('Bid on one package at least.');
+		expect(error.message).toBe('Answer one bid at least.');
 		const back = await s.saveDraftBid(b.token, declining);
 		expect((await s.submitBid(b.token, back.id)).declined).toEqual(['pkg:creature', 'assets']);
 	});

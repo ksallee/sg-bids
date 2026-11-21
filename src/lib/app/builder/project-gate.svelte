@@ -1,5 +1,5 @@
 <!--
-	The project, picked once: one project per request, with the registry's ProjectPicker as
+	The project, picked once: one project per bid, with the registry's ProjectPicker as
 	sg-task-templates does. With no project yet it is the whole page, in the middle of it, and offers
 	the project last worked in (or the one the address names) as a one-click start. After, it opens
 	from the page header as a small dialog, and says first that another project starts the picks over.
@@ -49,11 +49,11 @@
 		<Dialog.Content class="sm:max-w-md">
 			<Dialog.Header>
 				<Dialog.Title>Change the project</Dialog.Title>
-				<Dialog.Description>One project per request. Its Shots and Assets are what vendors bid on.</Dialog.Description>
+				<Dialog.Description>One project per bid. Its Shots and Assets are what the bid holds.</Dialog.Description>
 			</Dialog.Header>
 			{@render picker('Project')}
 			{#if picked > 0}
-				<Notice tone="warning">Another project starts the picks over. {picked} {picked === 1 ? 'item is' : 'items are'} picked now.</Notice>
+				<Notice tone="warning">Another project starts the rows over. {picked} {picked === 1 ? 'row is' : 'rows are'} in the bid now.</Notice>
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (open = false)}>Keep {builder.state.project?.name ?? 'this one'}</Button>
@@ -66,8 +66,8 @@
 			<div class="flex items-start gap-3">
 				<span class="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-full border"><FolderOpen class="size-5" aria-hidden="true" /></span>
 				<div class="flex flex-col gap-1">
-					<h1 id="gate-title" class="text-lg leading-tight font-semibold tracking-tight">New bid request</h1>
-					<p class="text-muted-foreground text-sm">Pick the project first. Its Shots and Assets are what vendors bid on. One project per request.</p>
+					<h1 id="gate-title" class="text-lg leading-tight font-semibold tracking-tight">New bid</h1>
+					<p class="text-muted-foreground text-sm">Pick the project first. Its Shots and Assets are what the bid holds. One project per bid.</p>
 				</div>
 			</div>
 			{#if suggested}
@@ -80,8 +80,8 @@
 				<Notice tone="destructive" title="Could not read the project.">{' '}{builder.data.message}</Notice>
 			{/if}
 			<div class="border-border -mx-6 -mb-6 flex items-center justify-between rounded-b-xl border-t px-6 py-3">
-				<a href="/bids" class="text-muted-foreground hover:text-foreground text-sm underline decoration-current/30 underline-offset-2">Back to the requests</a>
-				<span class="text-muted-foreground text-xs">The draft saves once it has a project and a code.</span>
+				<a href="/bids" class="text-muted-foreground hover:text-foreground text-sm underline decoration-current/30 underline-offset-2">Back to the bids</a>
+				<span class="text-muted-foreground text-xs">The bid saves once it has a name or a row.</span>
 			</div>
 		</section>
 	</div>

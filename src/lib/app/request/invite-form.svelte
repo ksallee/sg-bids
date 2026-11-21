@@ -3,8 +3,8 @@
 	Flow PT, picked from the site's Groups with the registry's EntityPicker (the award writes it to the
 	Shot later). A problem sits under its field and names it; an invite that does not pass focuses
 	the first field to fix. Checks in `$lib/pure/invitations`. The new link goes to the page, which
-	shows it once. A request with packages offers them: every package by default, or some
-	(`packages-dialog.svelte`).
+	shows it once; on a draft (`pending`) the vendor is added and its link is made at the issue. A
+	request of several bids offers them: every bid by default, or some (`vendor-bids-dialog.svelte`).
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
@@ -20,30 +20,36 @@
 	import { VENDOR_REQUIRED, validateVendor } from '$lib/pure/invitations';
 	import type { Id, RequestPackage } from '$lib/pure/model';
 	import type { PackageStats } from '$lib/pure/packages';
-	import Package from '@lucide/svelte/icons/package';
-	import PackagesDialog from './packages-dialog.svelte';
+	import Layers from '@lucide/svelte/icons/layers';
+	import VendorBidsDialog from './vendor-bids-dialog.svelte';
 
 	let {
 		projectId,
 		requestId,
 		onInvited,
 		primary = true,
+		pending = false,
 		packages = [],
 		stats = new Map()
 	}: {
 		projectId: number;
 		requestId: string;
-		onInvited: (name: string, token: string) => void;
+		/** The vendor is invited. `token`: its link, shown once; null for a vendor added to a draft. */
+		onInvited: (name: string, token: string | null) => void;
 		/** Invite is the page's primary action. */
 		primary?: boolean;
-		/** The request's packages. Empty: one package, nothing to choose. */
+		/** A draft: the vendor is added, its link made at the issue. */
+		pending?: boolean;
+		/** The request's bids. One or none: nothing to choose. */
 		packages?: readonly RequestPackage[];
 		stats?: ReadonlyMap<Id, PackageStats>;
 	} = $props();
 
+	const choosable = $derived(packages.length > 1);
+
 	let chosen = $state<Id[] | null>(null);
 	let choosing = $state(false);
-	const chosenLabel = $derived(chosen === null ? 'Every package' : chosen.length === 1 ? (packages.find((p) => p.id === chosen![0])?.name ?? '1 package') : `${chosen.length} of ${packages.length} packages`);
+	const chosenLabel = $derived(chosen === null ? 'Every bid' : chosen.length === 1 ? (packages.find((p) => p.id === chosen![0])?.name ?? '1 bid') : `${chosen.length} of ${packages.length} bids`);
 
 	let name = $state('');
 	let email = $state('');
@@ -65,8 +71,14 @@
 		sending = true;
 		failure = null;
 		try {
-			const answer = await api.invite(projectId, requestId, { name: name.trim(), email: email.trim(), groupId: group?.id ?? null, packages: packages.length > 0 ? chosen : null });
-			onInvited(answer.invitation.name, answer.token);
+			const vendor = { name: name.trim(), email: email.trim(), groupId: group?.id ?? null, packages: choosable ? chosen : null };
+			if (pending) {
+				const answer = await api.plan(projectId, requestId, vendor);
+				onInvited(answer.invitation.name, null);
+			} else {
+				const answer = await api.invite(projectId, requestId, vendor);
+				onInvited(answer.invitation.name, answer.token);
+			}
 			name = '';
 			email = '';
 			group = null;
@@ -93,7 +105,7 @@
 		<p class="text-sm font-semibold">Invite a vendor</p>
 		<RequiredLegend />
 	</div>
-	<div class={packages.length > 0 ? 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]' : 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_auto]'}>
+	<div class={choosable ? 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]' : 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_auto]'}>
 		<div class="flex flex-col gap-1.5">
 			<FieldLabel for="v-name" required>Vendor</FieldLabel>
 			<Input
@@ -134,24 +146,24 @@
 			/>
 			</div>
 		</div>
-		{#if packages.length > 0}
+		{#if choosable}
 			<div class="flex flex-col gap-1.5">
-				<FieldLabel for="v-packages">Packages</FieldLabel>
+				<FieldLabel for="v-packages">Bids</FieldLabel>
 				<Button id="v-packages" variant="outline" class="justify-start font-normal" onclick={() => (choosing = true)} data-slot="invite-packages">
-					<Package data-icon="inline-start" />
+					<Layers data-icon="inline-start" />
 					<span class="truncate">{chosenLabel}</span>
 				</Button>
 			</div>
 		{/if}
 		<div class="flex flex-col gap-1.5">
 			<span class="text-sm leading-5 md:invisible" aria-hidden="true">Invite</span>
-			<Button type="submit" variant={primary ? 'default' : 'outline'} disabled={sending}>{sending ? 'Inviting…' : 'Invite'}</Button>
+			<Button type="submit" variant={primary ? 'default' : 'outline'} disabled={sending} data-slot="invite-submit">{sending ? (pending ? 'Adding…' : 'Inviting…') : pending ? 'Add the vendor' : 'Invite'}</Button>
 		</div>
 	</div>
-	{#if failure}<p class="text-destructive text-sm" role="alert">Not invited. {failure}</p>{/if}
+	{#if failure}<p class="text-destructive text-sm" role="alert">{pending ? 'Not added.' : 'Not invited.'} {failure}</p>{/if}
 </form>
 
-<PackagesDialog
+<VendorBidsDialog
 	bind:open={choosing}
 	vendor={name.trim()}
 	{packages}

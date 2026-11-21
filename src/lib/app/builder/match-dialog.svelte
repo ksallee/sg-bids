@@ -12,9 +12,9 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { linkPlan, type Match } from '$lib/pure/match';
 	import type { ItemKind } from '$lib/pure/field-map';
-	import type { Builder } from '$lib/app/builder.svelte';
+	import type { Matcher } from './matcher';
 
-	let { builder, open = $bindable(false) }: { builder: Builder; open?: boolean } = $props();
+	let { builder, open = $bindable(false) }: { builder: Matcher; open?: boolean } = $props();
 
 	let found = $state<Record<ItemKind, Match[]> | null>(null);
 	let picked = $state<Set<string>>(new Set());
@@ -84,7 +84,7 @@
 			case 'several':
 				return `${m.ids.length} rows in Flow PT carry this code. None is picked.`;
 			case 'taken':
-				return `Already in the request, as ${m.by}.`;
+				return `Already in the ${builder.readOnly ? 'request' : 'bid'}, as ${m.by}.`;
 			case 'none':
 				return 'No row with this code.';
 		}

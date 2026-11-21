@@ -41,7 +41,7 @@ export function bpText(bp: number | null): string {
 function status(cell: Cell): string {
 	if (cell.kind === 'excluded') return 'excluded';
 	if (cell.kind === 'missing') return 'not bid';
-	if (cell.kind === 'package') return 'in package price';
+	if (cell.kind === 'package') return "in the bid's figure";
 	if (cell.kind === 'declined') return 'not bidding';
 	if (cell.amount.base === null) return 'needs a rate';
 	return cell.lowest ? 'lowest' : 'price';
@@ -68,7 +68,7 @@ export function gridCsv(grid: Grid, groups: readonly Group[], names: readonly st
 	// Each package as a unit: a vendor's one figure, or the sum of its row prices.
 	for (const unit of grid.packages) {
 		if (!unit.cells.some((c) => c.kind === 'package')) continue;
-		const record = ['Packages', 'package', unit.name, '', ''];
+		const record = ['Bids', 'bid', unit.name, '', ''];
 		for (const cell of unit.cells) {
 			if (cell.kind === 'none') record.push('', '', 'not bid');
 			else if (cell.kind === 'declined') record.push('', '', 'not bidding');
@@ -129,7 +129,7 @@ export function scenarioCsv(grid: Grid, name: string, picks: Picks, summary: Sce
 			const column = columnOf.get(share.bidId)!;
 			const cell = row.cells[column];
 			if (cell.kind === 'package') {
-				records.push([row.target.kind, row.label, row.sequence ?? '', names[column], share.percent, '', grid.columns[column].currency, '', 'in package price']);
+				records.push([row.target.kind, row.label, row.sequence ?? '', names[column], share.percent, '', grid.columns[column].currency, '', "in the bid's figure"]);
 				continue;
 			}
 			if (cell.kind !== 'price') continue;
@@ -150,7 +150,7 @@ export function scenarioCsv(grid: Grid, name: string, picks: Picks, summary: Sce
 	for (const unit of grid.packages) {
 		unit.cells.forEach((cell, column) => {
 			if (cell.kind !== 'package' || !wholes.has(`${grid.columns[column].bidId}|${unit.id}`)) return;
-			records.push(['package', unit.name, '', names[column], '100', amount(cell.amount.bid), grid.columns[column].currency, cell.amount.base ? amount(cell.amount.base) : 'needs a rate', 'one figure for the package']);
+			records.push(['bid', unit.name, '', names[column], '100', amount(cell.amount.bid), grid.columns[column].currency, cell.amount.base ? amount(cell.amount.base) : 'needs a rate', 'one figure for the bid']);
 		});
 	}
 	records.push([], ['Vendor', 'Rows', `Shots and assets (${base})`, `Non-shot costs (${base})`, 'Costs counted', `Total (${base})`, 'Share %']);

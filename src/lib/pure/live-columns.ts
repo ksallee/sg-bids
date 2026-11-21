@@ -1,5 +1,5 @@
 /**
- * The columns of a draft's Shots and Assets table, and where each cell's edit lands. Pure, no I/O.
+ * The columns of a bid's Shots and Assets table, and where each cell's edit lands. Pure, no I/O.
  *
  * A column fed by a Flow PT field is live: on a row picked from Flow PT, its cell shows the field as
  * Flow PT holds it and an edit writes the field, as the signed in person. Every other column, and
@@ -10,15 +10,14 @@
  * preflight write was refused (094, recipe 017). The code and the Sequence are read live and never
  * written here: the code names the Shot in the pipeline, and a Sequence is a link.
  *
- * The Package column is the request's own: a list of the request's package names. A change moves
- * the row to that package (`packages.ts`); Flow PT is not touched.
+ * A row belongs to a bid because it was added to it: there is no column for its group.
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
 import { slotsFor, type ItemKind, type Mapping } from './field-map';
 import { DEFAULT_TIERS } from './request';
 
-export type ColumnKey = 'code' | 'package' | 'sequence' | 'frames' | 'description' | 'type' | 'difficulty' | 'notes' | 'omitted';
+export type ColumnKey = 'code' | 'sequence' | 'frames' | 'description' | 'type' | 'difficulty' | 'notes' | 'omitted';
 
 export type CellType = 'text' | 'number' | 'list' | 'checkbox';
 
@@ -56,7 +55,6 @@ interface ColumnSpec {
 const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Shot', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
 	{ key: 'sequence', label: 'Sequence', width: 150, fallback: 'text', field: (m) => m.sequence, fixedLock: 'Move a Shot to another Sequence in Flow PT.' },
-	{ key: 'package', label: 'Package', width: 180, fallback: 'list', field: () => null },
 	{ key: 'frames', label: 'Frames', width: 120, fallback: 'number', field: (m) => m.frames },
 	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
 	{ key: 'type', label: 'Type', width: 140, fallback: 'text', field: (m) => m.type },
@@ -68,7 +66,6 @@ const SHOT_SPECS: readonly ColumnSpec[] = [
 
 const ASSET_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Asset', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
-	{ key: 'package', label: 'Package', width: 180, fallback: 'list', field: () => null },
 	{ key: 'type', label: 'Type', width: 150, fallback: 'text', field: (m) => m.type },
 	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
@@ -94,19 +91,12 @@ function cellTypeOf(field: FieldSchema): CellType | null {
 
 /**
  * The table's columns for a kind. `denied`: the fields the preflight write was refused on, with
- * what the site said (094). `packages`: the request's package names, the values of its Package column.
+ * what the site said (094).
  */
-export function requestColumns(
-	kind: ItemKind,
-	mapping: Mapping,
-	schema: Record<string, FieldSchema>,
-	denied: Readonly<Record<string, string>> = {},
-	packages: readonly string[] = []
-): RequestColumn[] {
+export function requestColumns(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>, denied: Readonly<Record<string, string>> = {}): RequestColumn[] {
 	return (kind === 'shot' ? SHOT_SPECS : ASSET_SPECS).map((spec): RequestColumn => {
 		const name = spec.field(mapping);
 		const field = typeof name === 'string' ? schema[name] : undefined;
-		if (spec.key === 'package') return { kind, key: 'package', label: spec.label, field: null, live: false, lock: null, dataType: 'list', validValues: packages, width: spec.width };
 		if (!field) {
 			const list = spec.fallback === 'list';
 			return { kind, key: spec.key, label: spec.label, field: null, live: false, lock: null, dataType: spec.fallback, ...(list ? { validValues: DEFAULT_TIERS } : {}), width: spec.width };

@@ -85,7 +85,8 @@ export function vendorRequestView(input: {
 		issuedAt: input.issuedAt,
 		expiresAt: input.expiresAt,
 		header,
-		packages: resolved.packages.filter((p) => (resolved.rows.get(p.id) ?? []).length > 0),
+		// A bid's id and name: the production bid it came from is production's.
+		packages: resolved.packages.filter((p) => (resolved.rows.get(p.id) ?? []).length > 0).map((p) => ({ id: p.id, name: p.name })),
 		// Where a row came from is production's: a vendor sees no difference.
 		shots: input.request.shots.flatMap(({ fpt, source, package: _, ...rest }) => {
 			const own = id('shot', rest.id);
@@ -165,4 +166,28 @@ export function itemMatches(item: Partial<RequestShot> | Partial<RequestAsset>, 
 		.join(' ')
 		.toLowerCase();
 	return words.every((word) => hay.includes(word));
+}
+
+/**
+ * What the vendor's "The request" box lists, label and value, each one set: the title, the bids it
+ * answers with their rows, then who and when. It always has the bids, so the box is never empty.
+ * `day` writes a `YYYY-MM-DD` day for the reader.
+ */
+export function requestFacts(request: Pick<VendorRequestView, 'header' | 'packages' | 'shots' | 'assets'>, day: (text: string) => string): [string, string][] {
+	const h = request.header;
+	const rows = (id: Id) => request.shots.filter((s) => s.package === id && !s.omitted).length + request.assets.filter((a) => a.package === id && !a.omitted).length;
+	const bids = request.packages.map((p) => `${p.name} (${rows(p.id)} ${rows(p.id) === 1 ? 'row' : 'rows'})`).join(', ');
+	const facts: [string, string | undefined][] = [
+		['Title', h.title],
+		[request.packages.length === 1 ? 'Bid' : 'Bids', bids || undefined],
+		['Studio', h.studio],
+		['Director', h.director],
+		['Client supervisor', h.clientSupervisor],
+		['Client producer', h.clientProducer],
+		['Cut', h.cutVersion],
+		['Turnover', h.turnoverDate ? day(h.turnoverDate) : h.turnoverWeek],
+		['Delivery', h.deliveryDate ? day(h.deliveryDate) : undefined],
+		['Format', h.deliveryFormat]
+	];
+	return facts.filter((f): f is [string, string] => typeof f[1] === 'string' && f[1].trim() !== '');
 }

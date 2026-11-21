@@ -1,11 +1,11 @@
 <!--
-	Which packages a vendor is invited to: every package, the default, or some of them, each with its
-	rows and frames. Used when inviting and when changing a vendor's packages. A vendor sees the rows
-	of its packages alone (`$lib/pure/packages`). `locked` says why the packages cannot change: the
-	vendor has submitted a bid.
+	Which bids of the request a vendor is invited to: every bid, the default, or some of them, each
+	with its rows and frames. Used when inviting and when changing a vendor's bids. A vendor sees the
+	rows of its bids alone (`$lib/pure/packages`). `locked` says why they cannot change: the vendor
+	has submitted an answer.
 -->
 <script lang="ts">
-	import Package from '@lucide/svelte/icons/package';
+	import Layers from '@lucide/svelte/icons/layers';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
@@ -67,23 +67,23 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-lg" data-slot="packages-dialog">
 		<Dialog.Header>
-			<Dialog.Title>{vendor ? `Packages for ${vendor}` : 'Packages for the vendor'}</Dialog.Title>
-			<Dialog.Description>The vendor sees and bids on the rows of its packages, and nothing else.</Dialog.Description>
+			<Dialog.Title>{vendor ? `Bids for ${vendor}` : 'Bids for the vendor'}</Dialog.Title>
+			<Dialog.Description>The vendor sees and answers the rows of its bids, and nothing else.</Dialog.Description>
 		</Dialog.Header>
 
-		<div class="flex flex-col gap-3" role="radiogroup" aria-label="Which packages">
+		<div class="flex flex-col gap-3" role="radiogroup" aria-label="Which bids">
 			<label class={cn('flex items-start gap-3 rounded-lg border p-3', every && 'border-primary bg-primary/5')}>
 				<input type="radio" name="packages-scope" class="accent-primary mt-0.5 size-4" checked={every} onchange={() => (every = true)} disabled={!!locked} />
 				<span class="flex flex-col">
-					<span class="text-sm font-semibold">Every package</span>
-					<span class="text-muted-foreground text-xs">{plural(packages.length, 'package')}, every row of the request.</span>
+					<span class="text-sm font-semibold">Every bid</span>
+					<span class="text-muted-foreground text-xs">{plural(packages.length, 'bid')}, every row of the request.</span>
 				</span>
 			</label>
 			<label class={cn('flex items-start gap-3 rounded-lg border p-3', !every && 'border-primary bg-primary/5')}>
 				<input type="radio" name="packages-scope" class="accent-primary mt-0.5 size-4" checked={!every} onchange={() => (every = false)} disabled={!!locked} />
 				<span class="flex flex-col">
-					<span class="text-sm font-semibold">Some packages</span>
-					<span class="text-muted-foreground text-xs">Pick the ones this vendor bids on.</span>
+					<span class="text-sm font-semibold">Some bids</span>
+					<span class="text-muted-foreground text-xs">Pick the ones this vendor answers.</span>
 				</span>
 			</label>
 
@@ -94,7 +94,7 @@
 						<li class="border-b last:border-b-0">
 							<label class="hover:bg-muted/50 flex cursor-pointer items-center gap-3 px-3 py-2">
 								<Checkbox checked={on} onCheckedChange={(v) => toggle(p.id, v === true)} disabled={!!locked} aria-label={p.name} />
-								<Package class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+								<Layers class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
 								<span class="min-w-0 flex-1 truncate text-sm font-medium">{p.name}</span>
 								<span class="text-muted-foreground shrink-0 text-xs tabular-nums">{line(p.id)}</span>
 							</label>
@@ -103,12 +103,12 @@
 				</ul>
 			{/if}
 			{#if locked}<p class="text-muted-foreground text-sm" role="note">{locked}</p>{/if}
-			{#if empty}<p class="text-destructive text-sm" role="alert">Pick at least one package, or every package.</p>{/if}
+			{#if empty}<p class="text-destructive text-sm" role="alert">Pick at least one bid, or every bid.</p>{/if}
 			{#if error}<p class="text-destructive text-sm" role="alert">{error}</p>{/if}
 		</div>
 
 		<Dialog.Footer class="items-center">
-			<span class="text-muted-foreground mr-auto text-xs tabular-nums">{plural(rows, 'row')} to bid on</span>
+			<span class="text-muted-foreground mr-auto text-xs tabular-nums">{plural(rows, 'row')} to price</span>
 			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
 			<Button disabled={!!locked || empty || busy} onclick={() => onSave(every ? null : [...picked])} data-slot="packages-save">{busy ? 'Saving…' : 'Save'}</Button>
 		</Dialog.Footer>

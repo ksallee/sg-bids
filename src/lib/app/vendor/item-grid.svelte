@@ -4,18 +4,18 @@
 	- Arrow up and down, Enter and Shift+Enter move between price cells, in the order shown.
 	- Pasting several cells into a price cell fills down from there, or matches rows by code when
 	  each starts with one (`$lib/pure/paste`). What landed and what did not is said above the grid.
-	- Search, a filter by state, and grouping by package (the default), sequence or episode.
-	- Per package, the vendor bids on it or not, and prices it row by row or as one figure for the
-	  whole package. With a figure, its rows say "In package price" and take no price of their own; a
-	  package not bid on says "Not bidding". A change asks first when it would clear what was typed
-	  (`$lib/pure/bid-form`: typedFor, switchMode, setBidding).
+	- Search, a filter by state, and grouping by bid (the default), sequence or episode.
+	- Per bid of the request, the vendor answers it or not, and prices it row by row or as one figure
+	  for the whole bid. With a figure, its rows say "In the bid's figure" and take no price of their
+	  own; a bid not answered says "Not bidding". A change asks first when it would clear what was
+	  typed (`$lib/pure/bid-form`: typedFor, switchMode, setBidding).
 
 	"Exclude" is apart from a zero price: an excluded item is one you will not do.
 -->
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Search from '@lucide/svelte/icons/search';
-	import Package from '@lucide/svelte/icons/package';
+	import Layers from '@lucide/svelte/icons/layers';
 	import Segmented from '$lib/app/segmented.svelte';
 	import ConfirmDialog from './confirm-dialog.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -257,7 +257,7 @@
 					value={grouping ?? ''}
 					onchange={(e) => (grouping = (e.currentTarget.value || null) as Grouping | null)}
 				>
-					{#each offered as option (option)}<option value={option}>{option === 'package' ? 'Package' : option === 'sequence' ? 'Sequence' : 'Episode'}</option>{/each}
+					{#each offered as option (option)}<option value={option}>{option === 'package' ? 'Bid' : option === 'sequence' ? 'Sequence' : 'Episode'}</option>{/each}
 					<option value="">Nothing</option>
 				</select>
 			</label>
@@ -313,7 +313,7 @@
 					data-mode={pkg.bidding ? pkg.mode : 'declined'}
 				>
 					<span class="flex min-w-0 items-center gap-2" role="rowheader">
-						<Package class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+						<Layers class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
 						<span class={cn('truncate text-sm font-semibold', !pkg.bidding && 'text-muted-foreground')}>{section.label}</span>
 						<span class="text-muted-foreground text-xs tabular-nums">{section.keys.length}</span>
 					</span>
@@ -322,7 +322,7 @@
 					{:else}
 						<span id={vendorControlId(`package:${pkg.id}:bidding`)} tabindex="-1" class="contents">
 							<Segmented
-								label={`Do you bid on ${section.label}`}
+								label={`Do you answer ${section.label}`}
 								value={pkg.bidding ? 'bid' : 'decline'}
 								options={[
 									{ value: 'bid', label: 'Bid on this' },
@@ -345,11 +345,11 @@
 					{/if}
 					<span class="ml-auto flex items-center gap-2">
 						{#if !pkg.bidding}
-							<span class="text-muted-foreground text-xs">You are not bidding on this package. It needs no price.</span>
+							<span class="text-muted-foreground text-xs">You are not bidding on this one. It needs no price.</span>
 						{:else if pkg.mode === 'package' && !readOnly}
 							{@const index = form.packages.findIndex((p) => p.id === pkg.id)}
 							<label class="text-muted-foreground flex items-center gap-2 text-xs" for={vendorControlId(`package:${pkg.id}:price`)}>
-								<span class="font-medium text-foreground">Price for the package, {form.currency}<span class="text-destructive" aria-hidden="true">*</span></span>
+								<span class="font-medium text-foreground">Price for the bid, {form.currency}<span class="text-destructive" aria-hidden="true">*</span></span>
 							</label>
 							<input
 								id={vendorControlId(`package:${pkg.id}:price`)}
@@ -368,7 +368,7 @@
 					</span>
 					{#if error}<p class="text-destructive w-full text-right text-xs">{error}</p>{/if}
 					{#if pkg.bidding && pkg.mode === 'package'}
-						<p class="text-muted-foreground w-full text-xs">One price for every row below, all in. Each row is in the package price.</p>
+						<p class="text-muted-foreground w-full text-xs">One price for every row below, all in. Each row is in the bid's figure.</p>
 					{/if}
 				</div>
 			{:else}
@@ -424,7 +424,7 @@
 							<span class="text-muted-foreground py-1.5 text-xs" data-slot="not-bidding">Not bidding</span>
 						{:else if covered}
 							<span class="text-muted-foreground flex items-center gap-1.5 py-1.5 text-xs" data-slot="in-package">
-								{#if line.omitted}Omitted{:else}<Package class="size-3.5" aria-hidden="true" />In package price{/if}
+								{#if line.omitted}Omitted{:else}<Layers class="size-3.5" aria-hidden="true" />In the bid's figure{/if}
 							</span>
 						{:else if readOnly}
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
@@ -477,12 +477,12 @@
 	{#if switching?.mode === 'declined'}
 		<p>
 			{switching.figure ? `The figure you typed for ${switching.name} is cleared.` : `${switching.rows === 1 ? 'The price you typed on 1 row' : `The prices you typed on ${switching.rows} rows`} of ${switching.name} are cleared, with their detail.`}
-			The package goes to production as not bid on.
+			Production sees it as not bid on.
 		</p>
 	{:else if switching?.mode === 'package'}
 		<p>
 			{switching.rows === 1 ? 'The price you typed on 1 row of' : `The prices you typed on ${switching.rows} rows of`}
-			{switching.name} are cleared, with their detail. One figure covers every row of the package.
+			{switching.name} are cleared, with their detail. One figure covers every row of the bid.
 		</p>
 	{:else if switching}
 		<p>The figure you typed for {switching.name} is cleared. Each row then takes its own price.</p>

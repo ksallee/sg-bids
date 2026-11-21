@@ -87,7 +87,7 @@ describe('applyScenario with packages', () => {
 
 	it('refuses part of a package priced as one figure', () => {
 		expect(() => applyScenario(packed, [byPackage, byRow], scenario([whole('a', 'A'), whole('b', 'B')]))).toThrow(
-			'Bid A priced Creature as one figure. The scenario gives it part of the package: it is awarded whole or not at all.'
+			'Bid A priced Creature as one figure. The scenario gives it part of it: it is awarded whole or not at all.'
 		);
 	});
 

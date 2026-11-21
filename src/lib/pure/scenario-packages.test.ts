@@ -39,7 +39,7 @@ describe('picking a package priced as one figure', () => {
 			{ bidId: 'A', percent: '50' },
 			{ bidId: 'B', percent: '50' }
 		]);
-		expect(result).toEqual({ ok: false, message: 'Creature was priced as one figure by a vendor here. Give that vendor the whole package, or none of it.' });
+		expect(result).toEqual({ ok: false, message: 'Creature was priced as one figure by a vendor here. Give that vendor the whole bid, or none of it.' });
 	});
 
 	it('takes a single whole share as the whole package', () => {

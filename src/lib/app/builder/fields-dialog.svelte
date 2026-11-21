@@ -1,5 +1,5 @@
 <!--
-	The project's field mapping, a setting out of the request's path: which Flow PT field fills each
+	The project's field mapping, a setting out of the bid's path: which Flow PT field fills each
 	thing a vendor reads. Shots then Assets, one row per concept: its name and what it is for, the
 	field, and for a concept with no field, what that means (it can still be set per item in the
 	request). When concepts have no field, "Create missing fields" opens one form for all of them
@@ -81,7 +81,7 @@
 								<p class="text-muted-foreground text-xs" data-slot="unmapped-line">
 									{#if options.length === 0}No field on this site fits.{' '}{:else}Not mapped.{' '}{/if}
 									{#if spec.create}
-										Set it per item in the request instead. It stays in the request only.
+										Set it per item in the bid instead. It stays in the bid only.
 									{:else}
 										A link field also adds a field to {spec.linksTo}, so an admin adds it in Flow PT.
 									{/if}
@@ -128,8 +128,8 @@
 			<Dialog.Header class="border-border border-b px-5 pt-5 pb-4">
 				<Dialog.Title>Fields from Flow PT</Dialog.Title>
 				<Dialog.Description>
-					Which field on this site fills each thing a vendor reads. {status ? mappingWords(status).headline : ''} A mapped field is live: editing it in the request changes Flow PT.
-					Anything left unmapped can still be set per item, in the request only. Kept for this project in this browser.
+					Which field on this site fills each thing a vendor reads. {status ? mappingWords(status).headline : ''} A mapped field is live: editing it in the bid changes Flow PT.
+					Anything left unmapped can still be set per item, in the bid only. Kept for this project in this browser.
 				</Dialog.Description>
 			</Dialog.Header>
 			<div class="flex min-h-0 flex-col gap-6 overflow-y-auto px-5 py-4">

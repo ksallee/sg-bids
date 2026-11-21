@@ -12,6 +12,8 @@ export interface InvitationFacts {
 	readonly expires_at: string;
 	readonly revoked_at: string | null;
 	readonly last_opened_at: string | null;
+	/** Added to a draft: its link is made at the issue. */
+	readonly link_pending?: boolean;
 }
 
 export interface BidFacts {
@@ -24,6 +26,7 @@ export interface BidFacts {
 }
 
 export type InvitationState =
+	| { readonly kind: 'pending' }
 	| { readonly kind: 'not_opened' }
 	| { readonly kind: 'opened'; readonly at: string }
 	| { readonly kind: 'submitted'; readonly version: number; readonly at: string }
@@ -36,6 +39,7 @@ function live(invitation: InvitationFacts, now: Date): boolean {
 }
 
 export function invitationState(invitation: InvitationFacts, bids: readonly BidFacts[], now: Date): InvitationState {
+	if (invitation.link_pending) return { kind: 'pending' };
 	if (invitation.revoked_at !== null) return { kind: 'revoked', at: invitation.revoked_at };
 	if (!live(invitation, now)) return { kind: 'expired', at: invitation.expires_at };
 	const latest = bids
@@ -49,6 +53,8 @@ export function invitationState(invitation: InvitationFacts, bids: readonly BidF
 
 export function stateLabel(state: InvitationState): string {
 	switch (state.kind) {
+		case 'pending':
+			return 'Link made at the issue';
 		case 'not_opened':
 			return 'Not opened';
 		case 'opened':

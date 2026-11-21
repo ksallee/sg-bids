@@ -56,7 +56,7 @@ is called. The approved session token stays in the browser's `localStorage`. The
 
 ## Database
 
-Supabase (Postgres) holds the bid requests and the bids. The schema is plain SQL in
+Supabase (Postgres) holds production's bids, the requests and the vendors' answers. The schema is plain SQL in
 `supabase/migrations/`, one timestamped file per change, applied in name order. Each file is
 idempotent: it applies to an empty database and again on top of itself.
 
@@ -136,21 +136,48 @@ vendor's packages, or a figure for a package outside them, is refused (`sg_bid_l
 `sg_bids_guard`). `sg_delete_request` deletes the packages with the rest. The migration is additive:
 no existing row changes, and code from before it runs on it unchanged.
 
+Bids first (`20261126100000_bids_first.sql`). `production_bids` holds production's bids per tenant,
+with the counts the Bids list shows, and `production_bid_items` their rows, the columns of a request
+item without the package. No freeze: a bid is always editable. `request_packages.bid_id` names the
+bid a request's package comes from, by a composite foreign key in the tenant. A draft request holds
+its bids by reference, one package each, keyed `bid:<id>`, and no rows of its own; the server reads
+it as its bids are now (`request-bids.composeDraft`). `invitations.link_pending` marks a vendor added
+to a draft: it has a placeholder hash and no token until the issue. Writes that land whole:
+`sg_save_production_bid` (a bid and its rows), `sg_clone_production_bid` (`<name> copy`, made free),
+`sg_move_bid_rows` (copy or move rows to another bid), `sg_delete_production_bid` (out of its drafts,
+with each vendor's choice of it; refused while a vendor of a draft is invited to it alone; its id
+cleared from the requests it went out in, which the packages guard allows and nothing else),
+`sg_set_request_bids` (a draft's bids in order; a vendor is never left with none) and
+`sg_issue_request` (each bid's rows copied under its package, named as the bid and made unique, a
+row in two bids refused, the pending links set from the hashes the server made, the request issued,
+all in one transaction; the server answers each token once). The migration turns every draft
+request stored before it into its bids (`sg_bids_first_convert`, run by the migration, idempotent):
+one bid per package with its rows, or one bid of every row for a draft from before packages, a row
+in no package to an Other rows bid; the draft keeps its packages, now pointing at the bids, so each
+vendor's choice stands, and its own rows move to the bids. An issued request is not touched. Code
+from before it reads a converted draft as empty: apply the migration with the deploy of this code.
+
 Never apply a migration to the hosted project from a branch. Migrations reach it from `main`
 only, by hand, with the Supabase CLI or the SQL editor.
 
 ### Production endpoints
 
-The browser reaches the data layer through `src/routes/api/production/<action>`: `list`, `get`,
-`save`, `issue`, `new-round`, `invite`, `invite-packages` (a vendor's packages, refused once it has
-submitted a bid), `revoke`, `reissue`, `delete-check` (what deleting the
-request would take with it, or the award that stops it) and `delete` (`{id, code}`, the request's
-code as typed). Each is a POST whose body carries
+The browser reaches the data layer through `src/routes/api/production/<action>`. Bids: `bid-list`,
+`bid-get`, `bid-save` (a name and rows), `bid-clone`, `bid-move-rows`, `bid-delete-check` (the drafts
+it leaves, the requests that keep what was issued) and `bid-delete`, over
+`src/lib/server/production-bids.ts`. Requests: `list`, `get` (a draft as its bids make it now, with
+the rows in two of them), `save` (a draft's header, and its bids when given; no id makes one),
+`request-bids` (a draft's bids in order), `issue` (answers the links of the vendors added to the
+draft, once), `new-round` (a draft of the same bids), `invite` (`pending`: added to a draft, its
+link made at the issue), `uninvite` (a vendor added to a draft goes), `invite-packages` (a vendor's
+bids, refused once it has submitted an answer), `revoke`, `reissue`, `delete-check` (what deleting
+the request would take with it, or the award that stops it) and `delete` (`{id, code}`, the
+request's code as typed). Each is a POST whose body carries
 `claim` (site, project, session token or, in `vite dev`, the dev key's bearer) and is verified with
 `production.ts` before anything else. `src/lib/pure/wire.ts` checks the rest of the body and lets
 through only the model's header and item fields.
 
-The requests list reads across projects through `requests`. Its `claim` names the site and the
+The requests list reads across projects through `requests`, and the Bids list through `bids`. Its `claim` names the site and the
 credential, no project. `verifyProductionSite` checks the person and the role as a project's check
 does, then lists the projects the person's own bearer may read on that site (`GET
 /entity/projects`, paged to the first empty page; a person reads only their projects, corpus 006,
@@ -162,20 +189,30 @@ request, every submitted and withdrawn bid, the latest submitted version per ven
 `scenario-rename`, `scenario-delete`, `scenario-choose`, over `src/lib/server/comparison.ts` with
 bodies checked by `src/lib/pure/compare-wire.ts`. The award has `award-record` and `award-undo`,
 over `src/lib/server/awards.ts`, bodies checked by `src/lib/pure/award-wire.ts`. The publish page
-is `/bids/[id]/publish`; what blocks it is `src/lib/pure/award-gate.ts`. Long reads page past PostgREST's 1000 row cap.
-The page is `/bids/[id]/compare`. The builder's drafts go through
-`src/lib/drafts.ts`, the one storage seam. A link token is answered once, by `invite` or
-`reissue`; the vendor pages live under `/v/`.
+is `/requests/[id]/publish`; what blocks it is `src/lib/pure/award-gate.ts`. Long reads page past PostgREST's 1000 row cap.
+The page is `/requests/[id]/compare`. Bids and draft requests go through `src/lib/drafts.ts`, the
+one storage seam. A link token is answered once, by `invite`, `reissue` or `issue`; the vendor pages
+live under `/v/`.
 
-## A draft's rows, live to Flow PT
+## Pages
 
-A draft shows its Shots and Assets in the registry's EntityTable over a list source of the
-request's own rows (`src/lib/app/builder/request-table.svelte`). Which column a Flow PT field feeds,
+`/bids` lists the bids across the person's projects, ticks bids of one project and starts a request
+from them; `/bids/new` and `/bids/[id]` are the bid editor. `/requests` lists the requests;
+`/requests/new` is the send flow (`?project=&bids=` makes the draft, `?id=` opens it, `&step=` says
+the step); `/requests/[id]`, `/requests/[id]/compare` and `/requests/[id]/publish` are a request's
+pages. The addresses from before bids came first go to them: `/bids/[id]/compare` and
+`/bids/[id]/publish` redirect, `/bids/new?id=` opens the send flow, and `/bids/[id]` naming a request
+opens its page (`routes.movedRequestPath`).
+
+## A bid's rows, live to Flow PT
+
+A bid shows its Shots and Assets in the registry's EntityTable over a list source of the bid's own
+rows (`src/lib/app/builder/request-table.svelte`). Which column a Flow PT field feeds,
 where each cell's edit lands and why a cell is locked: `src/lib/pure/live-columns.ts`. The value a
 field takes, the edit plan, the read back and the undo: `src/lib/pure/row-edit.ts`. The calls:
 `src/lib/io/fpt-write.ts`.
 
-- Opening a draft reads every picked row again, one batched read per kind paged at 5000 (082), and
+- Opening a bid reads every picked row again, one batched read per kind paged at 5000 (082), and
   takes each live value. A row Flow PT does not answer for, deleted or out of reach, keeps its last
   values and is flagged. A breakdown row, linked or not, keeps what it was typed with.
 - An edit to a live cell writes the field as the signed in person: `_batch` in chunks of 100,
@@ -185,17 +222,17 @@ field takes, the edit plan, the read back and the undo: `src/lib/pure/row-edit.t
   shown. Reads and writes here go through the bare client (`liveWriter`): the context's client keeps
   reads, and a read back must see Flow PT as it is now.
 - Selected rows change together: an edit in one applies to that column in every selected row, after
-  a confirm that counts the Shots changed in Flow PT and the rows changed in the request.
+  a confirm that counts the Shots changed in Flow PT and the rows changed in the bid.
 - Undo reads each field first and writes the old value only where Flow PT still holds the edit; a
   value changed since is left and named (024: there is no conditional write).
 - A field the schema marks not editable for the person is locked, and so is one the preflight
   refused: a rolled back `_batch` of the update at its current value and a sentinel update of Task
   999999999, once per kind (094, recipe 017).
-- A field just created from the mapping takes what the request showed for its column before its
-  first live read, so nothing typed is lost; it is empty, so nothing in Flow PT is overwritten.
+- A field just created from the mapping takes what the bid showed for its column before its first
+  live read, so nothing typed is lost; it is empty, so nothing in Flow PT is overwritten.
 - Description reads the stock `description` by default only when the site has no `sg_bid_description`.
   When it does, the mapping and the column header suggest a field of the bid's own.
-- A draft is stored, and kept in the tab, once it has a title or a row.
+- A bid is stored, and kept in the tab, once it has a name or a row.
 
 The table's bulk edit, list source and per-cell lock are sg-widgets PR #382 (with #380's width
 fix). Until sg-widgets-core ships them, `src/lib/components/core-next.ts` carries core's part.
@@ -319,6 +356,12 @@ runs `vitest.db.config.ts`, and removes all three, pass or fail. It touches no o
   rows; a declined package takes no price and one package is bid on at least; a request from before
   packages works as one; a scenario giving part of a package priced as one figure is refused
   (`packages.db.test.ts`);
+- a bid saves, clones, moves rows and is deleted in its tenant only; a draft request made from bids
+  reads them as they are; the issue copies their rows, makes the pending links and a vendor reads its
+  bids alone; a bid edited after the issue changes nothing issued and goes out again; a row in two
+  bids refuses the issue; deleting a bid leaves its drafts and keeps what was issued; the drafts from
+  before bids turn into their bids with every row as it was, and applied again nothing turns
+  (`bids.db.test.ts`);
 - the migrations apply again without a change (`migrations.db.test.ts`).
 
 Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
@@ -328,15 +371,18 @@ Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
     E2E_SANDBOX_PROJECT="<project name>" E2E_GROUP_A=<id> E2E_GROUP_B=<id> pnpm e2e:live
 
 `scripts/e2e-live.mjs` drives the whole product in headless Chromium against the real Flow PT site
-of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. It writes only to
-the one project named, by exact name: it builds a request from 12 of its Shots and 2 Assets (making
-`zzsgbids_*` fixtures when it has fewer), issues it, invites two vendors linked to the two Groups,
-bids as each in its own browser context (one in GBP), sets the rate, builds a scenario with one
-split row, publishes, reads Flow PT back, undoes from the request page, and reads Flow PT back
-again. Then it deletes the fixtures and the request's rows, also on a failure part way. It takes
-port 5182, or uses the app already there. Screenshots go to `shots/e2e-live/` (gitignored); it
-prints ids and counts, never a key or the site's address. The award migration must be in that
-database. `E2E_STOP_AFTER=build|invite|bids|scenario` stops early, then cleans up.
+of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. Point `.env.local` at
+a throwaway database, not one a running app reads. It writes only to the one project named, by exact
+name: it builds a bid from 4 of its Shots and one from a pasted breakdown, clones the first, makes a
+request from the two for two vendors linked to the two Groups (B invited to the breakdown bid
+alone), issues it, edits the first bid and checks the issued request did not change, answers as
+each vendor in its own browser context (A declines a bid and prices the other row by row, B prices
+its bid as one figure in GBP), sets the rate, chooses a scenario, publishes, reads Flow PT back (the
+Bids, the Bid Lines, their sums), undoes from the request page and reads Flow PT back again, then
+sends the breakdown bid again in a second request. Then it deletes what the drive made in Flow PT
+and in the database, also on a failure part way. It takes port 5182, or uses the app already
+there. Screenshots go to `shots/e2e-live/` (gitignored); it prints ids and counts, never a key or
+the site's address.
 
 ## Security headers
 

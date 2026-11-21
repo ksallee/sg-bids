@@ -1,18 +1,19 @@
 <!--
-	The Shots or Assets of a draft, in the registry's EntityTable over a list source of the request's
-	own rows: dense, full width, the rest of the height. A column a Flow PT field feeds is live and
-	says so in its header: on a row picked from Flow PT, an edit there writes the field as the signed
-	in person and shows the value read back. Every other column, and every cell of a breakdown row,
-	is in this request only. A cell that cannot be edited says why on hover.
+	The Shots or Assets of a bid, in the registry's EntityTable over a list source of the bid's own
+	rows: dense, full width, the rest of the height. A column a Flow PT field feeds is live and says
+	so in its header: on a row picked from Flow PT, an edit there writes the field as the signed in
+	person and shows the value read back. Every other column, and every cell of a breakdown row, is in
+	this bid only. A cell that cannot be edited says why on hover.
 
 	Select rows (a press, Shift for a range) and edit one cell: the value goes to that column in every
 	selected row, after a confirm that says what changes where. The bar over the table omits,
-	includes or takes the selected rows out. Every edit offers Undo; a write Flow PT refused, or one
+	includes, takes the selected rows out, or moves or copies them to another bid. Every edit offers
+	Undo; a write Flow PT refused, or one
 	that answered and changed nothing (028), is listed with Retry. Rules in `$lib/pure/live-columns`,
 	`$lib/pure/row-edit` and `$lib/pure/edit-words`.
 
 	Each code carries where its row comes from, in the columns' marks: live from Flow PT, or from a
-	breakdown and in this request only. A source filter shows when the request holds both
+	breakdown and in this bid only. A source filter shows when the bid holds both
 	(`$lib/pure/row-source`).
 -->
 <script lang="ts">
@@ -38,7 +39,7 @@
 	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
 	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
 	import Segmented from '$lib/app/segmented.svelte';
-	import type { RequestAsset, RequestShot } from '$lib/pure/model';
+	import type { RequestAsset, RequestShot, Target } from '$lib/pure/model';
 	import type { Builder, EditOutcome } from '$lib/app/builder.svelte';
 
 	let {
@@ -47,7 +48,8 @@
 		fresh = new Set(),
 		onAdd,
 		onBreakdown,
-		onFields
+		onFields,
+		onSendRows
 	}: {
 		builder: Builder;
 		kind: ItemKind;
@@ -56,6 +58,8 @@
 		onAdd: () => void;
 		onBreakdown: () => void;
 		onFields: () => void;
+		/** Move or copy the selected rows to another bid. Absent: the bid is not stored yet. */
+		onSendRows?: (rows: Target[], move: boolean) => void;
 	} = $props();
 
 	type Item = RequestShot | RequestAsset;
@@ -67,11 +71,7 @@
 	const allItems = $derived(builder.itemsOf(kind));
 	const byItem = $derived(new Map(allItems.map((item) => [item.id, item])));
 	const requestColumns = $derived(builder.columns(kind));
-	const packages = $derived(builder.packages());
-	const packageNames = $derived(new Map(packages.map((p) => [p.id, p.name])));
-	/** Show the rows of one package, or every row. */
-	let inPackage = $state<string>('');
-	const items = $derived(inPackage === '' ? allItems : allItems.filter((item) => item.package === inPackage));
+	const items = $derived(allItems);
 
 	/* rows ----------------------------------------------------------------- */
 
@@ -96,7 +96,7 @@
 
 	function rowOf(item: Item): EntityRow {
 		const attributes: Record<string, unknown> = { __item: item.id };
-		for (const column of requestColumns) attributes[pathOf(column.key)] = itemValue(item, column.key, packageNames);
+		for (const column of requestColumns) attributes[pathOf(column.key)] = itemValue(item, column.key);
 		return { ...refOf(item), attributes, relationships: {} };
 	}
 
@@ -211,9 +211,9 @@
 		const reasons = new Map(outcome.failures.map((f) => [f.itemId, f.reason]));
 		return updates.map((u): RowWriteResult => {
 			const item = itemOfRef(u.ref);
-			const reason = item ? reasons.get(item.id) : 'This row is no longer in the request.';
+			const reason = item ? reasons.get(item.id) : 'This row is no longer in the bid.';
 			const now = item ? builder.itemsOf(kind).find((i) => i.id === item.id) : undefined;
-			if (reason !== undefined || !now) return { ref: u.ref, ok: false, message: reason ?? 'This row is no longer in the request.' };
+			if (reason !== undefined || !now) return { ref: u.ref, ok: false, message: reason ?? 'This row is no longer in the bid.' };
 			return { ref: u.ref, ok: true, row: rowOf(now) };
 		});
 	}
@@ -267,10 +267,10 @@
 		failed = null;
 		toast = {
 			id: ++toastId,
-			line: removed.length === 1 ? `${builder.codeOf(kind, removed[0].item.id) || removed[0].item.id} is out of the request.` : `${removed.length} rows are out of the request.`,
+			line: removed.length === 1 ? `${builder.codeOf(kind, removed[0].item.id) || removed[0].item.id} is out of the bid.` : `${removed.length} rows are out of the bid.`,
 			undo: async () => {
 				builder.restore(kind, removed);
-				return removed.length === 1 ? 'It is back in the request.' : 'They are back in the request.';
+				return removed.length === 1 ? 'It is back in the bid.' : 'They are back in the bid.';
 			}
 		};
 	}
@@ -294,8 +294,8 @@
 
 	const SOURCE_WORDS = $derived<Record<RowSource, { label: string; title: string }>>({
 		fpt: { label: 'From Flow PT', title: `From Flow PT. A change in a live column changes the ${type} in Flow PT.` },
-		breakdown: { label: 'From a breakdown', title: 'From a breakdown. Its cells are in this request only.' },
-		linked: { label: 'From a breakdown, linked to Flow PT', title: `From a breakdown, linked to its ${type} in Flow PT. Its cells are in this request only.` }
+		breakdown: { label: 'From a breakdown', title: 'From a breakdown. Its cells are in this bid only.' },
+		linked: { label: 'From a breakdown, linked to Flow PT', title: `From a breakdown, linked to its ${type} in Flow PT. Its cells are in this bid only.` }
 	});
 </script>
 
@@ -306,7 +306,7 @@
 			<Radio class="size-3.5" aria-hidden="true" />
 		</span>
 	{:else}
-		<span class="text-muted-foreground/70 flex shrink-0 items-center pr-2" role="img" aria-label="In this request only" title="In this request only. Flow PT is not changed.">
+		<span class="text-muted-foreground/70 flex shrink-0 items-center pr-2" role="img" aria-label="In this bid only" title="In this bid only. Flow PT is not changed.">
 			<FileText class="size-3.5" aria-hidden="true" />
 		</span>
 	{/if}
@@ -345,7 +345,7 @@
 
 {#if allItems.length === 0}
 	<div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center" data-slot="picked-empty">
-		<p class="text-base font-semibold tracking-tight">No {noun}s in the request yet</p>
+		<p class="text-base font-semibold tracking-tight">No {noun}s in the bid yet</p>
 		<p class="text-muted-foreground max-w-md text-sm text-balance">
 			Add them from Flow PT, or from a breakdown when they are not in Flow PT yet. A {noun} from Flow PT shows its live values, and a change to them changes Flow PT.
 		</p>
@@ -361,26 +361,19 @@
 				<span class="mr-2 text-sm font-medium tabular-nums" aria-live="polite">{selection.length} selected</span>
 				<Button size="sm" variant="ghost" onclick={() => void setOmitted(true)} data-slot="bulk-omit">Omit</Button>
 				<Button size="sm" variant="ghost" onclick={() => void setOmitted(false)} data-slot="bulk-include">Include</Button>
-				<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={takeOut} data-slot="bulk-remove">Remove from the request</Button>
+				{#if onSendRows}
+					<Button size="sm" variant="ghost" onclick={() => onSendRows?.(selectedItems.map((i) => ({ kind, id: i.id }) as Target), true)} data-slot="bulk-move">Move to bid…</Button>
+					<Button size="sm" variant="ghost" onclick={() => onSendRows?.(selectedItems.map((i) => ({ kind, id: i.id }) as Target), false)} data-slot="bulk-copy">Copy to bid…</Button>
+				{/if}
+				<Button size="sm" variant="ghost" class="hover:text-destructive" onclick={takeOut} data-slot="bulk-remove">Remove from the bid</Button>
 				<span class="bg-border mx-1 h-4 w-px" aria-hidden="true"></span>
 				<Button size="sm" variant="ghost" class="text-muted-foreground" onclick={() => (selection = [])} data-slot="bulk-clear">Clear selection</Button>
 			</div>
 		{:else}
 			<div class="relative w-full sm:w-64">
 				<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden="true" />
-				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun} in the request`} bind:value={query} aria-label={`Find a ${noun} in the request`} />
+				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun} in the bid`} bind:value={query} aria-label={`Find a ${noun} in the bid`} />
 			</div>
-			<label class="text-muted-foreground flex items-center gap-2 text-xs">
-				<span>Package</span>
-				<select
-					class="border-input dark:bg-input/30 text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 max-w-56 rounded-lg border bg-transparent px-2 text-sm outline-none focus-visible:ring-3"
-					bind:value={inPackage}
-					data-slot="package-filter"
-				>
-					<option value="">Every package</option>
-					{#each packages as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
-				</select>
-			</label>
 		{/if}
 		{#if mixed}
 			<Segmented
@@ -396,7 +389,7 @@
 		{/if}
 		<p class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-slot="live-legend">
 			<span class="flex items-center gap-1.5"><Radio class="text-info size-3.5" aria-hidden="true" /><span><span class="text-foreground">Live in Flow PT.</span> A change here changes the {type} in Flow PT.</span></span>
-			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this request only.</span>
+			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this bid only.</span>
 			<span>By a code, the mark says where the row comes from.</span>
 			{#if builder.live.state === 'reading'}<span aria-live="polite">Reading Flow PT…</span>{/if}
 		</p>
@@ -452,7 +445,7 @@
 				paging="scroll"
 				maxHeight="100%"
 				density="compact"
-				emptyLabel={`No ${noun} in the request matches.`}
+				emptyLabel={`No ${noun} in the bid matches.`}
 				{cell}
 			>
 				{#snippet headerEnd({ column }: { column: CollectionColumn })}

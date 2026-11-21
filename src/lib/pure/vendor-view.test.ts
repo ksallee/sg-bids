@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { asset, bid, line, onShot, request, shot } from './fixtures';
 import { money } from './money';
 import { vendorKeys } from './vendor-keys';
-import { groupItems, groupings, itemMatches, packageSections, vendorBidView, vendorRequestView } from './vendor-view';
+import { groupItems, groupings, itemMatches, packageSections, requestFacts, vendorBidView, vendorRequestView } from './vendor-view';
 
 const SHOT = '11111111-1111-4111-8111-111111111111';
 const HERO = '22222222-2222-4222-8222-222222222222';
@@ -161,5 +161,35 @@ describe('itemMatches', () => {
 		expect(itemMatches(s, 'cg')).toBe(true);
 		expect(itemMatches(s, 'water')).toBe(false);
 		expect(itemMatches(asset('hero', { name: 'Hero Suit' }), 'suit')).toBe(true);
+	});
+});
+
+describe('requestFacts', () => {
+	const day = (text: string) => `day ${text}`;
+	const base = {
+		header: { project: 'Show', round: 1, baseCurrency: 'USD', assumptions: [] },
+		packages: [
+			{ id: 'p1', name: 'SEQ010' },
+			{ id: 'p2', name: 'Creature' }
+		],
+		shots: [
+			{ id: 's1', code: 'SH010', omitted: false, assetIds: [], package: 'p1' },
+			{ id: 's2', code: 'SH020', omitted: true, assetIds: [], package: 'p1' }
+		],
+		assets: [{ id: 'a1', name: 'Hero', package: 'p2' }]
+	};
+
+	it('always lists the bids the vendor answers, with their rows in, so the box is never empty', () => {
+		expect(requestFacts(base, day)).toEqual([['Bids', 'SEQ010 (1 row), Creature (1 row)']]);
+	});
+
+	it('lists what production set, and leaves out what it did not', () => {
+		const facts = requestFacts({ ...base, packages: [base.packages[0]], header: { ...base.header, title: 'Main', director: 'Ada', deliveryDate: '2027-02-01', studio: ' ' } }, day);
+		expect(facts).toEqual([
+			['Title', 'Main'],
+			['Bid', 'SEQ010 (1 row)'],
+			['Director', 'Ada'],
+			['Delivery', 'day 2027-02-01']
+		]);
 	});
 });

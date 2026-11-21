@@ -19,7 +19,6 @@
 	import { cn } from '$lib/utils.js';
 	import Segmented from '$lib/app/segmented.svelte';
 	import { focusById } from '$lib/app/focus-by-id';
-	import { builderHref } from '$lib/pure/builder-view';
 	import type { PublishState } from './publish.svelte';
 
 	let { state: s }: { state: PublishState } = $props();
@@ -39,7 +38,7 @@
 	const missingCount = $derived(g.missing.shot.labels.length + g.missing.asset.labels.length);
 	const missingMark = $derived<Mark>((['shot', 'asset'] as const).some((k) => g.missing[k].labels.length > 0 && !g.missing[k].choice) ? 'blocked' : 'ok');
 	const collisions = $derived(s.prepared?.plan.collisions ?? []);
-	const matchHref = $derived(builderHref(s.requestId, 'review'));
+	const matchHref = $derived(`/requests/${s.requestId}`);
 </script>
 
 {#snippet mark(m: Mark)}
@@ -204,7 +203,7 @@
 							{#if b.rate}
 								<span class="text-muted-foreground">{b.rate.rate}, {formatDay(b.rate.date)}, locked at publish</span>
 							{:else}
-								<a class="text-destructive underline-offset-4 hover:underline" href={`/bids/${s.requestId}/compare`}>Needs a rate</a>
+								<a class="text-destructive underline-offset-4 hover:underline" href={`/requests/${s.requestId}/compare`}>Needs a rate</a>
 							{/if}
 						</li>
 					{/each}

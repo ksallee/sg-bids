@@ -1,8 +1,8 @@
 # sg-bids
 
-VFX bidding for Flow Production Tracking. Production signs in to FPT as a person, builds a bid
-request from Shots and Assets, vendors answer through a hosted link with no FPT account, production
-compares and awards, and the award is written to FPT.
+VFX bidding for Flow Production Tracking. Production signs in to FPT as a person, builds bids from
+Shots and Assets, sends one or several in a request, vendors answer through a hosted link with no
+FPT account, production compares and awards, and the award is written to FPT.
 
 The plan lives in a local `BRIEF.md`: the research, the decisions, what is still open. It is
 gitignored and never committed. Nothing from it that names a site goes in the repo.
@@ -25,7 +25,7 @@ gitignored and never committed. Nothing from it that names a site goes in the re
   grows there, issue and PR there, never a private extension here.
 - Default theme only (`src/app.css`, sg-widgets' default). Light and dark switch in the navbar,
   following the system preference at first.
-- Supabase holds requests and bids. Only server code touches it, with the secret key; row level
+- Supabase holds bids, requests and answers. Only server code touches it, with the secret key; row level
   security is on with no policy. Every query carries the filter `src/lib/pure/access.ts` gives
   the verified principal: production's site host and project id, or a vendor's invitation.
   Freezes live in the database too. `docs/development.md` says how.
@@ -41,14 +41,17 @@ metaphors, no "not X, Y", no filler.
 
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
 - `src/lib/app/`: the app's own components (shell, page header and body on one measure rule in
-  `measure.ts`, page state, the shared form label with its required mark), and the request
-  builder's one page under `builder/` (header panel, items, summary bar, fields setting, review)
-  with its page state in `builder.svelte.ts`, the comparison's grid, scenario rail and page state
-  under `compare/`. What is required and what blocks the issue is `pure/readiness.ts`.
+  `measure.ts`, page state, the shared form label with its required mark), the bid editor's pieces
+  under `builder/` (the one table, the add dialogs, the fields setting, the header panel the send
+  flow uses) with its page state in `builder.svelte.ts`, the bid page and its dialogs under `bid/`,
+  the send flow's state (`send.svelte.ts`), invite and vendor bids dialog under `request/`, the
+  comparison's grid, scenario rail and page state under `compare/`. What is required and what
+  blocks the issue is `pure/readiness.ts`; a request made from bids is `pure/request-bids.ts`.
 - `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.
-- `src/lib/drafts.ts`: the one place a draft request is stored. Storage plugs in there.
+- `src/lib/drafts.ts`: the one place a bid and a draft request are stored. Storage plugs in there.
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
-- `docs/data-model.md`: the bid request, vendor bid, award and change order, field by field.
+- `docs/data-model.md`: the bid, the request, the vendor's answer, award and change order, field by
+  field.
 - `src/lib/server/`: the data layer and the production check. Server only.
 - `supabase/migrations/`: the schema, timestamped plain SQL, idempotent.
 - `tests/db/`: database tests, run by `pnpm test:db` against a throwaway Postgres in Docker.

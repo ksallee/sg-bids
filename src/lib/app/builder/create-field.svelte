@@ -3,7 +3,7 @@
 	the entity type, the display name, the API name the site will give it, the data type, a list's
 	values, all editable before the create. It says the field is for everyone on the site, and
 	whether the person may create fields (132). When they may not, it says so and points to the way
-	that needs no field: set it per item in the request. Plan and answer in `$lib/pure/field-create`.
+	that needs no field: set it per item in the bid. Plan and answer in `$lib/pure/field-create`.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
@@ -115,7 +115,7 @@
 	</div>
 	{#if right?.state === 'no'}
 		<Notice tone="destructive" title="You cannot create this field.">
-			{' '}{right.reason} Until then, set {spec?.label.toLowerCase()} per item in the request. It stays in the request only.
+			{' '}{right.reason} Until then, set {spec?.label.toLowerCase()} per item in the bid. It stays in the bid only.
 		</Notice>
 	{/if}
 	{#if answer}

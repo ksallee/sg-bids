@@ -134,7 +134,7 @@ export function bidLinks(siteUrl: string, site: Pick<FptSite, 'bidType'>, writte
 		if (!b.key.startsWith(prefix)) return [];
 		const [vendorId, , part] = b.key.slice(prefix.length).split('/');
 		const name = request.vendors.find((v) => v.id === vendorId)?.name ?? 'A vendor';
-		const label = part === 'general' ? GENERAL_COSTS : part?.startsWith('p:') ? (packageNames.get(decodeURIComponent(part.slice(2))) ?? 'A package') : null;
+		const label = part === 'general' ? GENERAL_COSTS : part?.startsWith('p:') ? (packageNames.get(decodeURIComponent(part.slice(2))) ?? 'A bid') : null;
 		return [{ vendorId, name, label, id: b.id, url: detailUrl(siteUrl, site.bidType, b.id) }];
 	});
 }

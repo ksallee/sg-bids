@@ -440,7 +440,7 @@ export function applyScenario(request: BidRequest, bids: readonly VendorBid[], s
 		const bid = bidsById.get(bidId)!;
 		const pkgName = resolved.packages.find((p) => p.id === pkg)?.name ?? pkg;
 		const every = (resolved.live.get(pkg) ?? []).every((t) => rows.has(targetKey(t)));
-		if (!every) throw new Error(`Bid ${bidId} priced ${pkgName} as one figure. The scenario gives it part of the package: it is awarded whole or not at all.`);
+		if (!every) throw new Error(`Bid ${bidId} priced ${pkgName} as one figure. The scenario gives it part of it: it is awarded whole or not at all.`);
 		const price = packagePrices(bid).get(pkg)!;
 		perVendor.set(bid.vendorId, add(perVendor.get(bid.vendorId) ?? money(0, base), toBase(price.total, bid, base)));
 	}

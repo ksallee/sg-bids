@@ -98,11 +98,11 @@
 				<label class="col-span-2 flex flex-col gap-1 sm:col-span-1">
 					<span class="text-xs font-medium">Applies to</span>
 					{#if readOnly}
-						<span class="text-sm">{split.base === 'all' ? 'The whole bid' : split.base === 'labour' ? 'Labour only' : `${split.contractPercent}% of the contract`}</span>
+						<span class="text-sm">{split.base === 'all' ? 'The whole answer' : split.base === 'labour' ? 'Labour only' : `${split.contractPercent}% of the contract`}</span>
 					{:else}
 						<div class="flex items-center gap-2">
 							<select class={select} bind:value={split.base}>
-								<option value="all">The whole bid</option>
+								<option value="all">The whole answer</option>
 								<option value="labour">Labour only</option>
 								<option value="contract">Share of the contract</option>
 							</select>

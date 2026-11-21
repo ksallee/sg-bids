@@ -106,14 +106,14 @@
 								{:else if cell.kind === 'package'}
 									{@const unit = grid.packages.find((p) => p.id === cell.package)}
 									{@const figure = unit?.cells[c]}
-									<span class="text-sm">In the package price of {unit?.name ?? 'its package'}.</span>
+									<span class="text-sm">In the figure for {unit?.name ?? 'its bid'}.</span>
 									{#if figure && figure.kind === 'package'}
 										<span class="text-muted-foreground text-xs tabular-nums">
-											One figure for the package: {figure.amount.base ? formatAmount(figure.amount.base, undefined, false) : formatAmount(figure.amount.bid, undefined, false)}. Awarded whole or not at all.
+											One figure for the bid: {figure.amount.base ? formatAmount(figure.amount.base, undefined, false) : formatAmount(figure.amount.bid, undefined, false)}. Awarded whole or not at all.
 										</span>
 									{/if}
 								{:else if cell.kind === 'declined'}
-									<span class="text-muted-foreground text-sm">Not bidding on this package.</span>
+									<span class="text-muted-foreground text-sm">Not bidding on this bid.</span>
 								{:else if cell.kind === 'excluded'}
 									<span class="text-muted-foreground text-sm">Excluded. The vendor will not do it.</span>
 								{:else}
@@ -165,7 +165,7 @@
 				>
 					<div class="flex flex-wrap items-baseline gap-x-2">
 						<h3 class="text-sm font-semibold">Split between vendors</h3>
-						<span class="text-muted-foreground text-xs">A share per vendor, in percent, summing to 100. Leave a vendor empty to leave it out. A vendor that priced the row's package as one figure takes no share: click its cell to give it the whole package.</span>
+						<span class="text-muted-foreground text-xs">A share per vendor, in percent, summing to 100. Leave a vendor empty to leave it out. A vendor that priced the row's bid as one figure takes no share: click its cell to give it the whole bid.</span>
 					</div>
 					<div class="flex flex-wrap items-end gap-3">
 						{#each grid.columns as column, c (column.bidId)}

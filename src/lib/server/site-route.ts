@@ -10,6 +10,7 @@ import type { SitePrincipal } from '$lib/pure/access';
 import type { ProjectRow } from '$lib/pure/fpt-session';
 import { StoreError } from './errors';
 import type { SiteClaim, VerifiedSite } from './production';
+import type { BidOverview } from './production-bids';
 import type { SiteRequestOverview } from './requests';
 
 export function siteRoute(verify: (claim: SiteClaim) => Promise<VerifiedSite>, action: (site: VerifiedSite) => Promise<unknown>) {
@@ -40,5 +41,20 @@ export function listRequestsAcross(list: (principal: SitePrincipal) => Promise<S
 		const requests = await list({ kind: 'production-site', siteHost: site.siteHost, projectIds: site.projectIds });
 		const used = new Set(requests.map((r) => r.projectId));
 		return { projects: site.projects.filter((p) => used.has(p.id)), requests };
+	};
+}
+
+export interface BidsAcross {
+	/** The projects that hold a listed bid, with their names, in the site's order. */
+	readonly projects: readonly ProjectRow[];
+	readonly bids: readonly BidOverview[];
+}
+
+/** The bids list across the site: the same, for production's bids. */
+export function listBidsAcross(list: (principal: SitePrincipal) => Promise<BidOverview[]>) {
+	return async (site: VerifiedSite): Promise<BidsAcross> => {
+		const bids = await list({ kind: 'production-site', siteHost: site.siteHost, projectIds: site.projectIds });
+		const used = new Set(bids.map((b) => b.projectId));
+		return { projects: site.projects.filter((p) => used.has(p.id)), bids };
 	};
 }

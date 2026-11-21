@@ -94,7 +94,7 @@
 
 <Dialog.Header class="border-border border-b px-5 pt-5 pb-4">
 	<Dialog.Title>Create the missing fields</Dialog.Title>
-	<Dialog.Description>Tick the ones to create. Each row is what Flow PT receives. The ones you leave stay unmapped and can still be set per item in the request.</Dialog.Description>
+	<Dialog.Description>Tick the ones to create. Each row is what Flow PT receives. The ones you leave stay unmapped and can still be set per item in the bid.</Dialog.Description>
 </Dialog.Header>
 
 <form class="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4" onsubmit={(e) => (e.preventDefault(), void create())} id="create-missing-form" data-slot="create-missing">
@@ -115,7 +115,7 @@
 		{/if}
 	</div>
 	{#if right?.state === 'no'}
-		<Notice tone="destructive" title="You cannot create fields.">{' '}{right.reason} Until then, set these per item in the request. They stay in the request only.</Notice>
+		<Notice tone="destructive" title="You cannot create fields.">{' '}{right.reason} Until then, set these per item in the bid. They stay in the bid only.</Notice>
 	{/if}
 
 	<div class="border-border overflow-hidden rounded-lg border">

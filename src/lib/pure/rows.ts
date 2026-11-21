@@ -12,13 +12,16 @@
  * - A bid's vendor is its invitation. A line points at its item by kind and key.
  * - A rate is kept as the exact string typed, never a float.
  * - A request's packages are rows of their own (`request_packages`), keyed by the model's package
- *   id; an item names its package in `package_key`. An invitation's packages are `package_keys`,
- *   null for every package. A bid's package figures are `packages`, in the model's shape, and a
- *   line covered by one has `in_package`.
+ *   id; an item names its package in `package_key`, and a package names the production bid it comes
+ *   from in `bid_id`. An invitation's packages are `package_keys`, null for every package. A bid's
+ *   package figures are `packages`, in the model's shape, and a line covered by one has `in_package`.
+ * - A production bid is a row (`production_bids`) and its rows (`production_bid_items`), the
+ *   columns of a request item without the package.
  */
 
 import type {
 	AwardScenario,
+	ProductionBid,
 	BidLine,
 	BidRequest,
 	EntityRef,
@@ -88,6 +91,28 @@ export interface RequestPackageRow extends Tenant, PackageColumns {
 	id: string;
 	request_id: string;
 	position: number;
+	/** The production bid the package comes from. Null for a package made before bids, or once its bid is deleted. */
+	bid_id?: string | null;
+}
+
+/** A production bid as stored, with the counts its functions keep. */
+export interface ProductionBidRow extends Tenant {
+	id: string;
+	name: string;
+	shot_count: number;
+	asset_count: number;
+	omitted_count: number;
+	frame_count: number;
+	created_at: string;
+	updated_at: string;
+}
+
+/** A production bid's row as written: a request item's columns without the package. */
+export type BidItemColumns = Omit<ItemColumns, 'package_key'>;
+
+export interface ProductionBidItemRow extends Tenant, BidItemColumns {
+	id: string;
+	bid_id: string;
 }
 
 export interface RequestItemRow extends Tenant, ItemColumns {
@@ -249,8 +274,18 @@ export function packagesToRows(packages: readonly RequestPackage[]): PackageColu
 	});
 }
 
-export function packagesFromRows(rows: readonly (PackageColumns & { position: number })[]): RequestPackage[] {
-	return [...rows].sort((a, b) => a.position - b.position).map((row) => ({ id: row.key, name: row.name }));
+export function packagesFromRows(rows: readonly (PackageColumns & { position: number; bid_id?: string | null })[]): RequestPackage[] {
+	return [...rows].sort((a, b) => a.position - b.position).map((row) => ({ id: row.key, name: row.name, ...(row.bid_id ? { bid: row.bid_id } : {}) }));
+}
+
+/** A production bid's rows as written, in order. Same checks as a request's: one id per kind. */
+export function bidItemsToRows(shots: readonly RequestShot[], assets: readonly RequestAsset[]): BidItemColumns[] {
+	const strip = <T extends { package?: Id }>({ package: _, ...rest }: T) => rest;
+	return itemsToRows(shots.map(strip) as RequestShot[], assets.map(strip) as RequestAsset[]).map(({ package_key: _, ...row }) => row);
+}
+
+export function productionBidFromRows(row: Pick<ProductionBidRow, 'id' | 'name'>, items: readonly BidItemColumns[]): ProductionBid {
+	return { id: row.id, name: row.name, ...itemsFromRows(items) };
 }
 
 export function itemsFromRows(rows: readonly ItemColumns[]): { shots: RequestShot[]; assets: RequestAsset[] } {
@@ -268,7 +303,7 @@ export function requestFromRows(
 	row: RequestRow,
 	items: readonly ItemColumns[],
 	vendors: readonly InvitedVendor[],
-	packages: readonly (PackageColumns & { position: number })[] = []
+	packages: readonly (PackageColumns & { position: number; bid_id?: string | null })[] = []
 ): BidRequest {
 	const stored = row.header as Partial<RequestHeader>;
 	const header: RequestHeader = {

@@ -5,7 +5,8 @@
  */
 
 import { productionClaim, siteClaim } from '$lib/live';
-import type { BidRequest, InvitedVendor } from '$lib/pure/model';
+import type { BidRequest, Id, InvitedVendor, ProductionBid, RequestAsset, RequestShot } from '$lib/pure/model';
+import type { Overlap, RequestOfBid } from '$lib/pure/request-bids';
 import type { InvitationState } from '$lib/pure/invitations';
 import type { Publication } from '$lib/pure/award-record';
 import type { Deleted, DeletionFacts } from '$lib/pure/request-delete';
@@ -32,12 +33,55 @@ export interface InvitationView {
 }
 
 export interface LoadedRequest {
+	/** A draft made from bids reads as its bids make it now. */
 	request: BidRequest;
+	/** A draft's rows that sit in two of its bids: the issue refuses them. */
+	overlaps: Overlap[];
 	status: RequestStatus;
 	issuedAt: string | null;
 	invitations: InvitationView[];
 	/** What the award wrote to Flow PT, or null. */
 	award: Publication | null;
+}
+
+/** A production bid in a list: its counts and the requests it is in. */
+export interface BidOverview {
+	id: Id;
+	projectId: number;
+	name: string;
+	shots: number;
+	assets: number;
+	omitted: number;
+	frames: number;
+	createdAt: string;
+	updatedAt: string;
+	requests: RequestOfBid[];
+}
+
+/** A production bid with its rows, and the requests it is in. */
+export interface LoadedBid {
+	bid: ProductionBid;
+	projectId: number;
+	updatedAt: string;
+	requests: RequestOfBid[];
+}
+
+export interface BidDeletionFacts {
+	name: string;
+	drafts: RequestOfBid[];
+	issued: RequestOfBid[];
+}
+
+export interface BidDeleted {
+	name: string;
+	drafts: { id: Id; code: string; round: number }[];
+	issued: { id: Id; code: string; round: number }[];
+}
+
+/** The bids across the site, as the requests list. */
+export interface BidsAcross {
+	projects: { id: number; name: string }[];
+	bids: BidOverview[];
 }
 
 export interface Invited {
@@ -74,6 +118,11 @@ export async function listAcross(): Promise<RequestsAcross> {
 	return post<RequestsAcross>('requests', { claim: await siteClaim() });
 }
 
+/** The signed-in person's bids in every project they may read on the site. */
+export async function listBidsAcross(): Promise<BidsAcross> {
+	return post<BidsAcross>('bids', { claim: await siteClaim() });
+}
+
 export async function call<T>(action: string, projectId: number, body: Record<string, unknown> = {}): Promise<T> {
 	return post<T>(action, { ...body, claim: await productionClaim(projectId) });
 }
@@ -94,14 +143,34 @@ async function post<T>(action: string, body: Record<string, unknown>): Promise<T
 	return answer as T;
 }
 
+export const bidsApi = {
+	list: (projectId: number) => call<{ bids: BidOverview[] }>('bid-list', projectId),
+	get: (projectId: number, id: string) => call<LoadedBid>('bid-get', projectId, { id }),
+	save: (projectId: number, body: { id: string | null; name: string; items: { shots: readonly RequestShot[]; assets: readonly RequestAsset[] } }) => call<LoadedBid>('bid-save', projectId, body),
+	clone: (projectId: number, id: string) => call<LoadedBid>('bid-clone', projectId, { id }),
+	deleteCheck: (projectId: number, id: string) => call<{ facts: BidDeletionFacts }>('bid-delete-check', projectId, { id }),
+	delete: (projectId: number, id: string) => call<{ deleted: BidDeleted }>('bid-delete', projectId, { id }),
+	moveRows: (projectId: number, body: { from: string; to: string; rows: { kind: 'shot' | 'asset'; id: string }[]; move: boolean }) =>
+		call<{ taken: number; from: LoadedBid }>('bid-move-rows', projectId, body)
+};
+
 export const api = {
 	list: (projectId: number) => call<RequestOverview[]>('list', projectId),
 	get: (projectId: number, id: string) => call<LoadedRequest>('get', projectId, { id }),
-	save: (projectId: number, body: { id: string | null; code: string; header: unknown; items: unknown; packages?: unknown }) => call<{ request: BidRequest }>('save', projectId, body),
-	issue: (projectId: number, id: string) => call<{ request: BidRequest }>('issue', projectId, { id }),
+	/** A draft's header, and its bids when given. No id: a new draft. */
+	save: (projectId: number, body: { id: string | null; code: string; header: unknown; bids?: string[] }) => call<{ request: BidRequest }>('save', projectId, body),
+	/** A draft's bids, in order. */
+	requestBids: (projectId: number, id: string, bids: string[]) => call<LoadedRequest>('request-bids', projectId, { id, bids }),
+	/** Issues the draft. Answers the links of the vendors added to it, once. */
+	issue: (projectId: number, id: string) => call<{ request: BidRequest; links: Invited[] }>('issue', projectId, { id }),
 	newRound: (projectId: number, id: string) => call<{ request: BidRequest }>('new-round', projectId, { id }),
 	invite: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null; packages?: string[] | null }) =>
 		call<Invited>('invite', projectId, { requestId, vendor }),
+	/** A vendor added to a draft: its link is made at the issue. */
+	plan: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null; packages?: string[] | null }) =>
+		call<{ invitation: InvitedVendor }>('invite', projectId, { requestId, vendor, pending: true }),
+	/** A vendor added to a draft goes again. */
+	uninvite: (projectId: number, invitationId: string) => call<{ ok: true }>('uninvite', projectId, { invitationId }),
 	/** A vendor's packages: some, or null for every one. Refused once the vendor has submitted a bid. */
 	invitePackages: (projectId: number, invitationId: string, packages: string[] | null) => call<{ invitation: InvitedVendor }>('invite-packages', projectId, { invitationId, packages }),
 	revoke: (projectId: number, invitationId: string) => call<{ ok: true }>('revoke', projectId, { invitationId }),

@@ -1,6 +1,6 @@
 /**
  * The request's header folded to one line in the page header, once it is filled: the code, the
- * round, the base currency and the bids due day, and how many header fields still need a fix. The
+ * round, the base currency and the answers due day, and how many header fields still need a fix. The
  * builder opens the header form while there is one to fix; the title is the page's own title.
  */
 
@@ -27,7 +27,7 @@ export function headerSummary(form: HeaderForm, problems: readonly Problem[], da
 	if (form.code.trim()) parts.push({ key: 'code', text: form.code.trim(), mono: true });
 	if (form.round.trim()) parts.push({ key: 'round', text: `Round ${form.round.trim()}` });
 	if (form.baseCurrency.trim()) parts.push({ key: 'baseCurrency', text: form.baseCurrency.trim(), mono: true });
-	parts.push({ key: 'dueDate', text: form.dueDate.trim() ? `Bids due ${day(form.dueDate.trim())}` : 'No due day' });
+	parts.push({ key: 'dueDate', text: form.dueDate.trim() ? `Answers due ${day(form.dueDate.trim())}` : 'No due day' });
 	const toFix = problems.filter((p) => p.tone === 'error' && !NOT_HEADER.has(p.target)).length;
 	return { parts, toFix };
 }

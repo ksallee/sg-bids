@@ -123,9 +123,23 @@ export interface SaveInput {
 	readonly id: string | null;
 	readonly code: string;
 	readonly header: RequestHeader;
-	readonly items: { readonly shots: RequestShot[]; readonly assets: RequestAsset[] };
-	/** The request's packages. Empty: none, every row without one. */
-	readonly packages: RequestPackage[];
+	/** Rows of its own, as a request made before bids holds. Absent: the header alone. */
+	readonly items?: { readonly shots: RequestShot[]; readonly assets: RequestAsset[] };
+	/** With `items`: the request's packages. Empty: none, every row without one. */
+	readonly packages?: RequestPackage[];
+	/** The draft's bids, in order. Absent: they stay as they are. */
+	readonly bids?: Id[];
+}
+
+/** Most bids one request is made from. Far above a real one. */
+export const MAX_REQUEST_BIDS = 200;
+
+/** Absent: none given. Else bid ids, one each. */
+function bidIds(value: unknown): Parsed<Id[] | undefined> {
+	if (value === undefined) return { ok: true, value: undefined };
+	if (!Array.isArray(value) || value.length > MAX_REQUEST_BIDS || !value.every((v) => parseId(v) !== null)) return { ok: false, message: 'The bids do not fit a request.' };
+	if (new Set(value).size !== value.length) return { ok: false, message: 'A bid is named twice.' };
+	return { ok: true, value: [...(value as string[])] };
 }
 
 /** Most packages a request holds. Far above a real one. */
@@ -162,14 +176,81 @@ export function parseSave(body: unknown): Parsed<SaveInput> {
 	if (!isText(body.code) || body.code.trim() === '' || body.code.length > 200) return { ok: false, message: 'Give the request a code.' };
 	const header = parseHeader(body.header);
 	if (!header) return { ok: false, message: 'The header does not fit a request.' };
-	const items = isObject(body.items) ? body.items : null;
+	const bids = bidIds(body.bids);
+	if (!bids.ok) return bids;
+	const code = body.code.trim();
+	if (body.items === undefined) {
+		if (body.packages !== undefined) return { ok: false, message: 'Packages come with the rows.' };
+		return { ok: true, value: { id, code, header, ...(bids.value ? { bids: bids.value } : {}) } };
+	}
+	const items = parseRows(body.items);
+	if (!items.ok) return items;
+	if (bids.value) return { ok: false, message: 'A draft holds rows of its own or bids, not both.' };
+	const packages = parsePackages(body.packages, [...items.value.shots, ...items.value.assets]);
+	if (!packages.ok) return packages;
+	return { ok: true, value: { id, code, header, items: items.value, packages: packages.value } };
+}
+
+function parseRows(value: unknown): Parsed<{ shots: RequestShot[]; assets: RequestAsset[] }> {
+	const items = isObject(value) ? value : null;
 	if (!items || !Array.isArray(items.shots) || !Array.isArray(items.assets)) return { ok: false, message: 'An item does not fit a request.' };
 	const shots = items.shots.map(parseShot);
 	const assets = items.assets.map(parseAsset);
 	if (shots.includes(null) || assets.includes(null)) return { ok: false, message: 'An item does not fit a request.' };
-	const packages = parsePackages(body.packages, [...(shots as RequestShot[]), ...(assets as RequestAsset[])]);
-	if (!packages.ok) return packages;
-	return { ok: true, value: { id, code: body.code.trim(), header, items: { shots: shots as RequestShot[], assets: assets as RequestAsset[] }, packages: packages.value } };
+	return { ok: true, value: { shots: shots as RequestShot[], assets: assets as RequestAsset[] } };
+}
+
+/** Most rows one bid holds. Far above a real one. */
+export const MAX_BID_ROWS = 20_000;
+
+export interface BidSaveInput {
+	/** The stored bid to update, or null to create one. */
+	readonly id: string | null;
+	readonly name: string;
+	readonly shots: RequestShot[];
+	readonly assets: RequestAsset[];
+}
+
+/** A production bid to store: its name and rows. A row's package, if sent, is dropped: a bid has none. */
+export function parseBidSave(body: unknown): Parsed<BidSaveInput> {
+	if (!isObject(body)) return { ok: false, message: 'Send a bid.' };
+	const id = body.id === undefined || body.id === null ? null : parseId(body.id);
+	if (id === null && body.id !== undefined && body.id !== null) return { ok: false, message: 'That is not a bid id.' };
+	if (!isText(body.name) || body.name.trim() === '') return { ok: false, message: 'Name the bid.' };
+	if (body.name.trim().length > MAX_PACKAGE_NAME) return { ok: false, message: `A bid name is ${MAX_PACKAGE_NAME} characters at most.` };
+	const rows = parseRows(body.items);
+	if (!rows.ok) return { ok: false, message: 'A row does not fit a bid.' };
+	if (rows.value.shots.length + rows.value.assets.length > MAX_BID_ROWS) return { ok: false, message: `A bid holds ${MAX_BID_ROWS} rows at most.` };
+	const strip = <T extends { package?: Id }>({ package: _, ...rest }: T) => rest;
+	return { ok: true, value: { id, name: body.name.trim(), shots: rows.value.shots.map(strip) as RequestShot[], assets: rows.value.assets.map(strip) as RequestAsset[] } };
+}
+
+/** Rows of one bid to another: `{from, to, rows: [{kind, id}], move}`. */
+export function parseBidMove(body: unknown): Parsed<{ from: Id; to: Id; rows: { kind: 'shot' | 'asset'; id: string }[]; move: boolean }> {
+	if (!isObject(body)) return { ok: false, message: 'Name the bids and the rows.' };
+	const from = parseId(body.from);
+	const to = parseId(body.to);
+	if (!from || !to) return { ok: false, message: 'That is not a bid id.' };
+	if (from === to) return { ok: false, message: 'Pick another bid.' };
+	if (typeof body.move !== 'boolean') return { ok: false, message: 'Say whether the rows move or are copied.' };
+	if (!Array.isArray(body.rows) || body.rows.length === 0 || body.rows.length > MAX_BID_ROWS) return { ok: false, message: 'Name the rows.' };
+	const rows: { kind: 'shot' | 'asset'; id: string }[] = [];
+	for (const r of body.rows) {
+		if (!isObject(r) || (r.kind !== 'shot' && r.kind !== 'asset') || !isKey(r.id)) return { ok: false, message: 'A row is not a shot or an asset of the bid.' };
+		rows.push({ kind: r.kind, id: r.id });
+	}
+	return { ok: true, value: { from, to, rows, move: body.move } };
+}
+
+/** A draft request's bids: `{id, bids}`. */
+export function parseRequestBids(body: unknown): Parsed<{ requestId: Id; bids: Id[] }> {
+	if (!isObject(body)) return { ok: false, message: 'Name the request and its bids.' };
+	const requestId = parseId(body.id);
+	if (!requestId) return { ok: false, message: 'That is not a request id.' };
+	const bids = bidIds(body.bids);
+	if (!bids.ok) return bids;
+	if (!bids.value) return { ok: false, message: 'Name the request’s bids.' };
+	return { ok: true, value: { requestId, bids: bids.value } };
 }
 
 /** A breakdown row and the Flow PT row it gets. */
@@ -206,8 +287,8 @@ export function parseLinks(body: unknown): Parsed<{ requestId: string; links: It
 /** Absent or null: every package. Else one package id each, at least one. */
 function packageList(value: unknown): Parsed<Id[] | null> {
 	if (value === undefined || value === null) return { ok: true, value: null };
-	if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PACKAGES || !value.every(isKey)) return { ok: false, message: 'Pick at least one package, or every package.' };
-	if (new Set(value).size !== value.length) return { ok: false, message: 'A package is named twice.' };
+	if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PACKAGES || !value.every(isKey)) return { ok: false, message: 'Pick at least one bid, or every bid.' };
+	if (new Set(value).size !== value.length) return { ok: false, message: 'A bid is named twice.' };
 	return { ok: true, value: [...value] };
 }
 
@@ -233,7 +314,7 @@ export function parseVendor(body: unknown): Parsed<Omit<InvitedVendor, 'id'>> {
 
 /** A vendor's packages changed: the invitation, and the packages, or null for every package. */
 export function parseInvitationPackages(body: unknown): Parsed<{ invitationId: string; packages: Id[] | null }> {
-	if (!isObject(body)) return { ok: false, message: 'Name the invitation and its packages.' };
+	if (!isObject(body)) return { ok: false, message: 'Name the invitation and its bids.' };
 	const invitationId = parseId(body.invitationId);
 	if (!invitationId) return { ok: false, message: 'That is not an invitation id.' };
 	const packages = packageList(body.packages);

@@ -24,6 +24,7 @@ import { targetKey } from './model';
 import { add, fromDecimal, minorDigits, money, toDecimal, type Money } from './money';
 import { comparePercent, sumPercents } from './percent';
 import { totalProblems } from './bid-limits';
+import { ANSWER_ONE } from './packages';
 import { estimateRebate, type RebateEstimate } from './rebate';
 import type { BidDraft } from './rows';
 import { bidTotals, type BidTotals } from './totals';
@@ -180,7 +181,7 @@ function problemOf(key: string, message: string, form: BidForm, names: ReadonlyM
 	const base = { key, message, control: vendorControlId(key) };
 	if (FIXED_LABELS[key]) return { ...base, label: FIXED_LABELS[key] };
 	const pkg = /^package:(.+):price$/.exec(key);
-	if (pkg) return { ...base, label: `Price for ${names.get(`package:${pkg[1]}`) ?? 'the package'}` };
+	if (pkg) return { ...base, label: `Price for ${names.get(`package:${pkg[1]}`) ?? 'the bid'}` };
 	const line = /^line:((?:shot|asset):[^:]+):(.+)$/.exec(key);
 	if (line) {
 		const name = names.get(line[1]) ?? (line[1].startsWith('shot') ? 'A shot' : 'An asset');
@@ -513,7 +514,7 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 	const priceControl = firstPrice ? { control: vendorControlId(`line:${firstPrice.key}:price`), line: firstPrice.key } : { control: 'items' };
 	const packages = form.packages ?? [];
 	if (packages.length > 0 && packages.every((p) => !p.bidding)) {
-		problems.push({ key: 'bidding', label: 'Packages', message: 'Bid on one package at least.', control: vendorControlId(`package:${packages[0].id}:bidding`) });
+		problems.push({ key: 'bidding', label: 'Bids', message: ANSWER_ONE, control: vendorControlId(`package:${packages[0].id}:bidding`) });
 	} else if (counts.priced === 0 && counts.packaged === 0) problems.push({ key: 'priced', label: 'Shots and assets', message: 'Price at least one shot or asset.', ...priceControl });
 
 	const validUntil = form.validUntil !== '' && isDay(form.validUntil) ? form.validUntil : undefined;

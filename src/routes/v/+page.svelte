@@ -117,7 +117,7 @@
 			if (status === 410 && error instanceof VendorError && error.reason === 'withdrawn') problem = WITHDRAWN;
 			else if (status === 410) problem = { title: 'This link was replaced', line, link: true };
 			else if (status === 401 || status === 403) problem = { title: status === 401 ? 'This link does not work' : 'This link is closed', line, link: true };
-			else problem = { title: 'The bid could not load', line, link: false };
+			else problem = { title: 'Your answer could not load', line, link: false };
 		}
 	}
 	void load();
@@ -129,7 +129,7 @@
 			return true;
 		}
 		if (!(error instanceof VendorError) || error.reason !== 'session') return false;
-		problem = { title: 'Another bid is open in this browser', line: 'Reload the page to see whose.', link: false };
+		problem = { title: 'Another answer is open in this browser', line: 'Reload the page to see whose.', link: false };
 		return true;
 	}
 
@@ -232,7 +232,7 @@
 </script>
 
 <svelte:head>
-	<title>{request ? `Bid for ${request.header.project}` : 'Your bid'} · SG Bids</title>
+	<title>{request ? `Bid request for ${request.header.project}` : 'Your answer'} · SG Bids</title>
 	<meta name="referrer" content="no-referrer" />
 	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
@@ -247,7 +247,7 @@
 	<PageState state="loading" title="Opening the bid request" />
 {:else}
 	{@const header = request.header}
-	<PageHeader title={`Bid for ${header.project}`}>
+	<PageHeader title={`Bid request for ${header.project}`}>
 		{#snippet context()}
 			<span>
 				<span class="text-foreground font-semibold" data-slot="vendor-name">{request?.vendorName}</span>.
@@ -274,11 +274,11 @@
 			</label>
 		{/snippet}
 		{#if stage === 'submitted'}
-			<Notice tone="info" title="Submitted. ">Production can see this bid. To change it, revise it and submit again.</Notice>
+			<Notice tone="info" title="Submitted. ">Production can see your answer. To change it, revise it and submit again.</Notice>
 		{:else if stage === 'withdrawn'}
-			<Notice tone="warning" title="Withdrawn. ">Production sees this bid as withdrawn. Start a new version to bid again.</Notice>
+			<Notice tone="warning" title="Withdrawn. ">Production sees your answer as withdrawn. Start a new version to answer again.</Notice>
 		{:else if stage === 'closed'}
-			<Notice tone="info" title="Closed. ">This request no longer takes bids.</Notice>
+			<Notice tone="info" title="Closed. ">This request no longer takes answers.</Notice>
 		{:else if earlier}
 			<Notice tone="info">Production sees version {earlier.version} until you submit this one.</Notice>
 		{/if}
@@ -294,7 +294,7 @@
 				<Section
 					id="items"
 					title="Shots and assets"
-					note={readOnly ? undefined : 'A price for each, all in, or one figure for a whole package. Leave one blank to not bid it, or exclude what you will not do.'}
+					note={readOnly ? undefined : 'A price for each, all in, or one figure for a whole bid. Leave one blank to not bid it, or exclude what you will not do.'}
 				>
 					<ItemGrid bind:this={grid} bind:form {request} errors={result.errors} {prices} {figures} {mark} {locale} {readOnly} />
 				</Section>
@@ -361,8 +361,8 @@
 
 	<ConfirmDialog
 		open={confirming === 'submit'}
-		title="Submit your bid"
-		confirm="Submit bid"
+		title="Submit your answer"
+		confirm="Submit answer"
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
@@ -372,7 +372,7 @@
 		<ProblemList problems={result.problems} onPick={(p) => void goTo(p)} />
 		<dl class="flex flex-col">
 			<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Priced</dt><dd class="tabular-nums">{result.counts.priced}</dd></div>
-			{#if result.counts.packaged > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">In a package price</dt><dd class="tabular-nums">{result.counts.packaged}</dd></div>{/if}
+			{#if result.counts.packaged > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">In a bid's figure</dt><dd class="tabular-nums">{result.counts.packaged}</dd></div>{/if}
 			{#if result.counts.declined > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bidding</dt><dd class="tabular-nums">{result.counts.declined}</dd></div>{/if}
 			{#if result.counts.excluded > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Excluded</dt><dd class="tabular-nums">{result.counts.excluded}</dd></div>{/if}
 			{#if result.counts.open > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bid</dt><dd class="tabular-nums">{result.counts.open}</dd></div>{/if}
@@ -381,21 +381,21 @@
 		{#each result.warnings as warning (warning)}<Notice tone="warning">{warning}</Notice>{/each}
 		<div class="flex flex-col gap-1">
 			<p class="font-medium">What happens next</p>
-			<p class="text-muted-foreground">Production sees your bid and its total. It is final once sent. To change it later, revise it and submit again. Production then sees the new version.</p>
+			<p class="text-muted-foreground">Production sees your answer and its total. It is final once sent. To change it later, revise it and submit again. Production then sees the new version.</p>
 		</div>
 	</ConfirmDialog>
 
 	<ConfirmDialog
 		open={confirming === 'withdraw'}
-		title="Withdraw your bid"
-		confirm="Withdraw bid"
+		title="Withdraw your answer"
+		confirm="Withdraw answer"
 		tone="destructive"
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
 		onconfirm={() => loaded?.bidId && move(() => vendorApi.withdraw(loaded))}
 	>
-		<p>Production will see this bid as withdrawn. You can start a new version after.</p>
+		<p>Production will see your answer as withdrawn. You can start a new version after.</p>
 	</ConfirmDialog>
 
 	<ConfirmDialog

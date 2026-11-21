@@ -165,7 +165,7 @@ export function answerWords(answer: CreateAnswer, entityType: string): string {
 		case 'retired':
 			return `A retired field holds the name ${answer.name}. Pick another name, or empty the field trash in Flow PT: open the admin menu, then Trash, then Fields.`;
 		case 'refused':
-			return 'Flow PT refused: you may not create fields. Ask an admin, or set it per item in the request.';
+			return 'Flow PT refused: you may not create fields. Ask an admin, or set it per item in the bid.';
 		case 'failed':
 			return `Flow PT answered ${answer.status}: ${answer.title.replace(/\.$/, '')}.${answer.status >= 500 ? ' A 500 can be a refusal of the right to create fields.' : ''}`;
 	}

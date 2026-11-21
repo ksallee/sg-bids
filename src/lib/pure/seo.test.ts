@@ -151,7 +151,7 @@ describe('indexable', () => {
 	});
 
 	it('keeps every app and vendor path out', () => {
-		for (const path of ['/connect', '/bids', '/bids/new', '/bids/abc/compare', '/v', '/v/open', '/v/token', '/api/production/list', '/live/session-poll', '/dev/fpt', '/dev/og']) {
+		for (const path of ['/connect', '/bids', '/bids/new', '/bids/abc/compare', '/requests', '/requests/new', '/requests/abc/compare', '/v', '/v/open', '/v/token', '/api/production/list', '/live/session-poll', '/dev/fpt', '/dev/og']) {
 			expect(indexable(path)).toBe(false);
 		}
 	});
@@ -162,8 +162,8 @@ describe('robotsTxt', () => {
 
 	it('allows the site and keeps crawlers out of the private paths', () => {
 		expect(robots).toContain('User-agent: *\nAllow: /');
-		for (const prefix of ['/v/', '/bids/', '/api/', '/live/', '/dev/']) expect(robots).toContain(`Disallow: ${prefix}`);
-		expect(PRIVATE_PREFIXES).toHaveLength(5);
+		for (const prefix of ['/v/', '/bids/', '/requests/', '/api/', '/live/', '/dev/']) expect(robots).toContain(`Disallow: ${prefix}`);
+		expect(PRIVATE_PREFIXES).toHaveLength(6);
 	});
 
 	it('names the AI crawlers as allowed, each with the same private paths, since a named group replaces *', () => {

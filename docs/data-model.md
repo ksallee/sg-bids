@@ -25,15 +25,60 @@ The "Seen in" column says:
 - A shot or an asset from a breakdown has no Flow PT entity until it is matched, or created at
   the award. Its `source` says so. A vendor sees neither.
 - Each vendor bids in its own currency. Production compares in the request's base currency.
-- A draft's shots and assets picked from Flow PT are live. Each value a mapped field feeds is read
-  from Flow PT when the draft opens and after every write, and an edit to it writes the field. The
-  stored draft holds the values last read, so a reload is safe. The note to vendors, omit, a
-  concept with no mapped field, and every value of a breakdown row are the request's own. Issuing
-  freezes the items as they are; from then on Flow PT edits do not reach them.
+- A bid's shots and assets picked from Flow PT are live. Each value a mapped field feeds is read
+  from Flow PT when the bid opens and after every write, and an edit to it writes the field. The
+  stored bid holds the values last read, so a reload is safe. The note to vendors, omit, a concept
+  with no mapped field, and every value of a breakdown row are the bid's own. Issuing a request
+  copies its bids' rows as they are and freezes the copy; from then on neither Flow PT edits nor
+  bid edits reach it.
+
+## Words
+
+In the app a **bid** is what production builds and sends: a named set of rows. A vendor's whole
+submission to a request is its **answer**. In the code a bid is a `ProductionBid` (table
+`production_bids`), a bid of a request is a package (`RequestPackage`, table `request_packages`),
+and an answer is a `VendorBid` (table `bids`): the names from before bids came first stay, to keep
+the risk of the change low.
+
+## Bid
+
+What production builds in a project, before any request. The rules are in
+`src/lib/pure/production-bid.ts` and `src/lib/pure/request-bids.ts`.
+
+| field | what | seen in |
+|---|---|---|
+| id | | sg-bids |
+| name | as production types it, 120 characters at most. Not unique: a clone is `<name> copy` | sg-bids |
+| shots, assets | its rows, each a shot or asset as below, with no package | sg-bids |
+| project | the tenant's project | sg-bids |
+
+- A bid is stored once it has a name or a row. One with rows and no name saves as Untitled bid.
+- It is always editable: the table of the editor, Add from Flow PT, Add from a breakdown, in place
+  and bulk edits live to Flow PT, Undo. Rows move or copy to another bid of the project; a row the
+  other bid holds already stays as it is there.
+- Cloning copies every row under `<name> copy`, then `<name> copy 2`, made free in the project.
+- Deleting a bid takes it out of the draft requests it is in, with each vendor's choice of it, and
+  leaves the requests it went out in as they were. It is refused while a vendor of a draft is
+  invited to it alone.
+- In storage, `production_bids` holds the bid with the counts the Bids list shows, kept by the
+  functions that write its rows, and `production_bid_items` its rows.
 
 ## Bid request
 
-What production sends: its rows in packages, to the vendors it invites.
+What production sends: one or several bids, the header they share, to the vendors it invites.
+
+- Made from the Bids page: tick bids of one project, then New request. A draft references its bids:
+  one package per bid, keyed `bid:<id>`, named as the bid, and no rows of its own. It reads as its
+  bids are now.
+- Issuing copies each bid's rows into the request under its package, named as the bid then, made
+  unique in the request (`<name> 2`), and freezes the request as before. A bid edited after the
+  issue, sent again or deleted changes nothing issued. A package keeps its bid's id while the bid
+  exists, so a bid lists the requests it went out in.
+- A request takes each row once: a row in two of its bids refuses the issue, named.
+- The send flow wants a vendor before the issue. The vendors added to a draft get their links at
+  the issue, shown once then (`invitations.link_pending`).
+- A new round of an issued request is a draft of the same bids. A bid of the request whose bid is
+  gone, or one from before bids, comes back as a new bid made from what was issued.
 
 ### Header
 
@@ -108,29 +153,30 @@ one.
   award record (`written.items`), and Undo award deletes exactly that, unless a created row has
   since gained links.
 
-### Packages
+### The bids of a request
 
-Named groups of a request's rows. Every row sits in exactly one. The rules are in
-`src/lib/pure/packages.ts`.
+A request's bids, packages in the code: named groups of its rows. Every row sits in exactly one. The
+rules are in `src/lib/pure/packages.ts`.
 
 | field | what | seen in |
 |---|---|---|
-| packages | the request's packages, in order: `id` and `name` | sg-bids |
-| shot or asset, package | the package the row sits in | sg-bids |
+| packages | the request's bids, in order: `id`, `name`, and the production bid it comes from | sg-bids |
+| shot or asset, package | the bid the row sits in | sg-bids |
 
-- Defaults come from sequences: a shot goes to its sequence's package (`seq:<sequence>`), a shot
-  with none to Other shots (`shots`), an asset to Assets (`assets`). A package production adds is
-  `pkg:<random>`. Names are unique in the request, in any case, 120 characters at most.
-- Production renames, adds, duplicates (a copy named `<name> copy`, with no rows) and deletes
-  packages, and moves rows with the Package column of the builder's table, one row or in bulk.
-  Deleting a package sends each of its rows back to its sequence's package when there is one, else
-  to Other shots or Assets, made when missing. A row with nowhere to go keeps the package.
-- Packages freeze with the request at issue, as its rows do.
-- A request stored before packages has none. It reads as one package, All shots and assets (`all`),
-  holding every row. Nothing is backfilled. A draft from before packages takes its defaults when the
-  builder opens it.
-- In storage, `request_packages` holds a request's packages and `request_items.package_key` each
-  row's package, held by a foreign key. A request with packages has every row in one.
+- A request made from bids has one per bid. Names are unique in the request, in any case, 120
+  characters at most.
+- They freeze with the request at issue, as its rows do.
+- A request stored with rows of its own, before bids, took defaults from sequences: a shot to its
+  sequence's package (`seq:<sequence>`), a shot with none to Other shots (`shots`), an asset to
+  Assets (`assets`). An issued one reads as it was. A draft one became its bids (below).
+- A request stored before packages has none. It reads as one, All shots and assets (`all`), holding
+  every row.
+- In storage, `request_packages` holds a request's bids (`bid_id` names the production bid while it
+  exists) and `request_items.package_key` each row's, held by a foreign key.
+- The drafts stored before bids came first turned into their bids at the migration: one bid per
+  package, named as it, with its rows, or one bid of every row named after the request for a draft
+  from before packages; a row in no package goes to one more bid, Other rows. The draft keeps its
+  packages, now pointing at the bids, so each vendor's choice stands.
 
 ### Invited vendor
 
@@ -143,20 +189,22 @@ Named groups of a request's rows. Every row sits in exactly one. The rules are i
 | ndaFile, ndaExecuted | NDA file and whether it is signed | 2+ |
 | tpn | Trusted Partner Network status | 2+ |
 | capacity | the vendor's capacity | OpenBID |
-| packages | the packages it is invited to. Absent: every package | sg-bids |
+| packages | the bids of the request it is invited to. Absent: every bid | sg-bids |
 
-A vendor invited to some packages sees and bids on their rows alone, in every vendor answer. The
-server reads no other row for it (`src/lib/pure/access.ts`: the vendor's reads of rows and packages
-carry the invitation's packages), refuses a line or a figure outside them, and the database refuses
-them too (`sg_bid_lines_guard`, `sg_bids_guard`). A request from before packages takes no list.
+A vendor invited to some bids sees and answers their rows alone, in every version. The server reads
+no other row for it (`src/lib/pure/access.ts`: the vendor's reads of rows and packages carry the
+invitation's packages), refuses a line or a figure outside them, and the database refuses them too
+(`sg_bid_lines_guard`, `sg_bids_guard`). A request from before packages takes no list. A vendor
+never reads a production bid.
 
-Production changes a vendor's packages while the vendor has submitted no bid, withdrawn or not. After
-that it is refused, with the reason: a bid answers the packages it was made for. A draft saved for
-wider packages is stopped at submit and the vendor reloads.
+Production changes a vendor's bids while the vendor has submitted no answer, withdrawn or not. After
+that it is refused, with the reason: an answer is for the bids it was made for. A draft saved for
+wider bids is stopped at submit and the vendor reloads.
 
-## Vendor bid
+## Vendor answer
 
-What a vendor answers. One per vendor per round. Every amount in it is in its currency.
+What a vendor sends, a `VendorBid` in the code. One per vendor per round. Every amount in it is in
+its currency.
 
 ### Header
 
@@ -200,19 +248,20 @@ NIM converts at the bid date. vfx_bidding_assist keeps amounts in both currencie
 An excluded line is a different thing from a zero price, and from a shot the vendor did not bid.
 The comparison shows all three apart.
 
-### Per package
+### Per bid
 
 | field | what | seen in |
 |---|---|---|
-| packages | packages priced as one figure: `package`, `total`, `notes` | sg-bids |
-| line, inPackage | the row is covered by its package's figure. Its total is zero | sg-bids |
-| declined | packages the vendor is not bidding on | sg-bids |
+| packages | bids priced as one figure: `package`, `total`, `notes` | sg-bids |
+| line, inPackage | the row is covered by its bid's figure. Its total is zero | sg-bids |
+| declined | bids the vendor is not bidding on | sg-bids |
 
-Per package the vendor bids row by row, gives one figure for the package, or does not bid. A figure
-covers every row of the package not omitted: each carries a line marked `inPackage`, so a scenario,
-an award row and a Flow PT Bid Line still name the row. A package not bid on has no line and no
-figure. The vendor bids on one package at least. Switching a package's way of pricing, or not
-bidding on it, clears what it held, after a confirm. The figures count once in the lines total, so
+Per bid the vendor prices row by row, gives one figure for the bid, or does not bid. A figure covers
+every row of the bid not omitted: each carries a line marked `inPackage`, so a scenario, an award
+row and a Flow PT Bid Line still name the row. A bid not answered has no line and no figure. The
+vendor answers one bid at least. Switching a bid's way of pricing, or not bidding on it, clears what
+it held, after a confirm. The figures common to the request (costs, discount, tax, rebate) are given
+once. The figures count once in the lines total, so
 the discount, the tax and an `all` rebate base take them. A `labour` rebate base cannot know a
 figure's labour: the estimate says so, as for a line without department detail.
 
@@ -268,6 +317,8 @@ checked. A user edits the rate per bid.
 
 ## Deleting
 
+A bid is deleted alone: out of its draft requests, kept where it went out (see Bid above).
+
 A request is deleted whole: its items, invitations, every bid and line, the rates and the
 scenarios. A draft goes after one confirm. An issued, undone or closed request asks for its code.
 While an award is in Flow PT the delete is refused: undo the award first, or its Bids and Groups
@@ -313,51 +364,52 @@ non-shot costs of each vendor that has a row in it, unless the user leaves them 
 they count: a vendor brought in brings its overhead and supervision. Discount and tax are left out.
 They stay in each bid's grand total. Omitted shots and assets are never picked.
 
-### Packages in the comparison
+### Bids in the comparison
 
-- A row of a package a vendor priced as one figure shows "In package price" for it, never a zero or
-  a gap; a package it declined shows "Not bidding". Row marks count row prices only.
-- Each package also compares as a unit: a vendor's figure, or the sum of its row prices, complete
-  when it priced every row not omitted. The lowest is marked among the figures and the complete
-  sums. Grouped by package, the group's row is that comparison.
-- A package priced as one figure is awarded whole or not at all. A click on one of its rows picks the
-  whole package for that vendor, a second click takes it off, and a row price picked in its place
-  takes the rest off that vendor, said on the rail. A split with that vendor is refused. A bulk pick
-  over part of the package skips its rows for that vendor. "Give each row to its lowest" gives the
-  package to its lowest figure when that beats its rows' lowest prices summed. The server refuses a
-  scenario that gives part of such a package (`partialPackagePicks`), and the award refuses it too.
-- A package priced row by row behaves as before, split awards included. A package a vendor declined
-  never goes to it.
+- A row of a bid a vendor priced as one figure shows "In the bid's figure" for it, never a zero or a
+  gap; a bid it declined shows "Not bidding". Row marks count row prices only.
+- Each bid also compares as a unit: a vendor's figure, or the sum of its row prices, complete when
+  it priced every row not omitted. The lowest is marked among the figures and the complete sums.
+  Grouped by bid, the group's row is that comparison.
+- A bid priced as one figure is awarded whole or not at all. A click on one of its rows picks the
+  whole bid for that vendor, a second click takes it off, and a row price picked in its place takes
+  the rest off that vendor, said on the rail. A split with that vendor is refused. A bulk pick over
+  part of the bid skips its rows for that vendor. "Give each row to its lowest" gives the bid to its
+  lowest figure when that beats its rows' lowest prices summed. The server refuses a scenario that
+  gives part of such a bid (`partialPackagePicks`), and the award refuses it too.
+- A bid priced row by row behaves as before, split awards included. A bid a vendor declined never
+  goes to it.
 
 ## In Flow PT
 
-The award writes one Bid per vendor per package per round (`src/lib/pure/fpt-award.ts`). In the app
-nothing changes: one request, one link per vendor, one submission, one comparison.
+The award writes one Bid in Flow PT per vendor per bid of the request it answered, per round
+(`src/lib/pure/fpt-award.ts`). In the app nothing changes: one request, one link per vendor, one
+answer, one comparison.
 
 | Bid | key `sg_sgbids_key` | name | total | Bid Lines |
 |---|---|---|---|---|
-| a package priced row by row | `sgbids/<request>/<vendor>/r<round>/p:<package>` | `<code> <vendor> R<round> <package>` | the sum of its rows | one per row, with its amount |
-| a package priced as one figure | the same | the same | the figure | one per row, no amount |
+| a bid priced row by row | `sgbids/<request>/<vendor>/r<round>/p:<package>` | `<code> <vendor> R<round> <bid name>` | the sum of its rows | one per row, with its amount |
+| a bid priced as one figure | the same | the same | the figure | one per row, no amount |
 | the whole-bid figures | `sgbids/<request>/<vendor>/r<round>/general` | `<code> <vendor> R<round> General costs` | non-shot costs less discount plus tax | none |
 
-- A package the vendor declined, or left unpriced, has no Bid.
+- A bid the vendor declined, or left unpriced, has no Bid.
 - A vendor's Bids sum to its grand total exactly, in minor units of its currency. In the base
   currency each Bid is converted alone and the last takes the rounding, so they sum exactly there
   too. The rebate estimate and the total after rebate are whole-bid figures: they sit on the General
   costs Bid alone. The General costs Bid is written only when the vendor gave a non-shot cost, a
   discount, a tax or a rebate split. It may be negative: a discount with no non-shot cost.
-- The package id is percent-encoded in the key, so any id finds its row again. A line key is its
-  Bid's key and the row, as before.
-- Award status is per Bid: a package priced as one figure is awarded whole; a package priced row by
-  row is awarded when any of its rows is, and a split inside it stays per Bid Line as before. The
-  General costs Bid is awarded when the vendor wins anything.
-- Every package Bid of a published vendor is written, awarded or not, so its Bids carry its whole
-  bid. Bid Lines are the awarded rows, or every row with the switch "every line of every bid" on.
+- The package id (`bid:<id>` for a request made from bids) is percent-encoded in the key, so any id
+  finds its row again. A line key is its Bid's key and the row, as before.
+- Award status is per Bid: a bid priced as one figure is awarded whole; a bid priced row by row is
+  awarded when any of its rows is, and a split inside it stays per Bid Line as before. The General
+  costs Bid is awarded when the vendor wins anything.
+- Every Bid of a published vendor is written, awarded or not, so its Bids carry its whole answer.
+  Bid Lines are the awarded rows, or every row with the switch "every line of every bid" on.
 - A request from before packages keeps one Bid per vendor, keyed `sgbids/<request>/<vendor>/r<round>`
   as before, with the grand total and the rebate on it. It gains the General costs Bid only when the
   vendor gave whole-bid figures; then its one Bid carries the lines' sum. With no whole-bid figure the
   plan is exactly what it was, so an award published before packages, and its undo, still match.
-- The package's name is in the Bid's name. No field is added to the site.
+- The bid's name is in the Bid's name. No field is added to the site.
 - Undo award deletes every Bid and Bid Line the award created, General costs included, as before.
 
 ## Change order

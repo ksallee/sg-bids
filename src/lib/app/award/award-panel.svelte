@@ -150,7 +150,7 @@
 				<Undo2 class="size-3.5" />{publication.state === 'undo_partial' ? 'Undo again' : 'Undo award'}
 			</Button>
 			{#if resume && publication.state === 'partial'}
-				<Button size="sm" href={`/bids/${request.id}/publish`}>Publish again</Button>
+				<Button size="sm" href={`/requests/${request.id}/publish`}>Publish again</Button>
 			{/if}
 		</div>
 	{/if}

@@ -146,7 +146,7 @@ export function gate(input: GateInput): Gate {
 	const { report, request, scenario } = input;
 	const problems: GateProblem[] = [];
 	const block = (message: string, target: string, href?: string) => problems.push(href ? { message, target, href } : { message, target });
-	const compare = `/bids/${request.id}/compare`;
+	const compare = `/requests/${request.id}/compare`;
 	const base = request.header.baseCurrency;
 	const bids = bidsToPublish(input.bids, scenario, input.allLines);
 	const awardedBids = new Set((scenario?.picks ?? []).flatMap((p) => p.shares.map((s) => s.bidId)));

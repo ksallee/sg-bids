@@ -3,7 +3,8 @@
  *
  * The server builds a principal from what it verified itself, never from what the client says:
  *
- * - production: the Flow PT site host and project id of a session the site accepted;
+ * - production: the Flow PT site host and project id of a session the site accepted. Its bids
+ *   (`production_bids`) are its own: a vendor reads none of them, only what a request issued;
  * - vendor: the invitation (and its request) found by the hash of the link token, and the packages
  *   the invitation names: a vendor reads the rows and packages of those alone (`packages.ts`).
  *
@@ -32,7 +33,7 @@ export type Principal = ProductionPrincipal | VendorPrincipal;
 
 /**
  * Production across a site: the projects the person's own bearer listed on that site, verified by
- * the server (`production.ts`). It only reads, and only for the requests list. It is no
+ * the server (`production.ts`). It only reads, and only for the requests and bids lists. It is no
  * `Principal`: `scope` refuses it, `siteScope` gives its filter.
  */
 export interface SitePrincipal {
@@ -42,6 +43,8 @@ export interface SitePrincipal {
 }
 
 export const TABLES = [
+	'production_bids',
+	'production_bid_items',
 	'bid_requests',
 	'request_items',
 	'request_packages',
@@ -77,12 +80,16 @@ export interface Scope {
 type Grants = Readonly<Partial<Record<Table, readonly Action[]>>>;
 
 const PRODUCTION: Grants = {
+	// Production's bids and their rows, written by `sg_save_production_bid` and its siblings.
+	production_bids: ['read', 'insert', 'update', 'delete'],
+	production_bid_items: ['read', 'insert', 'update', 'delete'],
 	// Delete is whole, through `sg_delete_request`: the request and everything under it.
 	bid_requests: ['read', 'insert', 'update', 'delete'],
 	request_items: ['read', 'insert', 'update', 'delete'],
 	// Written with the items, by `sg_save_request_items`.
 	request_packages: ['read', 'insert', 'update', 'delete'],
-	invitations: ['read', 'insert', 'update'],
+	// Delete is a vendor added to a draft whose link was never made (`link_pending`).
+	invitations: ['read', 'insert', 'update', 'delete'],
 	bids: ['read'],
 	bid_lines: ['read'],
 	award_scenarios: ['read', 'insert', 'update', 'delete'],
@@ -149,8 +156,11 @@ export function scope(principal: Principal, table: Table, action: Action): Scope
 	}
 }
 
-/** The tables the requests list reads across projects: the requests and their counts. */
-const SITE_READS: readonly Table[] = ['bid_requests', 'invitations', 'bids'];
+/**
+ * The tables the lists read across projects: the requests and their counts, the bids and the
+ * requests each is in.
+ */
+const SITE_READS: readonly Table[] = ['bid_requests', 'invitations', 'bids', 'production_bids', 'request_packages'];
 
 /**
  * The filter a read across the site carries: its site host, and the project ids it was verified
