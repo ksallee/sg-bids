@@ -5,7 +5,7 @@
  * a crafted link cannot send a person to another site, or loop them back to connect.
  */
 
-const FALLBACK = '/bids';
+const FALLBACK = '/requests';
 /** The signed-in pages a sign-in may lead back to. */
 const APP = /^\/(bids|requests|dev)(\/|\?|$)/;
 const BASE = 'https://app.invalid';
@@ -40,22 +40,30 @@ export function projectParam(params: URLSearchParams): number | null {
 	return Number.isSafeInteger(id) ? id : null;
 }
 
-/** Where a request in the list opens: a draft in the send flow, anything else on its page. Both name its project. */
-export function requestHref(row: { id: string; status: string; projectId: number }): string {
-	const project = `project=${row.projectId}`;
-	return row.status === 'draft' ? `/requests/new?id=${encodeURIComponent(row.id)}&${project}` : `/requests/${encodeURIComponent(row.id)}?${project}`;
+/** Where a request opens: its one page, draft or issued, naming its project. */
+export function requestHref(row: { id: string; status?: string; projectId: number }): string {
+	return `/requests/${encodeURIComponent(row.id)}?project=${row.projectId}`;
 }
 
 /**
- * Where an address a request had before bids came first goes now: `/bids/<id>/compare` and
- * `/bids/<id>/publish` to the request's, `/bids/new?id=<id>` to the send flow, and `/bids/<id>`,
- * when the id is a request's, to its page. The query goes along. Null for any other path.
+ * Where an old address goes now. A request is on one page: `/bids/<id>/compare` and `/publish` go to
+ * the request's, `/bids/new?id=` and `/requests/new?id=` to its page, and `/bids/<id>`, when the id is
+ * a request's, to its page. The Bids pages are gone: any other `/bids` address goes to the Requests
+ * list, and the old new request page to the list with New request open. The project goes along.
+ * Null for any other path.
  */
 export function movedRequestPath(pathname: string, search: string, isRequest = false): string | null {
+	const params = new URLSearchParams(search);
+	const project = projectParam(params);
+	const keep = project === null ? '' : `?project=${project}`;
 	const page = /^\/bids\/([^/]+)\/(compare|publish)\/?$/.exec(pathname);
 	if (page && page[1] !== 'new') return `/requests/${page[1]}/${page[2]}${search}`;
-	if (/^\/bids\/new\/?$/.test(pathname) && new URLSearchParams(search).has('id')) return `/requests/new${search}`;
+	if (/^\/(bids|requests)\/new\/?$/.test(pathname)) {
+		const id = params.get('id');
+		return id ? `/requests/${encodeURIComponent(id)}${keep}` : '/requests?new=1';
+	}
+	if (/^\/bids\/?$/.test(pathname)) return '/requests';
 	const one = /^\/bids\/([^/]+)\/?$/.exec(pathname);
-	if (one && one[1] !== 'new' && isRequest) return `/requests/${one[1]}${search}`;
+	if (one) return isRequest ? `/requests/${one[1]}${search}` : '/requests';
 	return null;
 }

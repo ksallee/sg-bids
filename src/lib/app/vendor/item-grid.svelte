@@ -11,6 +11,11 @@
 	  typed (`$lib/pure/bid-form`: typedFor, switchMode, setBidding).
 
 	"Exclude" is apart from a zero price: an excluded item is one you will not do.
+
+	Your rates, over the grid: a price per difficulty that appears in the rows, and one for rows with
+	none. A rate fills every row that follows it in the bids priced row by row; a price typed on a row
+	is the vendor's own, marked, and rates leave it alone until Use rate puts it back
+	(`$lib/pure/rate-card`).
 -->
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -27,6 +32,8 @@
 	import { groupings, groupItems, itemMatches, packageSections, type Grouping, type VendorRequestView } from '$lib/pure/vendor-view';
 	import { cn } from '$lib/utils.js';
 	import LineDetail from './line-detail.svelte';
+	import RateCard from './rate-card.svelte';
+	import { lineSource, rateFor, typePrice, useRate } from '$lib/pure/rate-card';
 
 	let {
 		form = $bindable(),
@@ -195,7 +202,10 @@
 			// A row in a package price, or in a package not bid on, takes no price of its own.
 			if (inFigure(update.key) || notBidding(update.key)) continue;
 			if ('excluded' in update) line.excluded = true;
-			else line.price = update.price;
+			else {
+				line.price = update.price;
+				line.typed = update.price.trim() !== '';
+			}
 		}
 		pasted = plan;
 	}
@@ -209,7 +219,7 @@
 
 	// One line per item. Below sm the description goes; from xl the kind of work and frames come in.
 	const COLS =
-		'grid-cols-[2rem_minmax(0,1fr)_7.5rem_2.5rem] sm:grid-cols-[2rem_7.5rem_minmax(0,1fr)_9.5rem_4rem] xl:grid-cols-[2rem_16rem_minmax(0,1fr)_8rem_3.5rem_9.5rem_4rem]';
+		'grid-cols-[2rem_minmax(0,1fr)_9rem_2.5rem] sm:grid-cols-[2rem_7.5rem_minmax(0,1fr)_11.5rem_4rem] xl:grid-cols-[2rem_16rem_minmax(0,1fr)_8rem_3.5rem_11.5rem_4rem]';
 
 	const FILTERS: { value: Filter; label: string }[] = [
 		{ value: 'all', label: 'All' },
@@ -223,6 +233,7 @@
 </datalist>
 
 <div class="flex flex-col gap-3" data-slot="item-grid">
+	<RateCard bind:form {errors} {readOnly} />
 	<div class="flex flex-wrap items-center gap-2">
 		<label class="relative w-full max-w-64">
 			<span class="sr-only">Search shots and assets</span>
@@ -429,21 +440,43 @@
 						{:else if readOnly}
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
 						{:else}
-							<input
-								id={vendorControlId(`line:${key}:price`)}
-								bind:value={form.lines[index].price}
-								data-price={key}
-								inputmode="decimal"
-								autocomplete="off"
-								aria-label={`Price for ${shot?.code ?? item?.name}`}
-								aria-invalid={!!error}
-								disabled={line.excluded}
-								placeholder={line.excluded ? 'Excluded' : ''}
-								class="border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 h-8 w-full rounded-lg border bg-transparent px-2.5 text-right tabular-nums outline-none placeholder:text-xs focus-visible:ring-3 disabled:opacity-60"
-								onfocus={(e) => e.currentTarget.select()}
-								onkeydown={(e) => onPriceKey(e, key)}
-								onpaste={(e) => onPricePaste(e, key)}
-							/>
+							{@const source = lineSource(form, line)}
+							<span class="flex w-full items-center gap-1.5">
+								{#if source === 'rate'}
+									<span class="text-muted-foreground w-14 shrink-0 text-right text-[11px] leading-tight" title={`From your rate for ${line.difficulty ?? 'rows with no difficulty'}`} data-slot="line-from-rate">rate</span>
+								{:else if source === 'override'}
+									<button
+										type="button"
+										class="text-primary w-14 shrink-0 text-right text-[11px] leading-tight underline decoration-current/40 underline-offset-2 hover:decoration-current"
+										title={`Your own price. Your rate is ${rateFor(form, line)}.`}
+										aria-label={`Use your rate on ${shot?.code ?? item?.name}`}
+										onclick={() => (form = useRate(form, key))}
+										data-slot="line-use-rate">Use rate</button
+									>
+								{:else}
+									<span class="w-14 shrink-0"></span>
+								{/if}
+								<input
+									id={vendorControlId(`line:${key}:price`)}
+									value={line.price}
+									data-price={key}
+									data-source={source}
+									inputmode="decimal"
+									autocomplete="off"
+									aria-label={`Price for ${shot?.code ?? item?.name}`}
+									aria-invalid={!!error}
+									disabled={line.excluded}
+									placeholder={line.excluded ? 'Excluded' : ''}
+									class={cn(
+										'border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 text-right tabular-nums outline-none placeholder:text-xs focus-visible:ring-3 disabled:opacity-60',
+										source === 'rate' && 'text-muted-foreground'
+									)}
+									oninput={(e) => (form = typePrice(form, key, e.currentTarget.value))}
+									onfocus={(e) => e.currentTarget.select()}
+									onkeydown={(e) => onPriceKey(e, key)}
+									onpaste={(e) => onPricePaste(e, key)}
+								/>
+							</span>
 							{#if error}<span class="text-destructive pt-0.5 text-right text-xs">{error}</span>{/if}
 						{/if}
 					</span>

@@ -5,7 +5,7 @@
  * keeps what is left; a tenant reaches none of another's; a vendor is told bidding is closed.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { bidKey, lineKey, type Written } from '$lib/pure/fpt-award';
+import { bidKey, lineKey, packageBidKey, type Written } from '$lib/pure/fpt-award';
 import type { AwardRecordWire } from '$lib/pure/award-wire';
 import { createAwards } from '$lib/server/awards';
 import { createComparison } from '$lib/server/comparison';
@@ -46,8 +46,10 @@ async function setup() {
 		costsLeftOut: []
 	});
 	await comparison.chooseScenario(production, request.id, scenario.id);
-	const keyA = bidKey(request.id, a.invitation.id, 1);
-	const keyB = bidKey(request.id, b.invitation.id, 1);
+	// The request's one bid: each vendor's Bid is keyed by it.
+	const only = request.packages![0].id;
+	const keyA = packageBidKey(bidKey(request.id, a.invitation.id, 1), only);
+	const keyB = packageBidKey(bidKey(request.id, b.invitation.id, 1), only);
 	const written: Written = {
 		bids: [
 			{ key: keyA, id: 5001, created: true },

@@ -118,6 +118,12 @@ describe('planAward', () => {
 		]);
 	});
 
+	it('names each Bid after the request’s name when it has one, its code still in Request Code', () => {
+		const [a, b] = planAward(input({ options: { date: '2026-11-20', requestCode: 'RQ-1', requestName: 'Rooftop chase' } })).steps[0].writes as Extract<Write, { kind: 'create' }>[];
+		expect([a.data.code, b.data.code]).toEqual(['Rooftop chase Vendor A R1', 'Rooftop chase Vendor B R1']);
+		expect(a.data.sg_request_code).toBe('RQ-1');
+	});
+
 	it('writes a Bid with its amounts in both currencies, codes, rate, dates, status and link', () => {
 		const [a, b] = planAward(input()).steps[0].writes as Extract<Write, { kind: 'create' }>[];
 		expect(a.data).toEqual({

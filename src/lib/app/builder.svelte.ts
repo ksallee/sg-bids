@@ -1,23 +1,19 @@
 /**
- * The bid editor's page state: the bid, the project's schema and Sequences, the mapping. It holds no
- * rule of its own: each change goes through a pure module, then the bid goes to the storage seam
- * (`$lib/drafts`), debounced, with the tab's cushion kept on every change once the bid has a name or
- * a row. One instance per page load. A bid is always editable: a request copies its rows at the
- * issue, so nothing here can change what went out.
+ * A draft request's page state: its name and details, its bids and their rows, its vendors, and the
+ * project's schema, Sequences and field mapping. It holds no rule of its own: each change goes
+ * through a pure module (`request-draft`, `vendor-rows`, `readiness`, `row-edit`), then the whole
+ * page goes to the storage seam (`$lib/drafts`), debounced, in one write. One instance per page load.
  *
- * A bid's rows are live: opening it reads its rows' values from Flow PT in one batched read per kind,
+ * Rows are live: opening the page reads its rows' values from Flow PT in one batched read per kind,
  * and an edit to a column a Flow PT field feeds writes that field as the signed in person, then reads
- * it back (`$lib/pure/row-edit`, `$lib/io/fpt-write`).
+ * it back (`$lib/pure/row-edit`, `$lib/io/fpt-write`). Every row sits in one bid, named by its
+ * `package`. New rows go to the bid picked (`current`).
  */
 
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
-import { liveAuth, liveContext, liveState, liveWriter, prepareLive } from '$lib/live';
-import type { LoadedBid } from '$lib/api';
-import { setCurrentProject, unnamed, workingProject } from '$lib/current-project';
-import { bidStore, cushion } from '$lib/drafts';
-import { isLocalId, localId } from '$lib/pure/persist';
-import { bidSavable, hasBidContent, type BidEditorState } from '$lib/pure/production-bid';
-import type { RequestOfBid } from '$lib/pure/request-bids';
+import { liveAuth, liveContext, liveState, liveWriter } from '$lib/live';
+import type { LoadedRequest } from '$lib/api';
+import { drafts } from '$lib/drafts';
 import { requestColumns, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
 import { liveItems, liveKeys } from '$lib/pure/live-read';
 import { applyLocal, changesOf, itemValue, planEdits, readBack, undoPlan, type CellChange, type Change, type FptWrite, type Refusal, type WriteOutcome } from '$lib/pure/row-edit';
@@ -25,17 +21,21 @@ import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { fptApi } from '$lib/io/fpt-api';
 import { createField, createMany, readCreateRight } from '$lib/io/fpt-field-create';
 import { preflight, readRows, writeFields } from '$lib/io/fpt-write';
-import { loadSequences, loadShape, projectName, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
+import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
-import type { ProjectPick } from '$lib/pure/header';
+import { headerForm, type HeaderForm, type ProjectPick } from '$lib/pure/header';
 import { addPicked } from '$lib/pure/pick';
 import { applyBreakdown, type BreakdownPlan } from '$lib/pure/breakdown';
 import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
 import type { ItemLink } from '$lib/pure/wire';
 import { removeItems, tiersFor } from '$lib/pure/request';
-import type { RequestAsset, RequestShot } from '$lib/pure/model';
+import type { Id, RequestAsset, RequestShot, Target } from '$lib/pure/model';
+import { addBid, bidKey, bidStats, deleteBid, draftFrom, inBid, moveRows, renameBid, type BidStats, type DraftBid } from '$lib/pure/request-draft';
+import { blankVendor, fromInvited, isBlank, withoutBid, type VendorRow } from '$lib/pure/vendor-rows';
+import { readiness, type Readiness, type Target as Place } from '$lib/pure/readiness';
+import { today } from '$lib/app/today';
 
 /** The table column a mapping slot fills. */
 const SLOT_COLUMN: Readonly<Record<string, ColumnKey>> = { description: 'description', frames: 'frames', type: 'type', difficulty: 'difficulty' };
@@ -52,17 +52,12 @@ function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-function newId(): string {
-	return localId(typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()));
+function uuid(): string {
+	return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
-/** Where the bid stands against storage, for the header line. */
-export type SaveState =
-	| { kind: 'idle' }
-	| { kind: 'waiting'; reason: string }
-	| { kind: 'saving' }
-	| { kind: 'saved'; at: Date }
-	| { kind: 'error'; message: string };
+/** Where the page stands against storage, for the header line. */
+export type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; at: Date } | { kind: 'error'; message: string };
 
 /** What one edit to the rows did: the changes that landed, and each cell left unchanged with why. */
 export interface EditOutcome {
@@ -72,16 +67,20 @@ export interface EditOutcome {
 	readonly failures: readonly Refusal[];
 }
 
-/** How long the editor waits after the last change before it saves. */
+/** How long the page waits after the last change before it saves. */
 const SAVE_DELAY_MS = 800;
 
 export class Builder {
-	state = $state<BidEditorState>({ id: newId(), project: null, name: '', shots: [], assets: [] });
-	problem = $state<string | null>(null);
+	/** The request's id, its project, and its rows: each row names its bid in `package`. */
+	state = $state<{ id: Id; project: ProjectPick; shots: RequestShot[]; assets: RequestAsset[] }>({ id: '', project: { id: 0, name: '' }, shots: [], assets: [] });
+	/** The name and the details, as typed. The name is `form.title`. */
+	form = $state<HeaderForm>(headerForm({ project: '', round: 1, baseCurrency: 'USD', assumptions: [] }));
+	bids = $state<DraftBid[]>([]);
+	/** The bid new rows go to. */
+	current = $state<Id>('');
+	vendors = $state<VendorRow[]>([]);
 	data = $state.raw<Load<ProjectData>>({ state: 'idle' });
 	mapping = $state<{ shot: Mapping; asset: Mapping } | null>(null);
-	/** True once the bid has been read back from storage. */
-	restored = $state(false);
 	/** Rows picked from Flow PT that it did not answer for at the last read: deleted, or out of reach. */
 	gone = $state.raw<ReadonlySet<string>>(new Set());
 	/** The fields the permission preflight was refused on, per kind, with the site's words (094). */
@@ -90,85 +89,60 @@ export class Builder {
 	live = $state.raw<{ state: 'idle' | 'reading' | 'ready' } | { state: 'error'; message: string }>({ state: 'idle' });
 	private asked = { shot: false, asset: false };
 	saving = $state<SaveState>({ kind: 'idle' });
-	/** The requests the bid is in, as stored. */
-	requests = $state.raw<readonly RequestOfBid[]>([]);
 	/** The mapping was kept for this project: set by hand once, so it is not offered as a check again. */
 	mappingKept = $state(false);
-	/** A bid is always editable. The match dialog reads it. */
+	/** A draft is always editable. The match dialog reads it. */
 	readonly readOnly = false;
 
 	readonly ready: Promise<void>;
-	/** Called once a new bid has its stored id, so the page can put it in the URL. */
-	onStored: ((id: string) => void) | null = null;
 
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private discarded = false;
 	private inFlight: Promise<void> | null = null;
 	private again = false;
 
-	constructor(bidId: string | null) {
-		this.ready = this.start(bidId);
-	}
-
-	private async start(bidId: string | null): Promise<void> {
-		const live = await prepareLive();
-		this.problem = live.problem;
-		if (live.problem) return;
-		if (bidId) {
-			const project = workingProject(live.siteUrl, new URL(location.href));
-			if (!project) throw new Error('Open the bid from the Bids page.');
-			const loaded = await bidStore.load(bidId, project.id);
-			this.take(loaded, { id: project.id, name: project.name });
-			this.saving = { kind: 'saved', at: new Date() };
-		} else {
-			const kept = await cushion.read();
-			if (kept && isLocalId(kept.id)) this.state = { id: kept.id, project: kept.project, name: kept.name, shots: kept.shots, assets: kept.assets };
-			else {
-				const project = workingProject(live.siteUrl, new URL(location.href));
-				if (project) this.state = { ...this.state, project };
-			}
-		}
-		this.restored = true;
-		if (this.state.project && unnamed(this.state.project)) await this.nameProject(live.siteUrl, this.state.project);
-		if (this.state.project) await this.loadProject(this.state.project);
-		if (bidId) await this.readLive();
-	}
-
-	/** A project an address named by its id alone: its name, read from Flow PT and kept. */
-	private async nameProject(siteUrl: string, project: ProjectPick): Promise<void> {
-		const name = await projectName(liveContext().client, project.id).catch(() => null);
-		if (!name || this.state.project?.id !== project.id) return;
-		this.state = { ...this.state, project: { id: project.id, name } };
-		setCurrentProject(siteUrl, { id: project.id, name });
-	}
-
-	/** The bid as stored, in place of what the editor holds. */
-	private take(loaded: LoadedBid, project: ProjectPick): void {
-		this.state = { id: loaded.bid.id, project: { id: loaded.projectId, name: project.id === loaded.projectId ? project.name : `Project ${loaded.projectId}` }, name: loaded.bid.name, shots: loaded.bid.shots, assets: loaded.bid.assets };
-		this.requests = loaded.requests;
-	}
-
-	/** Rows moved out on the server: the bid as stored now. */
-	replaceWith(loaded: LoadedBid): void {
-		if (!this.state.project) return;
-		this.take(loaded, this.state.project);
+	constructor(loaded: LoadedRequest, project: ProjectPick) {
+		const draft = draftFrom(loaded.request, bidKey(uuid()));
+		this.state = { id: loaded.request.id, project, shots: [...draft.rows.shots], assets: [...draft.rows.assets] };
+		this.form = headerForm(loaded.request.header);
+		this.bids = draft.bids;
+		this.current = draft.bids[0].key;
+		const vendors = loaded.invitations.map((inv) => fromInvited(inv.vendor, inv.state.kind === 'pending'));
+		this.vendors = vendors.length > 0 ? vendors : [blankVendor(uuid())];
 		this.saving = { kind: 'saved', at: new Date() };
+		this.ready = this.start();
 	}
 
-	get stored(): boolean {
-		return !isLocalId(this.state.id);
+	private async start(): Promise<void> {
+		await this.loadProject(this.state.project);
+		await this.readLive();
 	}
 
-	/** Keep the cushion now and store the bid once the changes settle. */
+	/* the page as a whole -------------------------------------------------- */
+
+	/** How far the draft is from going out. */
+	get readiness(): Readiness {
+		return readiness({ form: this.form, today: today(), bids: this.bids, rows: { shots: this.state.shots, assets: this.state.assets }, vendors: this.vendors });
+	}
+
+	/** Each bid's counts, by key. */
+	get stats(): Map<Id, BidStats> {
+		return bidStats(this.bids, { shots: this.state.shots, assets: this.state.assets });
+	}
+
+	/** The vendors typed in: the blank rows left out. */
+	get namedVendors(): VendorRow[] {
+		return this.vendors.filter((v) => !isBlank(v));
+	}
+
+	/** Store the page once the changes settle. */
 	private save(): void {
 		if (this.discarded) return;
-		// Only a bid with a name or a row is kept: one left at once leaves nothing behind.
-		void (hasBidContent(this.state) ? cushion.keep({ ...this.state }) : cushion.clear());
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = setTimeout(() => void this.flush(), SAVE_DELAY_MS);
 	}
 
-	/** Store the bid now. One save at a time; a change during a save saves again after it. */
+	/** Store the page now. One save at a time; a change during a save saves again after it. */
 	async flush(): Promise<void> {
 		if (this.timer) clearTimeout(this.timer);
 		this.timer = null;
@@ -177,22 +151,10 @@ export class Builder {
 			this.again = true;
 			return this.inFlight;
 		}
-		const ready = bidSavable(this.state);
-		if (!ready.ok || !this.state.project) {
-			this.saving = { kind: 'waiting', reason: ready.ok ? 'Pick a project to save the bid.' : ready.reason };
-			return;
-		}
 		this.saving = { kind: 'saving' };
-		const wasLocal = isLocalId(this.state.id);
-		this.inFlight = bidStore
-			.save(this.state.project.id, { id: this.state.id, name: ready.name, shots: ready.shots, assets: ready.assets })
-			.then((stored) => {
-				if (wasLocal) {
-					this.state = { ...this.state, id: stored.bid.id };
-					void cushion.clear();
-					this.onStored?.(stored.bid.id);
-				}
-				this.requests = stored.requests;
+		this.inFlight = drafts
+			.save({ id: this.state.id, project: this.state.project, form: this.form, bids: this.bids, rows: { shots: this.state.shots, assets: this.state.assets }, vendors: this.vendors })
+			.then(() => {
 				this.saving = { kind: 'saved', at: new Date() };
 			})
 			.catch((error) => {
@@ -205,8 +167,95 @@ export class Builder {
 					void this.flush();
 				}
 			});
-		return this.inFlight;
+		await this.inFlight;
+		if (this.inFlight) await this.inFlight;
 	}
+
+	/** Leave the page: nothing is saved from here on, so a change waiting to save cannot bring a deleted draft back. */
+	discard(): void {
+		this.discarded = true;
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = null;
+	}
+
+	/* name and details ------------------------------------------------------ */
+
+	setForm(form: HeaderForm): void {
+		this.form = form;
+		this.save();
+	}
+
+	setName(name: string): void {
+		this.setForm({ ...this.form, title: name });
+	}
+
+	/* bids ------------------------------------------------------------------ */
+
+	/** One more bid, named `Bid N`, and new rows go to it. Answers its key. */
+	addBid(): Id {
+		const key = bidKey(uuid());
+		this.bids = addBid(this.bids, key);
+		this.current = key;
+		this.save();
+		return key;
+	}
+
+	/** Rename a bid. Answers why not when the name does not fit. */
+	renameBid(key: Id, name: string): string | null {
+		const next = renameBid(this.bids, key, name);
+		if (!next.ok) return next.message;
+		this.bids = next.bids;
+		this.save();
+		return null;
+	}
+
+	/** Delete a bid: its rows go with it (`rowsTo` null) or move to that bid. Its vendors keep their others. */
+	deleteBid(key: Id, rowsTo: Id | null): void {
+		const next = deleteBid(this.bids, { shots: this.state.shots, assets: this.state.assets }, key, rowsTo);
+		if (next.bids === this.bids) return;
+		this.bids = [...next.bids];
+		this.state = { ...this.state, shots: [...next.rows.shots], assets: [...next.rows.assets] };
+		this.vendors = withoutBid(this.vendors, key);
+		if (this.current === key) this.current = rowsTo ?? this.bids[0].key;
+		this.save();
+	}
+
+	/** Rows to another bid of the request. */
+	moveRows(targets: readonly Target[], to: Id): void {
+		const next = moveRows({ shots: this.state.shots, assets: this.state.assets }, targets, to);
+		this.state = { ...this.state, shots: [...next.shots], assets: [...next.assets] };
+		this.save();
+	}
+
+	bidName(key: Id | undefined): string {
+		return this.bids.find((b) => b.key === key)?.name ?? '';
+	}
+
+	/* vendors --------------------------------------------------------------- */
+
+	setVendors(vendors: VendorRow[]): void {
+		this.vendors = vendors;
+		this.save();
+	}
+
+	setVendor(id: Id, change: (row: VendorRow) => VendorRow): void {
+		this.setVendors(this.vendors.map((v) => (v.id === id ? change(v) : v)));
+	}
+
+	/** One more empty row to type in. Answers its id. */
+	addVendor(): Id {
+		const row = blankVendor(uuid());
+		this.setVendors([...this.vendors, row]);
+		return row.id;
+	}
+
+	/** A row goes. The last one is emptied rather than removed, so there is always a row to type in. */
+	removeVendor(id: Id): void {
+		const left = this.vendors.filter((v) => v.id !== id);
+		this.setVendors(left.length > 0 ? left : [blankVendor(uuid())]);
+	}
+
+	/* the project ----------------------------------------------------------- */
 
 	private async loadProject(project: ProjectPick): Promise<void> {
 		this.data = { state: 'loading' };
@@ -226,25 +275,6 @@ export class Builder {
 		}
 	}
 
-	/** One project per bid: a new one starts the rows over. Only before the bid is stored. */
-	async setProject(project: ProjectPick | null): Promise<void> {
-		if (project?.id === this.state.project?.id || this.stored) return;
-		setCurrentProject(liveState().siteUrl, project);
-		this.state = { ...this.state, project, shots: [], assets: [] };
-		this.mapping = null;
-		this.gone = new Set();
-		this.denied = { shot: {}, asset: {} };
-		this.asked = { shot: false, asset: false };
-		this.data = { state: 'idle' };
-		this.save();
-		if (project) await this.loadProject(project);
-	}
-
-	setName(name: string): void {
-		this.state = { ...this.state, name };
-		this.save();
-	}
-
 	schemaOf(kind: ItemKind): Record<string, FieldSchema> {
 		if (this.data.state !== 'ready') return {};
 		return kind === 'shot' ? this.data.value.shape.shot : this.data.value.shape.asset;
@@ -252,11 +282,11 @@ export class Builder {
 
 	/**
 	 * Map a slot to a field, then read the rows again so every live value follows the mapping. A
-	 * field made a moment ago is empty on every row: it first takes what the bid shows for the slot,
+	 * field made a moment ago is empty on every row: it first takes what the page shows for the slot,
 	 * so nothing typed is lost (`seed`).
 	 */
 	setMapping(kind: ItemKind, slot: string, field: string | null, options: { fresh?: boolean } = {}): Promise<void> {
-		if (!this.mapping || !this.state.project) return Promise.resolve();
+		if (!this.mapping) return Promise.resolve();
 		const key = SLOT_COLUMN[slot];
 		this.mapping = { ...this.mapping, [kind]: { ...this.mapping[kind], [slot]: field } };
 		this.keepMapping();
@@ -270,7 +300,7 @@ export class Builder {
 
 	/** Keep the mapping shown for this project, so it is not offered as a check again. */
 	keepMapping(): void {
-		if (!this.mapping || !this.state.project) return;
+		if (!this.mapping) return;
 		storeMapping(liveState().siteUrl, this.state.project.id, this.mapping);
 		this.mappingKept = true;
 	}
@@ -338,15 +368,13 @@ export class Builder {
 		return kind === 'shot' ? (row, position) => freezeShot(row, mapping, sequences, position) : (row, position) => freezeAsset(row, mapping, position);
 	}
 
-	/** Rows ticked in the Add from Flow PT dialog join the bid; one already in it stays as it is. */
-	addRows(kind: ItemKind, rows: EntityRow[]): void {
-		if (kind === 'shot') this.setItems('shot', addPicked(this.state.shots, rows, this.freezer('shot')));
-		else this.setItems('asset', addPicked(this.state.assets, rows, this.freezer('asset')));
-		void this.askRights(kind, rows[0]);
-	}
+	/* rows ------------------------------------------------------------------ */
 
-	clear(kind: ItemKind): void {
-		this.setItems(kind, []);
+	/** Rows ticked in the Add from Flow PT dialog join the bid picked; one already in the request stays where it is. */
+	addRows(kind: ItemKind, rows: EntityRow[], to: Id = this.current): void {
+		if (kind === 'shot') this.setItems('shot', inBid(addPicked(this.state.shots, rows, this.freezer('shot')), to));
+		else this.setItems('asset', inBid(addPicked(this.state.assets, rows, this.freezer('asset')), to));
+		void this.askRights(kind, rows[0]);
 	}
 
 	private setItems(kind: ItemKind, items: RequestShot[] | RequestAsset[]): void {
@@ -354,23 +382,24 @@ export class Builder {
 		this.save();
 	}
 
-	/** Take rows out of the bid. Picking them again reads them fresh from Flow PT. */
+	/** Take rows out of the request. Picking them again reads them fresh from Flow PT. */
 	remove(kind: ItemKind, ids: string[]): void {
 		if (kind === 'shot') this.setItems('shot', removeItems(this.state.shots, ids));
 		else this.setItems('asset', removeItems(this.state.assets, ids));
 	}
 
-	/** Put back rows taken out, each at its place, when it is not in the bid again already. */
+	/** Put back rows taken out, each at its place and in its bid, when it is not in the request again already. */
 	restore(kind: ItemKind, removed: readonly { index: number; item: RequestShot | RequestAsset }[]): void {
 		const current = [...this.itemsOf(kind)];
 		const have = new Set(current.map((i) => i.id));
+		const known = new Set(this.bids.map((b) => b.key));
 		for (const { index, item } of [...removed].sort((a, b) => a.index - b.index)) {
-			if (!have.has(item.id)) current.splice(Math.min(index, current.length), 0, item);
+			if (have.has(item.id)) continue;
+			const back = item.package && known.has(item.package) ? item : { ...item, package: this.bids[0].key };
+			current.splice(Math.min(index, current.length), 0, back);
 		}
 		this.setItems(kind, current as RequestShot[] | RequestAsset[]);
 	}
-
-	/* live rows ------------------------------------------------------------ */
 
 	/** The table's columns for a kind: live where a field feeds them, locked where the person may not write. */
 	columns(kind: ItemKind): RequestColumn[] {
@@ -459,7 +488,7 @@ export class Builder {
 
 	/**
 	 * Edit cells of the table. A cell a Flow PT field feeds writes it, as the signed in person, and
-	 * shows the value read back; every other cell changes the bid. Nothing optimistic stays: a
+	 * shows the value read back; every other cell changes the request. Nothing optimistic stays: a
 	 * refused or silent write leaves the row as Flow PT holds it.
 	 */
 	async editCells(kind: ItemKind, key: ColumnKey, changes: readonly CellChange[]): Promise<EditOutcome> {
@@ -503,7 +532,7 @@ export class Builder {
 	}
 
 	/**
-	 * A field just created and mapped takes what the bid shows for its column on each row picked from
+	 * A field just created and mapped takes what the page shows for its column on each row picked from
 	 * Flow PT. The field is new and empty, so nothing in Flow PT is overwritten.
 	 */
 	private async seed(kind: ItemKind, key: ColumnKey, field: string): Promise<void> {
@@ -525,32 +554,34 @@ export class Builder {
 		return item ? ('code' in item ? item.code : item.name) : id;
 	}
 
-	/** Rows from a breakdown, as `breakdown.ts` planned them: replaced in place, new ones after. */
-	addBreakdown(kind: ItemKind, plan: BreakdownPlan<RequestShot> | BreakdownPlan<RequestAsset>): void {
+	/**
+	 * Rows from a breakdown, as `breakdown.ts` planned them: replaced in place, each in the bid it was
+	 * in, new ones after, in the bid picked.
+	 */
+	addBreakdown(kind: ItemKind, plan: BreakdownPlan<RequestShot> | BreakdownPlan<RequestAsset>, to: Id = this.current): void {
+		const was = new Map([...this.state.shots.map((s) => [`shot:${s.id}`, s.package] as const), ...this.state.assets.map((a) => [`asset:${a.id}`, a.package] as const)]);
 		const next = applyBreakdown({ shots: this.state.shots, assets: this.state.assets }, plan, kind);
-		this.state = { ...this.state, shots: next.shots, assets: next.assets };
+		const place = <T extends { id: Id; package?: Id }>(k: 'shot' | 'asset', rows: readonly T[]): T[] => rows.map((r) => ({ ...r, package: was.get(`${k}:${r.id}`) ?? r.package ?? to }));
+		this.state = { ...this.state, shots: place('shot', next.shots), assets: place('asset', next.assets) };
 		this.save();
 	}
 
 	/** A new id for a breakdown row. Never `shot-<n>`: that is a Flow PT row's. */
 	breakdownId(kind: ItemKind): string {
-		const seed = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-		return `${kind}-bd-${seed}`;
+		return `${kind}-bd-${uuid()}`;
 	}
 
 	/** Each breakdown row of a kind with no Flow PT row, against the project's rows with the same code. */
 	async findMatches(kind: ItemKind): Promise<Match[]> {
-		const project = this.state.project;
-		if (!project) return [];
 		const items = kind === 'shot' ? this.state.shots : this.state.assets;
 		const codes = codesToFind(items);
 		if (codes.length === 0) return [];
-		const rows = await rowsByCodes(liveContext().client, kind === 'shot' ? 'Shot' : 'Asset', project.id, codes);
+		const rows = await rowsByCodes(liveContext().client, kind === 'shot' ? 'Shot' : 'Asset', this.state.project.id, codes);
 		const candidates = rows.flatMap((r) => (typeof r.attributes?.code === 'string' ? [{ id: r.id, code: r.attributes.code }] : []));
 		return matchRows(kind, items, candidates);
 	}
 
-	/** Give breakdown rows their Flow PT row: an ordinary edit of the bid. A request already issued keeps what it was sent with. */
+	/** Give breakdown rows their Flow PT row: an ordinary edit of the draft. */
 	async link(kind: ItemKind, links: ItemLink[]): Promise<void> {
 		if (links.length === 0) return;
 		if (kind === 'shot') this.setItems('shot', withLinks(this.state.shots, links));
@@ -561,15 +592,7 @@ export class Builder {
 		const field = this.mapping?.[kind].difficulty;
 		return tiersFor(field ? this.schemaOf(kind)[field] : undefined);
 	}
-
-	/**
-	 * Leave this bid: the tab's cushion is cleared and nothing is saved from here on, so a change
-	 * waiting to save cannot bring a discarded or deleted bid back.
-	 */
-	async discard(): Promise<void> {
-		this.discarded = true;
-		if (this.timer) clearTimeout(this.timer);
-		this.timer = null;
-		await cushion.clear();
-	}
 }
+
+/** Where a problem of the readiness list points, as the page marks it. */
+export type { Place };

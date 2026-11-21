@@ -12,7 +12,7 @@
  * in the store.
  */
 
-import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PackagePrice, PaymentMilestone, RebateSplit } from './model';
+import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PackagePrice, PaymentMilestone, RateCard, RebateSplit } from './model';
 import type { Money } from './money';
 import { MAX_DISCOUNT_PERCENT, MAX_TAX_PERCENT } from './bid-limits';
 import { isCurrency } from './currencies';
@@ -105,7 +105,8 @@ function line(value: unknown, where: string): BidDraft['lines'][number] {
 		assumptions: optionalText(o.assumptions, `${where}.assumptions`),
 		elementsNeeded: optionalText(o.elementsNeeded, `${where}.elementsNeeded`),
 		startWeek: optionalText(o.startWeek, `${where}.startWeek`),
-		inPackage: o.inPackage === undefined || o.inPackage === false ? undefined : bool(o.inPackage, `${where}.inPackage`)
+		inPackage: o.inPackage === undefined || o.inPackage === false ? undefined : bool(o.inPackage, `${where}.inPackage`),
+		fromRate: o.fromRate === undefined || o.fromRate === false ? undefined : bool(o.fromRate, `${where}.fromRate`)
 	});
 	return result;
 }
@@ -118,6 +119,21 @@ function packagePrice(value: unknown, where: string): PackagePrice {
 		total: amount(o.total, `${where}.total`),
 		notes: optionalText(o.notes, `${where}.notes`)
 	});
+}
+
+/** The vendor's rates: a price per difficulty, one for a row with none. */
+function rateCard(value: unknown): RateCard {
+	const o = object(value, 'rateCard');
+	const seen = new Set<string>();
+	const rates = list(o.rates ?? [], 'rateCard.rates', 200).map((r, i) => {
+		const at = `rateCard.rates[${i}]`;
+		const row = object(r, at);
+		const difficulty = text(row.difficulty, `${at}.difficulty`, 200);
+		if (difficulty.trim() === '' || seen.has(difficulty)) throw new Wrong(`${at}.difficulty`);
+		seen.add(difficulty);
+		return { difficulty, amount: amount(row.amount, `${at}.amount`) };
+	});
+	return defined({ rates, fallback: o.fallback === undefined ? undefined : amount(o.fallback, 'rateCard.fallback') });
 }
 
 function adjustment(value: unknown, where: string, max: string): Adjustment | null {
@@ -177,7 +193,8 @@ export function readDraft(value: unknown): DraftInput {
 			tax: adjustment(o.tax, 'tax', MAX_TAX_PERCENT),
 			rebate: splits(o.rebate),
 			packages: o.packages === undefined ? undefined : list(o.packages, 'packages', 500).map((p, i) => packagePrice(p, `packages[${i}]`)),
-			declined: o.declined === undefined ? undefined : list(o.declined, 'declined', 500).map((d, i) => text(d, `declined[${i}]`, 200))
+			declined: o.declined === undefined ? undefined : list(o.declined, 'declined', 500).map((d, i) => text(d, `declined[${i}]`, 200)),
+			rateCard: o.rateCard === undefined ? undefined : rateCard(o.rateCard)
 		});
 		return { ok: true, draft };
 	} catch (error) {

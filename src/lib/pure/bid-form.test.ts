@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, setBidding, switchMode, typedFor, type BidForm } from './bid-form';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
+import { typePrice } from './rate-card';
 import { money } from './money';
 
 const req = request({ shots: [shot('sh010'), shot('sh020'), shot('sh030')], assets: [asset('hero', { name: 'Hero' })] });
@@ -457,10 +458,9 @@ describe('a package priced as one figure', () => {
 	});
 
 	it('says what a switch would clear, and clears it only when switched', () => {
-		const form = emptyForm(packed, TODAY);
-		form.lines.find((l) => l.key === 'shot:a')!.price = '10';
+		// Prices the vendor typed (`rate-card.typePrice` marks them so).
+		const form = typePrice(typePrice(emptyForm(packed, TODAY), 'shot:a', '10'), 'shot:d', '7');
 		form.lines.find((l) => l.key === 'shot:b')!.excluded = true;
-		form.lines.find((l) => l.key === 'shot:d')!.price = '7';
 		expect(typedFor(form, 'p1', 'package')).toEqual({ rows: 2, figure: false });
 		const switched = switchMode(form, 'p1', 'package');
 		expect(switched.lines.filter((l) => l.package === 'p1').every((l) => l.price === '' && !l.excluded)).toBe(true);

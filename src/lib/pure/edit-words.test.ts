@@ -26,13 +26,13 @@ describe('bulkConfirm', () => {
 	});
 
 	it('says what stays in the bid', () => {
-		expect(bulkConfirm('shot', 'Note to vendors', { fpt: 0, request: 40, locked: [] }).lines).toEqual(['This changes Note to vendors on 40 rows in this bid.']);
+		expect(bulkConfirm('shot', 'Note to vendors', { fpt: 0, request: 40, locked: [] }).lines).toEqual(['This changes Note to vendors on 40 rows in this request.']);
 	});
 
 	it('says both counts for a mixed selection, and the rows it leaves', () => {
 		const words = bulkConfirm('shot', 'Difficulty', { fpt: 38, request: 1, locked: ['Gone.', 'Gone.'] });
 		expect(words.title).toBe('Change Difficulty on 39 rows?');
-		expect(words.lines).toEqual(['This changes Difficulty on 38 Shots in Flow PT and on 1 row in this bid.', '2 selected rows stay as they are. Gone.']);
+		expect(words.lines).toEqual(['This changes Difficulty on 38 Shots in Flow PT and on 1 row in this request.', '2 selected rows stay as they are. Gone.']);
 	});
 
 	it('speaks of one Asset', () => {
@@ -50,11 +50,11 @@ const codeOf = (id: string) => codes.get(id) ?? id;
 describe('editLine', () => {
 	it('names the one row an edit changed, and where', () => {
 		expect(editLine('shot', 'Difficulty', [change('shot-1', true)], codeOf)).toBe('Difficulty of SH010 changed in Flow PT.');
-		expect(editLine('shot', 'Note to vendors', [change('shot-1', false)], codeOf)).toBe('Note to vendors of SH010 changed in this bid.');
+		expect(editLine('shot', 'Note to vendors', [change('shot-1', false)], codeOf)).toBe('Note to vendors of SH010 changed in this request.');
 	});
 
 	it('counts the rows of a bulk edit', () => {
-		expect(editLine('shot', 'Difficulty', [change('shot-1', true), change('shot-2', true), change('x', false)], codeOf)).toBe('Difficulty changed on 2 Shots in Flow PT and on 1 row in this bid.');
+		expect(editLine('shot', 'Difficulty', [change('shot-1', true), change('shot-2', true), change('x', false)], codeOf)).toBe('Difficulty changed on 2 Shots in Flow PT and on 1 row in this request.');
 	});
 });
 

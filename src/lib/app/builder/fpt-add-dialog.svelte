@@ -2,8 +2,8 @@
 	Add from Flow PT: a dialog with a plain list of the project's Shots or Assets, never a second
 	table. A line is the thumbnail, the code, the status, and the Sequence (an Asset's type) as quiet
 	text. Search by code, filter by Sequence or type, tick lines (Shift for a range), or tick every
-	line shown. A line already in the bid is ticked and cannot change. "Add N" freezes the
-	ticked rows into the bid (`addPicked`) and closes; editing happens in the bid's table.
+	line shown. A line already in the request is ticked and cannot change. "Add N" freezes the
+	ticked rows into the bid picked (`addPicked`) and closes; editing happens in the request's table.
 
 	The list reads 100 rows a page, sorted by code, and reads the next page as the end scrolls into
 	view, so a project with thousands of Shots opens at once. A thumbnail is a presigned URL that
@@ -181,8 +181,8 @@
 		}}
 	>
 		<Dialog.Header class="border-border gap-1 border-b px-5 pt-5 pb-4">
-			<Dialog.Title>Add {noun} from Flow PT</Dialog.Title>
-			<Dialog.Description>Tick the {noun} to add. You edit them in the bid's table.</Dialog.Description>
+			<Dialog.Title>Add {noun} to {builder.bidName(builder.current)}</Dialog.Title>
+			<Dialog.Description>Tick the {noun} to add from Flow PT. They go to {builder.bidName(builder.current)}. You edit them in the table.</Dialog.Description>
 		</Dialog.Header>
 
 		<div class="border-border flex flex-wrap items-center gap-2 border-b px-5 py-3" data-slot="fpt-add-filters">
@@ -243,13 +243,13 @@
 							data-slot="fpt-add-row"
 							data-held={held || undefined}
 						>
-							<Checkbox checked={on} disabled={held} aria-label={held ? `${line.code}, in the bid` : line.code} onclick={(e: MouseEvent) => pressBox(e, line.id)} />
+							<Checkbox checked={on} disabled={held} aria-label={held ? `${line.code}, in the request` : line.code} onclick={(e: MouseEvent) => pressBox(e, line.id)} />
 							<Thumbnail src={line.image} size="lg" entityType={type} alt="" class={cn(held && 'opacity-60')} />
 							<span class="flex min-w-0 flex-1 flex-col">
 								<span class={cn('truncate font-mono text-[13px] font-medium', !held && 'text-foreground')} title={line.code}>{line.code}</span>
 								{#if line.aside}<span class="text-muted-foreground truncate text-xs" title={line.aside}>{line.aside}</span>{/if}
 							</span>
-							{#if held}<span class="text-muted-foreground shrink-0 text-xs" data-slot="fpt-add-held">In the bid</span>{/if}
+							{#if held}<span class="text-muted-foreground shrink-0 text-xs" data-slot="fpt-add-held">In the request</span>{/if}
 							<span class="flex w-32 shrink-0 justify-end">
 								{#if line.status}<StatusBadge code={line.status} status={statuses.get(line.status) ?? null} field={statusField} size="sm" siteUrl={context.siteUrl} />{/if}
 							</span>

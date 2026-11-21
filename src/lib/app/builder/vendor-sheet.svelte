@@ -1,7 +1,7 @@
 <!--
 	A bid request as a vendor gets it: the header set as the sheet's head, the assumptions, then the
 	shots and assets that are in, each with the bid it sits in when the request has several. Omitted
-	items are left off. Used by the send flow's review and by the request's page. View and counts
+	items are left off. Used by an issued request's page. View and counts
 	from `$lib/pure/request`.
 -->
 <script lang="ts">
@@ -37,7 +37,6 @@
 			<div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
 				<p class="text-muted-foreground text-sm">{h.project || 'No project'}</p>
 				<p class="text-muted-foreground text-sm">
-					{#if h.code}<span class="text-foreground font-mono text-xs">{h.code}</span>{/if}
 					Round {h.round}
 				</p>
 			</div>

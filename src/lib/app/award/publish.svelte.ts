@@ -156,6 +156,7 @@ export class PublishState {
 				missing: this.missing,
 				date: today(),
 				requestCode: data.code,
+				requestName: data.request.header.title,
 				allLines: this.allLines,
 				groups: g.groups,
 				appLinks: Object.fromEntries(g.bids.map((b) => [b.id, `${location.origin}/requests/${data.request.id}/compare`]))

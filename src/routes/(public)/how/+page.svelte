@@ -156,7 +156,7 @@
 		</section>
 
 		<div class="flex flex-wrap gap-3">
-			<Button href="/bids">Build a bid</Button>
+			<Button href="/requests">Make a request</Button>
 			<Button variant="outline" href="/">Home</Button>
 		</div>
 

@@ -127,8 +127,10 @@ export type CreatedType = 'Shot' | 'Asset' | 'Sequence';
 export interface AwardOptions {
 	/** The award day. */
 	readonly date: Day;
-	/** The request's code, written on each Bid. The request id when absent. */
+	/** The request's code, written on each Bid's Request Code. The request id when absent. */
 	readonly requestCode?: string;
+	/** The request's name, which each Bid's name starts with. The code when absent. */
+	readonly requestName?: string;
 	/** Write a line for every line of every bid, not only the awarded ones. */
 	readonly allLines?: boolean;
 	/** The app's address for each bid, by bid id, written to the Bid's link on create. */
@@ -658,6 +660,7 @@ export function planAward(input: AwardInput): AwardPlan {
 	const warnings: string[] = [];
 	const project: EntityRef = { type: 'Project', id: site.projectId };
 	const requestCode = options.requestCode ?? request.id;
+	const requestName = options.requestName?.trim() || requestCode;
 	const awarded = [
 		...new Set([...scenario.picks.map((p) => targetKey(p.target)), ...(options.allLines ? bids.filter((b) => b.status === 'submitted').flatMap((b) => b.lines.map((l) => targetKey(l.target))) : [])])
 	];
@@ -721,7 +724,7 @@ export function planAward(input: AwardInput): AwardPlan {
 			const carriesRebate = unit.general || single;
 			const id = bidRows.get(unit.key);
 			const data: Record<string, FieldValue> = {
-				[BID.name]: `${requestCode} ${vendor.name} R${bid.round}${label ? ` ${label}` : ''}`,
+				[BID.name]: `${requestName} ${vendor.name} R${bid.round}${label ? ` ${label}` : ''}`,
 				[BID.key]: unit.key,
 				[BID.vendor]: group === null ? null : { type: 'Group', id: group },
 				[BID.round]: bid.round,

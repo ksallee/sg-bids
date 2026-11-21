@@ -1,46 +1,50 @@
 <!--
-	The main work: the Shots and the Assets of the bid, filling the rest of the page. One bar: a tab
-	per kind with its count, two buttons that add (from Flow PT, from a breakdown), then the bid's
-	counts. The table under it is the bid's own rows, edited in place and in bulk, live to Flow PT
-	where a field feeds the column (`request-table`). It is the only table: Add from Flow PT opens a
-	dialog with a plain list (`fpt-add-dialog.svelte`), and the rows it adds come back here marked and
-	in view. Add from a breakdown opens its dialog. The section carries `f-items`.
+	The main work: the request's rows, in one table grouped by bid, filling the rest of the page. One
+	bar: Shots, and Assets once there is one (else a quiet way to add some), the two buttons that add
+	(from Flow PT, from a breakdown) to the bid picked, and the counts. Under it the bids, one chip each
+	(`bids-bar`). The table is the request's own rows, edited in place and in bulk, live to Flow PT
+	where a field feeds the column (`request-table`). Add from Flow PT opens a dialog with a plain list
+	(`fpt-add-dialog.svelte`); the rows it adds come back here marked and in view. The section carries
+	`f-items`.
 -->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import FptAddDialog from './fpt-add-dialog.svelte';
 	import RequestTable from './request-table.svelte';
 	import BreakdownDialog from './breakdown-dialog.svelte';
+	import BidsBar from './bids-bar.svelte';
+	import DeleteBid from './delete-bid.svelte';
 	import MatchLine from './match-line.svelte';
 	import FileSpreadsheet from '@lucide/svelte/icons/file-spreadsheet';
 	import ListPlus from '@lucide/svelte/icons/list-plus';
+	import Plus from '@lucide/svelte/icons/plus';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
 	import type { ItemKind } from '$lib/pure/field-map';
-	import { bidSummary } from '$lib/pure/production-bid';
+	import type { Id } from '$lib/pure/model';
 	import { controlId } from '$lib/pure/readiness';
 	import type { Builder } from '$lib/app/builder.svelte';
-	import type { Target } from '$lib/pure/model';
 
 	let {
 		builder,
-		kind = $bindable('shot'),
-		adding = $bindable(null),
-		onFields,
-		onSendRows
+		marked,
+		onFields
 	}: {
 		builder: Builder;
-		kind?: ItemKind;
-		/** The kind the Add from Flow PT dialog is open for, or null when it is closed. */
-		adding?: ItemKind | null;
+		/** The bids the issue marked: they hold no rows. */
+		marked: ReadonlySet<Id>;
 		onFields: () => void;
-		/** Move or copy the selected rows to another bid. Absent: the bid is not stored yet. */
-		onSendRows?: (rows: Target[], move: boolean) => void;
 	} = $props();
 
-	const ids = (k: ItemKind) => (k === 'shot' ? builder.state.shots : builder.state.assets).map((row) => row.id);
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
+	// svelte-ignore state_referenced_locally
+	let kind = $state<ItemKind>(count('shot') === 0 && count('asset') > 0 ? 'asset' : 'shot');
+	/** The kind the Add from Flow PT dialog is open for, or null when it is closed. */
+	let adding = $state<ItemKind | null>(null);
 	let breakdownOpen = $state(false);
+	let deleting = $state<Id | null>(null);
+	let deleteOpen = $state(false);
+	const ids = (k: ItemKind) => (k === 'shot' ? builder.state.shots : builder.state.assets).map((row) => row.id);
 
 	/** The rows there were when the dialog opened, and the rows it added, marked once it closes. */
 	let before = $state<ReadonlySet<string>>(new Set());
@@ -55,8 +59,16 @@
 		});
 	});
 
-	function openPicker(): void {
-		adding = kind;
+	/** Add from Flow PT, to the bid named or the one picked. */
+	function openPicker(bid?: Id, k: ItemKind = kind): void {
+		if (bid) builder.current = bid;
+		kind = k;
+		adding = k;
+	}
+
+	function openBreakdown(bid?: Id): void {
+		if (bid) builder.current = bid;
+		breakdownOpen = true;
 	}
 
 	async function done(): Promise<void> {
@@ -75,19 +87,28 @@
 		document.getElementById(`tab-${kind}`)?.focus();
 	}
 
-	const counts = $derived(bidSummary(builder.state.shots, builder.state.assets));
+	/** A kind shows as a tab when it holds a row, or is the one on screen. */
+	const tabs = $derived((['shot', 'asset'] as const).filter((k) => count(k) > 0 || k === kind));
+	const other = $derived<ItemKind>(kind === 'shot' ? 'asset' : 'shot');
+
 	const number = new Intl.NumberFormat();
-	const facts = $derived([
-		{ label: counts.shots === 1 ? 'shot' : 'shots', value: counts.shots, title: counts.shotsWithoutFrames > 0 ? `${counts.shotsWithoutFrames} without a frame count` : undefined },
-		{ label: counts.frames === 1 ? 'frame' : 'frames', value: counts.frames, title: undefined },
-		{ label: counts.assets === 1 ? 'asset' : 'assets', value: counts.assets, title: undefined }
-	]);
+	const totals = $derived.by(() => {
+		let shots = 0;
+		let frames = 0;
+		let assets = 0;
+		for (const s of builder.stats.values()) {
+			shots += s.shots;
+			frames += s.frames;
+			assets += s.assets;
+		}
+		return { shots, frames, assets };
+	});
 </script>
 
-<section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Shots and assets" tabindex="-1" data-slot="items-panel">
+<section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Bids and rows" tabindex="-1" data-slot="items-panel">
 	<div class="border-border flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-6">
 		<div class="-mb-px flex items-end gap-5 self-stretch" role="tablist" aria-label="Kind">
-			{#each [['shot', 'Shots'], ['asset', 'Assets']] as [k, label] (k)}
+			{#each tabs as k (k)}
 				{@const on = kind === k}
 				<button
 					type="button"
@@ -100,31 +121,44 @@
 						'focus-visible:ring-ring/50 flex h-11 items-center gap-2 border-b-2 px-0.5 text-sm outline-none focus-visible:ring-[3px]',
 						on ? 'border-primary text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground border-transparent'
 					)}
-					onclick={() => ((kind = k as ItemKind), (fresh = new Set()))}
+					onclick={() => ((kind = k), (fresh = new Set()))}
 					onkeydown={tabKey}
+					data-slot={`tab-${k}`}
 				>
-					{label}
-					<span class={cn('rounded-md border px-1.5 text-xs leading-5 font-medium tabular-nums', count(k as ItemKind) === 0 && 'text-muted-foreground font-normal')}>{count(k as ItemKind)}</span>
+					{k === 'shot' ? 'Shots' : 'Assets'}
+					<span class={cn('rounded-md border px-1.5 text-xs leading-5 font-medium tabular-nums', count(k) === 0 && 'text-muted-foreground font-normal')}>{count(k)}</span>
 				</button>
 			{/each}
+			{#if !tabs.includes(other)}
+				<button
+					type="button"
+					class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex h-11 items-center gap-1 px-0.5 text-sm outline-none focus-visible:ring-[3px]"
+					onclick={() => openPicker(undefined, other)}
+					data-slot={`add-${other}s`}
+				>
+					<Plus class="size-3.5" aria-hidden="true" />{other === 'shot' ? 'Shots' : 'Assets'}
+				</button>
+			{/if}
 		</div>
 		<div class="flex items-center gap-2">
-			<Button id="add-from-fpt" size="sm" variant="secondary" onclick={openPicker} data-slot="fpt-open"><ListPlus data-icon="inline-start" />Add from Flow PT</Button>
-			<Button size="sm" variant="secondary" onclick={() => (breakdownOpen = true)} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+			<Button id="add-from-fpt" size="sm" variant="outline" onclick={() => openPicker()} data-slot="fpt-open"><ListPlus data-icon="inline-start" />Add from Flow PT</Button>
+			<Button size="sm" variant="outline" onclick={() => openBreakdown()} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+			<span class="text-muted-foreground text-xs">to <span class="text-foreground font-medium">{builder.bidName(builder.current)}</span></span>
 		</div>
-		<p class="text-muted-foreground ml-auto hidden items-baseline gap-3 py-2 text-sm whitespace-nowrap lg:flex" aria-label="In the bid" data-slot="bid-counts">
-			{#each facts as fact (fact.label)}
-				<span title={fact.title}><span class={cn('font-semibold tabular-nums', fact.value === 0 ? 'text-muted-foreground' : 'text-foreground')}>{number.format(fact.value)}</span> {fact.label}</span>
-			{/each}
-			{#if counts.omitted > 0}<span>{counts.omitted} omitted</span>{/if}
+		<p class="text-muted-foreground ml-auto hidden items-baseline gap-3 py-2 text-sm whitespace-nowrap lg:flex" aria-label="In the request" data-slot="request-counts">
+			<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.shots)}</span> {totals.shots === 1 ? 'shot' : 'shots'}</span>
+			<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.frames)}</span> {totals.frames === 1 ? 'frame' : 'frames'}</span>
+			{#if totals.assets > 0 || kind === 'asset'}<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.assets)}</span> {totals.assets === 1 ? 'asset' : 'assets'}</span>{/if}
 		</p>
 	</div>
+	<BidsBar {builder} {kind} {marked} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} onDelete={(bid) => ((deleting = bid), (deleteOpen = true))} />
 	<MatchLine {builder} />
-	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-h-0 min-w-0 flex-1 flex-col">
+	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="border-border flex min-h-0 min-w-0 flex-1 flex-col border-t">
 		{#key kind}
-			<RequestTable {builder} {kind} {fresh} onAdd={openPicker} onBreakdown={() => (breakdownOpen = true)} {onFields} {onSendRows} />
+			<RequestTable {builder} {kind} {fresh} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} {onFields} />
 		{/key}
 	</div>
 	{#if adding}<FptAddDialog {builder} kind={adding} onclose={() => void done()} />{/if}
 	<BreakdownDialog {builder} {kind} bind:open={breakdownOpen} />
+	{#if deleting}<DeleteBid {builder} bid={deleting} bind:open={deleteOpen} />{/if}
 </section>

@@ -62,23 +62,26 @@ export function splitAssumptions(text: string): string[] {
 		.filter((line) => line !== '');
 }
 
-/** The header fields in the order the form shows them. */
+/**
+ * The header fields in the order the page shows them: the name in the title, then the details. The
+ * code and the round are the app's: never typed, last.
+ */
 export const FIELD_ORDER: readonly (keyof HeaderForm)[] = [
 	'title',
-	'code',
-	'round',
-	'baseCurrency',
 	'dueDate',
+	'baseCurrency',
 	'turnoverDate',
 	'deliveryDate',
 	'deliveryFormat',
 	'materialLink',
-	'assumptions'
+	'assumptions',
+	'round',
+	'code'
 ];
 
 /** What each field is called, in the form and in every message about it. */
 export const LABELS: Readonly<Record<keyof HeaderForm, string>> = {
-	title: 'Title',
+	title: 'Name',
 	code: 'Code',
 	round: 'Round',
 	baseCurrency: 'Base currency',
@@ -91,10 +94,11 @@ export const LABELS: Readonly<Record<keyof HeaderForm, string>> = {
 };
 
 /**
- * What a sensible request cannot go out without. The code is made from the project and the round
- * starts at 1, so only the title is left to type. Everything else is optional.
+ * What a request cannot go out without: its name, the currency it is compared in, and the day
+ * answers are due. The code is made from the name when the request is made and the round starts at
+ * 1: neither is typed. Everything else is optional.
  */
-export const REQUIRED: readonly (keyof HeaderForm)[] = ['title', 'code', 'round', 'baseCurrency'];
+export const REQUIRED: readonly (keyof HeaderForm)[] = ['title', 'baseCurrency', 'dueDate'];
 
 /** The optional fields, in the groups the form folds them into. The due date sits with the required ones. */
 export const OPTIONAL_GROUPS = {
@@ -130,8 +134,8 @@ export function checkHeader(form: HeaderForm, today: Day, stage: Stage): FieldPr
 	const found = new Map<keyof HeaderForm, Omit<FieldProblem, 'field' | 'label' | 'missing'>>();
 	const error = (field: keyof HeaderForm, short: string, message: string) => found.set(field, { tone: 'error', short, message });
 
-	if (form.title.trim() === '') error('title', 'missing', 'Give the request a title.');
-	if (form.code.trim() === '') error('code', 'missing', 'Give the request a code. Vendors quote it back.');
+	if (form.title.trim() === '') error('title', 'missing', 'Name the request.');
+	if (form.dueDate.trim() === '') error('dueDate', 'missing', 'Pick the day answers are due.');
 	if (!ROUND.test(form.round.trim())) error('round', 'not a whole number from 1', 'The round is a whole number from 1.');
 
 	const currency = form.baseCurrency.trim();

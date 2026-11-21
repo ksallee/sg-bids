@@ -183,10 +183,9 @@ describe('requestFacts', () => {
 		expect(requestFacts(base, day)).toEqual([['Bids', 'SEQ010 (1 row), Creature (1 row)']]);
 	});
 
-	it('lists what production set, and leaves out what it did not', () => {
+	it('lists what production set, and leaves out what it did not; the name is the page’s title', () => {
 		const facts = requestFacts({ ...base, packages: [base.packages[0]], header: { ...base.header, title: 'Main', director: 'Ada', deliveryDate: '2027-02-01', studio: ' ' } }, day);
 		expect(facts).toEqual([
-			['Title', 'Main'],
 			['Bid', 'SEQ010 (1 row)'],
 			['Director', 'Ada'],
 			['Delivery', 'day 2027-02-01']

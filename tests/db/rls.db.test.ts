@@ -8,7 +8,6 @@ import type { TransactionSql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ALL_TABLES } from '$lib/pure/access';
 import { createComparison } from '$lib/server/comparison';
-import { createProductionBids } from '$lib/server/production-bids';
 import { draft, draftIn, header, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
 
 const sql = superuser();
@@ -62,9 +61,8 @@ beforeAll(async () => {
 	// A deleted request, so a withdrawn link is kept.
 	const gone = await issuedWithTwoVendors();
 	await gone.s.deleteRequest(gone.production, gone.request.id, 'BR-1');
-	// A production bid with a row, in a draft request.
-	const made = await createProductionBids(rest('service_role')).save(production, { id: null, name: 'SEQ010', shots: [{ id: 'sh900', code: 'SH900', omitted: false, assetIds: [] }], assets: [] });
-	await s.createDraftRequest(production, { code: 'BR-BIDS', header: header(), bids: [made.bid.id] });
+	// A draft request, whose bid holds a row.
+	await s.createDraftRequest(production, { code: 'BR-BIDS', header: header(), items: { shots: [{ id: 'sh900', code: 'SH900', omitted: false, assetIds: [] }], assets: [] } });
 });
 
 afterAll(async () => {

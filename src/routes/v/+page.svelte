@@ -247,11 +247,11 @@
 	<PageState state="loading" title="Opening the bid request" />
 {:else}
 	{@const header = request.header}
-	<PageHeader title={`Bid request for ${header.project}`}>
+	<PageHeader title={header.title?.trim() || `Bid request for ${header.project}`}>
 		{#snippet context()}
 			<span>
 				<span class="text-foreground font-semibold" data-slot="vendor-name">{request?.vendorName}</span>.
-				Request {request?.code}, round {header.round}.
+				{header.project}{header.round > 1 ? `, round ${header.round}` : ''}.
 				{#if header.dueDate}Due <span class="text-foreground font-medium">{day(header.dueDate)}</span>.{/if}
 				{#if view?.bid}Version {view.bid.version}.{/if}
 			</span>

@@ -11,7 +11,7 @@
  *   name; with no header the first is the code and the second the description.
  * - A row with no code is left out. A frame count that does not read is left blank and the row
  *   stays. Both are named by row. A count reads with any locale's thousands separator.
- * - A code already in the bid, or repeated in the paste, follows one choice for the batch:
+ * - A code already in the request, or repeated in the paste, follows one choice for the batch:
  *   skip it, replace the row there (its id and Flow PT row kept), or keep both. Codes compare
  *   without case, as Flow PT's filters do (field_types/text).
  * - A breakdown row has no Flow PT row: `source: 'breakdown'`, no `fpt`.
@@ -272,7 +272,7 @@ export interface RowIssue {
 export interface Duplicate {
 	readonly row: number;
 	readonly code: string;
-	/** `in the bid`, or `row 4` for an earlier row of the paste. */
+	/** `in the request`, or `row 4` for an earlier row of the paste. */
 	readonly matches: string;
 }
 
@@ -283,7 +283,7 @@ export interface PlanInput {
 	readonly columns: readonly (Column | null)[];
 	readonly existing: { readonly shots: readonly RequestShot[]; readonly assets: readonly RequestAsset[] };
 	readonly duplicates: DuplicateChoice;
-	/** Add the assets a shot names that the bid lacks, as breakdown rows. */
+	/** Add the assets a shot names that the request lacks, as breakdown rows. */
 	readonly addAssets: boolean;
 	/** A new item id for a kind. */
 	readonly newId: (kind: ItemKind) => Id;
@@ -296,7 +296,7 @@ export interface BreakdownPlan<T> {
 	readonly replace: readonly { readonly row: number; readonly id: Id; readonly item: T }[];
 	readonly duplicates: readonly Duplicate[];
 	readonly issues: readonly RowIssue[];
-	/** Assets the shots name that the bid lacks. */
+	/** Assets the shots name that the request lacks. */
 	readonly assetsToAdd: readonly RequestAsset[];
 	/** Something to add and nothing that stops it. */
 	readonly ready: boolean;
@@ -400,7 +400,7 @@ export function planBreakdown(input: PlanInput): BreakdownPlan<RequestShot | Req
 				} else missing.push(name);
 			}
 			if (missing.length > 0) {
-				issues.push({ row: record.row, level: 'warning', code, message: `Row ${record.row}, ${code}: ${list(missing)} ${missing.length === 1 ? 'is' : 'are'} not in the bid. Not linked.` });
+				issues.push({ row: record.row, level: 'warning', code, message: `Row ${record.row}, ${code}: ${list(missing)} ${missing.length === 1 ? 'is' : 'are'} not in the request. Not linked.` });
 			}
 		}
 		const fresh = (): RequestShot | RequestAsset => {
@@ -427,7 +427,7 @@ export function planBreakdown(input: PlanInput): BreakdownPlan<RequestShot | Req
 				continue;
 			}
 		} else if (there) {
-			duplicates.push({ row: record.row, code, matches: 'in the bid' });
+			duplicates.push({ row: record.row, code, matches: 'in the request' });
 			if (input.duplicates === 'skip') continue;
 			if (input.duplicates === 'replace') {
 				const base = replace.get(there.id)?.item ?? there;

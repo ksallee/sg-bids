@@ -163,6 +163,8 @@ export interface InvitedVendor {
 	readonly name: string;
 	/** The vendor's Group in FPT, written to the shot at award. */
 	readonly fpt?: EntityRef;
+	/** The Group's name as production picked it, for production's page. Never sent to a vendor. */
+	readonly groupName?: string;
 	readonly email: string;
 	readonly ndaFile?: string;
 	readonly ndaExecuted: boolean;
@@ -207,6 +209,17 @@ export interface VendorBid {
 	readonly packages?: readonly PackagePrice[];
 	/** Packages the vendor is not bidding on: no line, no figure. Absent: it bids on every one. */
 	readonly declined?: readonly Id[];
+	/** The vendor's rates, which fill its lines. The lines carry the amounts every total reads. */
+	readonly rateCard?: RateCard;
+}
+
+/**
+ * A vendor's rates: a price per difficulty that appears in its rows, and one for a row with none.
+ * A line that follows a rate is marked `fromRate`; one the vendor typed is its own.
+ */
+export interface RateCard {
+	readonly rates: readonly { readonly difficulty: string; readonly amount: Money }[];
+	readonly fallback?: Money;
 }
 
 /** One figure for a whole package: every row of it not omitted, all in. */
@@ -246,6 +259,8 @@ export interface BidLine {
 	readonly excluded: boolean;
 	/** Covered by its package's one figure (`VendorBid.packages`). Its total is zero, never its price. */
 	readonly inPackage?: boolean;
+	/** Its total came from the vendor's rate card. Absent: the vendor typed it. */
+	readonly fromRate?: boolean;
 }
 
 export interface DepartmentCost {

@@ -8,7 +8,7 @@ import { cellTarget, type RequestColumn } from './live-columns';
 import type { Id } from './model';
 import type { Change } from './row-edit';
 
-/** Where a bulk edit's rows land: how many in Flow PT, how many in the bid, and why the rest are left. */
+/** Where a bulk edit's rows land: how many in Flow PT, how many in the request, and why the rest are left. */
 export interface TargetSplit {
 	readonly fpt: number;
 	readonly request: number;
@@ -42,11 +42,11 @@ function nouns(kind: ItemKind): [string, string] {
 	return kind === 'shot' ? ['Shot', 'Shots'] : ['Asset', 'Assets'];
 }
 
-/** "on 38 Shots in Flow PT and on 2 rows in this bid". */
+/** "on 38 Shots in Flow PT and on 2 rows in this request". */
 function where(kind: ItemKind, fpt: number, request: number): string {
 	const parts: string[] = [];
 	if (fpt > 0) parts.push(`on ${count(fpt, ...nouns(kind))} in Flow PT`);
-	if (request > 0) parts.push(`on ${count(request, 'row', 'rows')} in this bid`);
+	if (request > 0) parts.push(`on ${count(request, 'row', 'rows')} in this request`);
 	return parts.join(' and ');
 }
 
@@ -64,7 +64,7 @@ export function bulkConfirm(kind: ItemKind, label: string, split: TargetSplit): 
 export function editLine(kind: ItemKind, label: string, changes: readonly Change[], codeOf: (id: Id) => string): string {
 	const fpt = changes.filter((c) => c.target).length;
 	const request = changes.length - fpt;
-	if (changes.length === 1) return `${label} of ${codeOf(changes[0].itemId)} changed ${fpt === 1 ? 'in Flow PT' : 'in this bid'}.`;
+	if (changes.length === 1) return `${label} of ${codeOf(changes[0].itemId)} changed ${fpt === 1 ? 'in Flow PT' : 'in this request'}.`;
 	return `${label} changed ${where(kind, fpt, request)}.`;
 }
 
