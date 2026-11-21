@@ -85,7 +85,7 @@
 
 	<FormField id="create-display" label="Display name" required hint="What people see in Flow PT. Plain letters, digits and spaces." problem={shownProblem('display')}>
 		{#snippet children({ id, describedBy, invalid })}
-			<Input {id} bind:value={display} aria-invalid={invalid ? 'true' : undefined} aria-describedby={describedBy} autocomplete="off" />
+			<Input {id} bind:value={display} aria-invalid={invalid ? 'true' : undefined} aria-describedby={describedBy} autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" />
 		{/snippet}
 	</FormField>
 

@@ -70,7 +70,7 @@
 								class="h-8"
 								value={row.name}
 								placeholder="Studio name"
-								autocomplete="off"
+								autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 								aria-required="true"
 								aria-invalid={nameProblem ? 'true' : undefined}
 								oninput={(e) => builder.setVendor(row.id, (r) => ({ ...r, name: e.currentTarget.value }))}
@@ -86,7 +86,7 @@
 								type="email"
 								value={row.email}
 								placeholder="bids@studio.com"
-								autocomplete="off"
+								autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 								aria-required="true"
 								aria-invalid={emailProblem ? 'true' : undefined}
 								oninput={(e) => builder.setVendor(row.id, (r) => ({ ...r, email: e.currentTarget.value }))}

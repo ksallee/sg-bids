@@ -76,7 +76,7 @@
 					bind:value={name}
 					maxlength={MAX_REQUEST_NAME}
 					placeholder="Rooftop chase, round one"
-					autocomplete="off"
+					autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 					aria-required="true"
 					aria-invalid={tried && nameProblem ? 'true' : undefined}
 					data-slot="new-request-name"
