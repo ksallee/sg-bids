@@ -815,13 +815,15 @@ const stages = {
 		await cell.dblclick();
 		await cell.locator('[data-slot=entity-table-editor] button').first().click();
 		await saved();
-		const [row2] = await sql`select header->>'round' as round from public.bid_requests where id = ${state.round2Id}`;
+		const [row2] = await sql`select round from public.bid_requests where id = ${state.round2Id}`;
 		const [item] = await sql`select omitted from public.production_bid_items where request_id = ${state.round2Id} and code = ${cut}`;
 		await page.setViewportSize({ width: 1920, height: 1080 });
+		// The editor scrolled the table to the Omit column: back to the codes for the shot.
+		await page.evaluate(() => document.querySelectorAll('[data-slot=request-table] *').forEach((el) => el.scrollLeft > 0 && (el.scrollLeft = 0)));
 		await page.waitForTimeout(600);
 		await shoot(page, 'round2-omitted-1920');
 		await page.setViewportSize({ width: 1440, height: 900 });
-		expect(row2?.round === '2' && item?.omitted === true, `round 2 started from the issued request; a double click on ${cut}'s Omit cell and a press omitted it, saved in the draft`);
+		expect(Number(row2?.round) === 2 && item?.omitted === true, `round ${row2?.round} started from the issued request; a double click on ${cut}'s Omit cell and a press omitted it, saved in the draft (omitted ${item?.omitted})`);
 		// Issued, Vendor A answers: the cut row takes no price.
 		await page.locator('[data-slot=issue]').click();
 		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
