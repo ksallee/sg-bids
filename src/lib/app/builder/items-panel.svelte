@@ -119,7 +119,8 @@
 </script>
 
 <section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Bids and rows" tabindex="-1" data-slot="items-panel">
-	<div class="border-border flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-6">
+	<BidsBar {builder} {kind} {marked} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} onDelete={(bid) => ((deleting = bid), (deleteOpen = true))} />
+	<div class="border-border flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-b px-6">
 		<div class="-mb-px flex items-end gap-5 self-stretch" role="tablist" aria-label="Kind">
 			{#each tabs as k (k)}
 				{@const on = kind === k}
@@ -165,9 +166,8 @@
 			{#if totals.assets > 0 || kind === 'asset'}<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.assets)}</span> {totals.assets === 1 ? 'asset' : 'assets'}{#if totals.assets !== totals.assetRows}{' '}in <span class="tabular-nums">{number.format(totals.assetRows)}</span> {totals.assetRows === 1 ? 'row' : 'rows'}{/if}</span>{/if}
 		</p>
 	</div>
-	<BidsBar {builder} {kind} {marked} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} onDelete={(bid) => ((deleting = bid), (deleteOpen = true))} />
 	<MatchLine {builder} />
-	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="border-border flex min-h-0 min-w-0 flex-1 flex-col border-t">
+	<div id="items-tabpanel" role="tabpanel" aria-labelledby={`tab-${kind}`} class="flex min-h-0 min-w-0 flex-1 flex-col">
 		{#key kind}
 			<RequestTable {builder} {kind} {fresh} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} {onFields} />
 		{/key}
