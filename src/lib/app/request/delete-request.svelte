@@ -113,7 +113,7 @@
 					<Input
 						id={`${uid}-code`}
 						bind:value={typed}
-						autocomplete="off"
+						autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 						spellcheck={false}
 						aria-required="true"
 						onkeydown={(e) => e.key === 'Enter' && ready && void remove()}

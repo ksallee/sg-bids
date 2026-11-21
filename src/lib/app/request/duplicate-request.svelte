@@ -68,7 +68,7 @@
 		<form class="flex flex-col gap-4" onsubmit={(e) => (e.preventDefault(), void duplicate())}>
 			<div class="flex flex-col gap-1.5">
 				<FieldLabel for={`${uid}-name`} required>Name</FieldLabel>
-				<Input id={`${uid}-name`} bind:value={typed} maxlength={MAX_REQUEST_NAME} autocomplete="off" aria-required="true" data-slot="duplicate-name" />
+				<Input id={`${uid}-name`} bind:value={typed} maxlength={MAX_REQUEST_NAME} autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" aria-required="true" data-slot="duplicate-name" />
 			</div>
 			<fieldset class="flex flex-col gap-2">
 				<legend class="mb-1.5 text-sm font-semibold">The rows</legend>

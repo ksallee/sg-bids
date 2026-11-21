@@ -370,7 +370,7 @@
 								bind:value={form.packages[index].price}
 								data-package-price={pkg.id}
 								inputmode="decimal"
-								autocomplete="off"
+								autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 								aria-invalid={!!error}
 								aria-required="true"
 								class="border-input dark:bg-input/30 bg-card focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 h-8 w-40 rounded-lg border px-2.5 text-right tabular-nums outline-none focus-visible:ring-3"
@@ -471,7 +471,7 @@
 									data-price={key}
 									data-source={source}
 									inputmode="decimal"
-									autocomplete="off"
+									autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 									aria-label={(line.count ?? 1) > 1 ? `Price for one of ${shot?.code ?? item?.name}, ${line.count} in the row` : `Price for ${shot?.code ?? item?.name}`}
 									aria-invalid={!!error}
 									disabled={line.excluded}

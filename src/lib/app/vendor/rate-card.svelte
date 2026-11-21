@@ -40,7 +40,7 @@
 							class={INPUT}
 							value={tier.price}
 							inputmode="decimal"
-							autocomplete="off"
+							autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 							aria-invalid={errors[key] ? 'true' : undefined}
 							oninput={(e) => (form = setRate(form, tier.difficulty, e.currentTarget.value))}
 							data-slot="rate-input"
@@ -61,7 +61,7 @@
 							class={cn(INPUT)}
 							value={form.rates.fallback}
 							inputmode="decimal"
-							autocomplete="off"
+							autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other"
 							aria-invalid={errors['rate:fallback'] ? 'true' : undefined}
 							oninput={(e) => (form = setRate(form, null, e.currentTarget.value))}
 							data-slot="rate-input"
