@@ -164,3 +164,10 @@ html:not(.dark) {
 		@apply font-sans;
 	}
 }
+
+/* LastPass draws its fill icon beside any field it takes for a name, and ignores `data-lpignore` on
+   some versions. The app holds no sign-in or address field, so the icon is hidden everywhere. */
+[data-lastpass-icon-root],
+[data-lastpass-root] {
+	display: none !important;
+}
