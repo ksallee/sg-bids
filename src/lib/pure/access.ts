@@ -4,7 +4,8 @@
  * The server builds a principal from what it verified itself, never from what the client says:
  *
  * - production: the Flow PT site host and project id of a session the site accepted;
- * - vendor: the invitation (and its request) found by the hash of the link token.
+ * - vendor: the invitation (and its request) found by the hash of the link token, and the packages
+ *   the invitation names: a vendor reads the rows and packages of those alone (`packages.ts`).
  *
  * `scope` answers the filter every query of that action carries: column equals value, and for a
  * few reads a status list. For an insert, `stamp` forces the same columns onto the row. Every row
@@ -23,6 +24,8 @@ export interface VendorPrincipal {
 	readonly invitationId: string;
 	/** The invitation's request, read from the invitation's row. */
 	readonly requestId: string;
+	/** The packages the invitation names, read from its row. Null or absent: every package. */
+	readonly packages?: readonly string[] | null;
 }
 
 export type Principal = ProductionPrincipal | VendorPrincipal;
@@ -41,6 +44,7 @@ export interface SitePrincipal {
 export const TABLES = [
 	'bid_requests',
 	'request_items',
+	'request_packages',
 	'invitations',
 	'bids',
 	'bid_lines',
@@ -76,6 +80,8 @@ const PRODUCTION: Grants = {
 	// Delete is whole, through `sg_delete_request`: the request and everything under it.
 	bid_requests: ['read', 'insert', 'update', 'delete'],
 	request_items: ['read', 'insert', 'update', 'delete'],
+	// Written with the items, by `sg_save_request_items`.
+	request_packages: ['read', 'insert', 'update', 'delete'],
 	invitations: ['read', 'insert', 'update'],
 	bids: ['read'],
 	bid_lines: ['read'],
@@ -90,7 +96,9 @@ const PRODUCTION: Grants = {
 
 const VENDOR: Grants = {
 	bid_requests: ['read'],
+	// Of the vendor's packages only.
 	request_items: ['read'],
+	request_packages: ['read'],
 	// Update is the opened stamp only; the store writes no other column.
 	invitations: ['read', 'update'],
 	// Delete is the vendor's own draft, discarded. The database refuses a submitted bid.
@@ -129,8 +137,11 @@ export function scope(principal: Principal, table: Table, action: Action): Scope
 	switch (table) {
 		case 'bid_requests':
 			return { eq: { id: principal.requestId }, in: { status: ['issued', 'awarded', 'closed'] } };
+		// A vendor invited to some packages reads their rows and themselves alone. An empty list reads nothing.
 		case 'request_items':
-			return { eq: { request_id: principal.requestId } };
+			return principal.packages ? { eq: { request_id: principal.requestId }, in: { package_key: [...principal.packages] } } : { eq: { request_id: principal.requestId } };
+		case 'request_packages':
+			return principal.packages ? { eq: { request_id: principal.requestId }, in: { key: [...principal.packages] } } : { eq: { request_id: principal.requestId } };
 		case 'invitations':
 			return { eq: { id: principal.invitationId } };
 		default:

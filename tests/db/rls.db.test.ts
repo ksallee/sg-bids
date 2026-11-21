@@ -18,6 +18,7 @@ type Table = (typeof ALL_TABLES)[number];
 const SAMPLE: Record<Table, Record<string, unknown>> = {
 	bid_requests: { site_host: 'x.example.com', project_id: 1, code: 'X', base_currency: 'USD' },
 	request_items: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, kind: 'shot', key: 'k', code: 'K' },
+	request_packages: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, key: 'p', name: 'P' },
 	invitations: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, vendor_name: 'V', contact_email: 'v@example.com', token_hash: 'a'.repeat(64), expires_at: '2099-01-01' },
 	bids: { invitation_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, currency: 'USD' },
 	bid_lines: { bid_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', total_minor: 1 },

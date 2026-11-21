@@ -93,6 +93,15 @@ describe('vendor', () => {
 		}
 	});
 
+	it('reads the rows and packages of its packages alone, when invited to some', () => {
+		const some = { ...vendor, packages: ['p1', 'p3'] };
+		expect(scope(some, 'request_items', 'read')).toEqual({ eq: { request_id: 'req-1' }, in: { package_key: ['p1', 'p3'] } });
+		expect(scope(some, 'request_packages', 'read')).toEqual({ eq: { request_id: 'req-1' }, in: { key: ['p1', 'p3'] } });
+		expect(scope({ ...vendor, packages: [] }, 'request_items', 'read').in).toEqual({ package_key: [] });
+		expect(scope(vendor, 'request_packages', 'read')).toEqual({ eq: { request_id: 'req-1' } });
+		expect(allowed(some, 'request_packages', 'insert')).toBe(false);
+	});
+
 	it('refuses a principal with no invitation', () => {
 		expect(() => scope({ kind: 'vendor', invitationId: '', requestId: 'req-1' }, 'bids', 'read')).toThrow();
 		expect(() => scope({ kind: 'vendor', invitationId: 'inv-a', requestId: '' }, 'bids', 'read')).toThrow();

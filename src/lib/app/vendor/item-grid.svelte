@@ -4,20 +4,27 @@
 	- Arrow up and down, Enter and Shift+Enter move between price cells, in the order shown.
 	- Pasting several cells into a price cell fills down from there, or matches rows by code when
 	  each starts with one (`$lib/pure/paste`). What landed and what did not is said above the grid.
-	- Search, a filter by state, and grouping by sequence or episode when the shots carry them.
+	- Search, a filter by state, and grouping by package (the default), sequence or episode.
+	- Per package, the vendor bids on it or not, and prices it row by row or as one figure for the
+	  whole package. With a figure, its rows say "In package price" and take no price of their own; a
+	  package not bid on says "Not bidding". A change asks first when it would clear what was typed
+	  (`$lib/pure/bid-form`: typedFor, switchMode, setBidding).
 
 	"Exclude" is apart from a zero price: an excluded item is one you will not do.
 -->
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Search from '@lucide/svelte/icons/search';
+	import Package from '@lucide/svelte/icons/package';
+	import Segmented from '$lib/app/segmented.svelte';
+	import ConfirmDialog from './confirm-dialog.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { DecimalMark } from '$lib/pure/amount';
-	import { vendorControlId, type BidForm } from '$lib/pure/bid-form';
+	import { setBidding, switchMode, typedFor, vendorControlId, type BidForm, type PackageForm } from '$lib/pure/bid-form';
 	import { targetKey } from '$lib/pure/model';
 	import { format, sum, type Money } from '$lib/pure/money';
 	import { planPaste, type PastePlan } from '$lib/pure/paste';
-	import { groupings, groupItems, itemMatches, type Grouping, type VendorRequestView } from '$lib/pure/vendor-view';
+	import { groupings, groupItems, itemMatches, packageSections, type Grouping, type VendorRequestView } from '$lib/pure/vendor-view';
 	import { cn } from '$lib/utils.js';
 	import LineDetail from './line-detail.svelte';
 
@@ -26,6 +33,7 @@
 		request,
 		errors,
 		prices,
+		figures,
 		mark,
 		locale,
 		readOnly
@@ -35,6 +43,8 @@
 		errors: Readonly<Record<string, string>>;
 		/** Each priced line's amount by key, as the draft read it. */
 		prices: ReadonlyMap<string, Money>;
+		/** Each package figure by package id, as the draft read it. */
+		figures: ReadonlyMap<string, Money>;
 		mark: DecimalMark;
 		locale: string;
 		readOnly: boolean;
@@ -44,11 +54,21 @@
 
 	const DEPARTMENTS = ['Matchmove', 'Roto', 'Paint', 'Layout', 'Animation', 'FX', 'Lighting', 'Comp', 'Modelling', 'Rigging', 'Texturing'];
 
+	type View = Grouping | 'package';
+
 	let query = $state('');
 	let filter = $state<Filter>('all');
-	const offered = $derived(groupings(request.shots));
-	// svelte-ignore state_referenced_locally
-	let grouping = $state<Grouping | null>(offered.includes('sequence') ? 'sequence' : (offered[0] ?? null));
+	const offered = $derived<View[]>(['package', ...groupings(request.shots)]);
+	let grouping = $state<View | null>('package');
+	const modeOf = $derived(new Map(form.packages.map((p) => [p.id, p])));
+	/** The package a line sits in is priced as one figure. */
+	const inFigure = (key: string) => {
+		const line = form.lines[indexOf.get(key)!];
+		const pkg = modeOf.get(line?.package ?? 'all');
+		return pkg?.bidding === true && pkg.mode === 'package';
+	};
+	/** The vendor is not bidding on the package a line sits in. */
+	const notBidding = (key: string) => modeOf.get(form.lines[indexOf.get(key)!]?.package ?? 'all')?.bidding === false;
 	const open = new SvelteSet<string>();
 	let pasted = $state<PastePlan | null>(null);
 	let grid = $state<HTMLElement | null>(null);
@@ -80,19 +100,53 @@
 		return itemMatches(shotByKey.get(key) ?? assetByKey.get(key) ?? {}, query);
 	}
 
-	const sections = $derived.by(() => {
+	const sections = $derived.by((): { label: string; keys: string[]; pkg: PackageForm | null }[] => {
+		if (grouping === 'package') {
+			return packageSections(request)
+				.map((section) => ({ label: section.label, keys: section.keys.filter(shows), pkg: modeOf.get(section.id) ?? null }))
+				.filter((section) => section.keys.length > 0 || (query === '' && kept === null));
+		}
 		const shotGroups = groupItems(request.shots, grouping).map((group) => ({
 			label: group.label ?? 'Shots',
-			keys: group.ids.map((id) => targetKey({ kind: 'shot', id })).filter(shows)
+			keys: group.ids.map((id) => targetKey({ kind: 'shot', id })).filter(shows),
+			pkg: null
 		}));
-		const assets = { label: 'Assets', keys: request.assets.map((a) => targetKey({ kind: 'asset', id: a.id })).filter(shows) };
+		const assets = { label: 'Assets', keys: request.assets.map((a) => targetKey({ kind: 'asset', id: a.id })).filter(shows), pkg: null };
 		return [...shotGroups, assets].filter((section) => section.keys.length > 0);
 	});
+
+	// Switching a package's pricing: straight away when nothing typed would go, else after a confirm.
+	let switching = $state<{ id: string; name: string; mode: PackageForm['mode'] | 'declined'; rows: number; figure: boolean } | null>(null);
+
+	function apply(id: string, mode: PackageForm['mode'] | 'declined'): void {
+		form = mode === 'declined' ? setBidding(form, id, false) : switchMode(form, id, mode);
+	}
+
+	function choose(pkg: PackageForm, mode: PackageForm['mode'] | 'declined'): void {
+		if (mode !== 'declined' && pkg.mode === mode) return;
+		const typed = typedFor(form, pkg.id, mode);
+		if (typed.rows === 0 && !typed.figure) {
+			apply(pkg.id, mode);
+			return;
+		}
+		switching = { id: pkg.id, name: pkg.name, mode, ...typed };
+	}
+
+	function bidOn(pkg: PackageForm, on: boolean): void {
+		if (on) form = setBidding(form, pkg.id, true);
+		else choose(pkg, 'declined');
+	}
+
+	function confirmSwitch(): void {
+		if (!switching) return;
+		apply(switching.id, switching.mode);
+		switching = null;
+	}
 	const order = $derived(sections.flatMap((section) => section.keys));
 
 	const counts = $derived({
 		all: form.lines.length,
-		open: form.lines.filter((l) => !l.excluded && !prices.has(l.key)).length,
+		open: form.lines.filter((l) => !l.excluded && !prices.has(l.key) && !notBidding(l.key) && !(inFigure(l.key) && figures.has(l.package ?? 'all'))).length,
 		excluded: form.lines.filter((l) => l.excluded).length
 	});
 
@@ -113,6 +167,7 @@
 		if (!grid) return;
 		for (let i = at + step; i >= 0 && i < order.length; i += step) {
 			const input = grid.querySelector<HTMLInputElement>(`[data-price="${CSS.escape(order[i])}"]`);
+			if (!input) continue;
 			if (input && !input.disabled) {
 				input.focus();
 				input.select();
@@ -137,6 +192,8 @@
 		event.preventDefault();
 		for (const update of plan.updates) {
 			const line = form.lines[indexOf.get(update.key)!];
+			// A row in a package price, or in a package not bid on, takes no price of its own.
+			if (inFigure(update.key) || notBidding(update.key)) continue;
 			if ('excluded' in update) line.excluded = true;
 			else line.price = update.price;
 		}
@@ -152,7 +209,7 @@
 
 	// One line per item. Below sm the description goes; from xl the kind of work and frames come in.
 	const COLS =
-		'grid-cols-[2rem_minmax(0,1fr)_7.5rem_2.5rem] sm:grid-cols-[2rem_7.5rem_minmax(0,1fr)_9.5rem_4rem] xl:grid-cols-[2rem_7.5rem_minmax(0,1fr)_8rem_3.5rem_9.5rem_4rem]';
+		'grid-cols-[2rem_minmax(0,1fr)_7.5rem_2.5rem] sm:grid-cols-[2rem_7.5rem_minmax(0,1fr)_9.5rem_4rem] xl:grid-cols-[2rem_16rem_minmax(0,1fr)_8rem_3.5rem_9.5rem_4rem]';
 
 	const FILTERS: { value: Filter; label: string }[] = [
 		{ value: 'all', label: 'All' },
@@ -200,7 +257,7 @@
 					value={grouping ?? ''}
 					onchange={(e) => (grouping = (e.currentTarget.value || null) as Grouping | null)}
 				>
-					{#each offered as option (option)}<option value={option}>{option === 'sequence' ? 'Sequence' : 'Episode'}</option>{/each}
+					{#each offered as option (option)}<option value={option}>{option === 'package' ? 'Package' : option === 'sequence' ? 'Sequence' : 'Episode'}</option>{/each}
 					<option value="">Nothing</option>
 				</select>
 			</label>
@@ -243,12 +300,84 @@
 		</div>
 
 		{#each sections as section (section.label)}
-			{@const total = subtotal(section.keys)}
-			<div class="bg-background/60 flex items-baseline gap-2 border-b px-3 py-1.5" role="row">
-				<span class="text-xs font-medium" role="rowheader">{section.label}</span>
-				<span class="text-muted-foreground text-xs tabular-nums">{section.keys.length}</span>
-				{#if total}<span class="text-muted-foreground ml-auto text-xs tabular-nums">{format(total, locale)}</span>{/if}
-			</div>
+			{@const pkg = section.pkg}
+			{@const figure = pkg ? figures.get(pkg.id) : undefined}
+			{@const total = !pkg?.bidding ? subtotal(section.keys) : pkg?.mode === 'package' ? (figure ?? null) : subtotal(section.keys)}
+			{#if pkg}
+				{@const error = errors[`package:${pkg.id}:price`]}
+				<div
+					class={cn('flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2', pkg.bidding ? 'bg-muted/50' : 'bg-muted/20')}
+					role="row"
+					data-slot="package-head"
+					data-package={pkg.id}
+					data-mode={pkg.bidding ? pkg.mode : 'declined'}
+				>
+					<span class="flex min-w-0 items-center gap-2" role="rowheader">
+						<Package class="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
+						<span class={cn('truncate text-sm font-semibold', !pkg.bidding && 'text-muted-foreground')}>{section.label}</span>
+						<span class="text-muted-foreground text-xs tabular-nums">{section.keys.length}</span>
+					</span>
+					{#if readOnly}
+						<span class="text-muted-foreground text-xs">{!pkg.bidding ? 'Not bidding' : pkg.mode === 'package' ? 'Priced as one figure' : 'Priced row by row'}</span>
+					{:else}
+						<span id={vendorControlId(`package:${pkg.id}:bidding`)} tabindex="-1" class="contents">
+							<Segmented
+								label={`Do you bid on ${section.label}`}
+								value={pkg.bidding ? 'bid' : 'decline'}
+								options={[
+									{ value: 'bid', label: 'Bid on this' },
+									{ value: 'decline', label: 'Not bidding' }
+								]}
+								onChange={(v) => bidOn(pkg, v === 'bid')}
+							/>
+						</span>
+						{#if pkg.bidding}
+							<Segmented
+								label={`How you price ${section.label}`}
+								value={pkg.mode}
+								options={[
+									{ value: 'rows', label: 'Row by row' },
+									{ value: 'package', label: 'One figure' }
+								]}
+								onChange={(v) => choose(pkg, v as PackageForm['mode'])}
+							/>
+						{/if}
+					{/if}
+					<span class="ml-auto flex items-center gap-2">
+						{#if !pkg.bidding}
+							<span class="text-muted-foreground text-xs">You are not bidding on this package. It needs no price.</span>
+						{:else if pkg.mode === 'package' && !readOnly}
+							{@const index = form.packages.findIndex((p) => p.id === pkg.id)}
+							<label class="text-muted-foreground flex items-center gap-2 text-xs" for={vendorControlId(`package:${pkg.id}:price`)}>
+								<span class="font-medium text-foreground">Price for the package, {form.currency}<span class="text-destructive" aria-hidden="true">*</span></span>
+							</label>
+							<input
+								id={vendorControlId(`package:${pkg.id}:price`)}
+								bind:value={form.packages[index].price}
+								data-package-price={pkg.id}
+								inputmode="decimal"
+								autocomplete="off"
+								aria-invalid={!!error}
+								aria-required="true"
+								class="border-input dark:bg-input/30 bg-card focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 h-8 w-40 rounded-lg border px-2.5 text-right tabular-nums outline-none focus-visible:ring-3"
+								onfocus={(e) => e.currentTarget.select()}
+							/>
+						{:else if total}
+							<span class="text-muted-foreground text-xs tabular-nums">{pkg.mode === 'package' ? 'One figure, ' : ''}{format(total, locale)}</span>
+						{/if}
+					</span>
+					{#if error}<p class="text-destructive w-full text-right text-xs">{error}</p>{/if}
+					{#if pkg.bidding && pkg.mode === 'package'}
+						<p class="text-muted-foreground w-full text-xs">One price for every row below, all in. Each row is in the package price.</p>
+					{/if}
+				</div>
+			{:else}
+				<div class="bg-background/60 flex items-baseline gap-2 border-b px-3 py-1.5" role="row">
+					<span class="text-xs font-medium" role="rowheader">{section.label}</span>
+					<span class="text-muted-foreground text-xs tabular-nums">{section.keys.length}</span>
+					{#if total}<span class="text-muted-foreground ml-auto text-xs tabular-nums">{format(total, locale)}</span>{/if}
+				</div>
+			{/if}
 			{#each section.keys as key (key)}
 				{@const index = indexOf.get(key)!}
 				{@const line = form.lines[index]}
@@ -256,6 +385,8 @@
 				{@const item = assetByKey.get(key)}
 				{@const error = errors[`line:${key}:price`]}
 				{@const detailOpen = open.has(key)}
+				{@const covered = inFigure(key)}
+				{@const declined = notBidding(key)}
 				{@const hasDetail = line.departments.length > 0 || line.compute !== '' || line.methodology !== '' || line.assumptions !== '' || line.notes !== ''}
 				<div
 					class={cn(
@@ -289,7 +420,13 @@
 					<span class="text-muted-foreground hidden truncate text-xs xl:block" role="cell">{meta(key)}</span>
 					<span class="text-muted-foreground hidden text-right text-xs tabular-nums xl:block" role="cell">{shot?.frames ?? ''}</span>
 					<span class="flex flex-col items-end" role="cell">
-						{#if readOnly}
+						{#if declined}
+							<span class="text-muted-foreground py-1.5 text-xs" data-slot="not-bidding">Not bidding</span>
+						{:else if covered}
+							<span class="text-muted-foreground flex items-center gap-1.5 py-1.5 text-xs" data-slot="in-package">
+								{#if line.omitted}Omitted{:else}<Package class="size-3.5" aria-hidden="true" />In package price{/if}
+							</span>
+						{:else if readOnly}
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
 						{:else}
 							<input
@@ -314,13 +451,13 @@
 						<input
 							type="checkbox"
 							bind:checked={form.lines[index].excluded}
-							disabled={readOnly}
+							disabled={readOnly || covered || declined}
 							aria-label={`Exclude ${shot?.code ?? item?.name}`}
 							class="accent-primary size-4"
 						/>
 					</span>
 				</div>
-				{#if detailOpen}
+				{#if detailOpen && !covered && !declined}
 					<LineDetail bind:line={form.lines[index]} {errors} currency={form.currency} {mark} {locale} price={prices.get(key) ?? null} {readOnly} listId="departments" />
 				{/if}
 			{/each}
@@ -329,3 +466,25 @@
 		{/each}
 	</div>
 </div>
+
+<ConfirmDialog
+	open={switching !== null}
+	title={switching?.mode === 'declined' ? `Not bidding on ${switching?.name}` : switching?.mode === 'package' ? `Price ${switching?.name} as one figure` : `Price ${switching?.name} row by row`}
+	confirm={switching?.mode === 'declined' ? 'Not bidding' : switching?.mode === 'package' ? 'Use one figure' : 'Price row by row'}
+	oncancel={() => (switching = null)}
+	onconfirm={confirmSwitch}
+>
+	{#if switching?.mode === 'declined'}
+		<p>
+			{switching.figure ? `The figure you typed for ${switching.name} is cleared.` : `${switching.rows === 1 ? 'The price you typed on 1 row' : `The prices you typed on ${switching.rows} rows`} of ${switching.name} are cleared, with their detail.`}
+			The package goes to production as not bid on.
+		</p>
+	{:else if switching?.mode === 'package'}
+		<p>
+			{switching.rows === 1 ? 'The price you typed on 1 row of' : `The prices you typed on ${switching.rows} rows of`}
+			{switching.name} are cleared, with their detail. One figure covers every row of the package.
+		</p>
+	{:else if switching}
+		<p>The figure you typed for {switching.name} is cleared. Each row then takes its own price.</p>
+	{/if}
+</ConfirmDialog>

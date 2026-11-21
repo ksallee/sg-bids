@@ -6,6 +6,9 @@
  *
  * The rate of a bid is production's (`bid_rates`), set after submission and locked by the
  * database at the award. The bids this answers carry it; a bid without one has `rate: null`.
+ *
+ * A scenario that gives part of a package to a vendor that priced it as one figure, or splits one
+ * of its rows with that vendor, is refused at save (`packages.partialPackagePicks`).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -15,6 +18,7 @@ import { applyRate, shownVersions, type BidRecord } from '$lib/pure/compare';
 import type { AwardScenario, BidRequest, Id, ScenarioPick, VendorBid } from '$lib/pure/model';
 import { targetKey } from '$lib/pure/model';
 import { rate as lockRate, type Rate } from '$lib/pure/money';
+import { partialPackagePicks, resolvePackages } from '$lib/pure/packages';
 import { comparePercent, sumPercents } from '$lib/pure/percent';
 import {
 	bidFromRows,
@@ -26,6 +30,7 @@ import {
 	type BidRow,
 	type InvitationRow,
 	type RequestItemRow,
+	type RequestPackageRow,
 	type RequestRow,
 	type ScenarioItemRow,
 	type ScenarioRow
@@ -107,7 +112,7 @@ export const PAGE = 1000;
 
 type StoredScenarioRow = ScenarioRow & { chosen: boolean; costs_left_out: unknown };
 
-const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, vendor_group_id, contact_email, details, expires_at, revoked_at, last_opened_at, created_at';
+const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, vendor_group_id, contact_email, details, package_keys, expires_at, revoked_at, last_opened_at, created_at';
 
 export interface ComparisonOptions {
 	/** Rows per page of a long read. Supabase answers 1000 at most. */
@@ -161,8 +166,9 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 	 */
 	async function loadComparison(principal: ProductionPrincipal, requestId: string, asked: readonly string[] = []): Promise<Comparison> {
 		const row = await requestRow(principal, requestId);
-		const [items, invitations, bidRows, rateRows, awards, scenarios, publication] = await Promise.all([
+		const [items, packages, invitations, bidRows, rateRows, awards, scenarios, publication] = await Promise.all([
 			all<RequestItemRow>(() => read(principal, 'request_items').eq('request_id', requestId)),
+			all<RequestPackageRow>(() => read(principal, 'request_packages').eq('request_id', requestId)),
 			run<Omit<InvitationRow, 'token_hash'>[]>(read(principal, 'invitations', INVITATION_COLUMNS).eq('request_id', requestId).order('created_at')),
 			run<BidRow[]>(read(principal, 'bids').eq('request_id', requestId).order('created_at')),
 			run<RateRow[]>(read(principal, 'bid_rates').eq('request_id', requestId)),
@@ -170,7 +176,7 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 			scenarioList(principal, requestId),
 			run<PublicationRow | null>(read(principal, 'award_publications').eq('request_id', requestId).maybeSingle())
 		]);
-		const request = requestFromRows(row, items, invitations.map(vendorFromRow));
+		const request = requestFromRows(row, items, invitations.map(vendorFromRow), packages);
 		const versions: BidVersion[] = bidRows.map((b) => {
 			const header = b.header as { number?: string; date?: string };
 			return {
@@ -278,8 +284,25 @@ export function createComparison(db: SupabaseClient, options: ComparisonOptions 
 		return found;
 	}
 
+	/** Refuses picks that give part of a package to a bid that priced it as one figure. */
+	async function checkPackages(principal: ProductionPrincipal, requestId: string, picks: readonly ScenarioPick[]): Promise<void> {
+		const asked = [...new Set(picks.flatMap((p) => p.shares.map((s) => s.bidId)))];
+		if (asked.length === 0) return;
+		const priced = await run<{ id: string; invitation_id: string; packages: unknown }[]>(read(principal, 'bids', 'id, invitation_id, packages').eq('request_id', requestId).in('id', asked));
+		const bids = priced.filter((b) => Array.isArray(b.packages) && b.packages.length > 0).map((b) => ({ id: b.id, packages: b.packages as VendorBid['packages'] }));
+		if (bids.length === 0) return;
+		const data = await loadComparison(principal, requestId);
+		const map = new Map(picks.map((p) => [targetKey(p.target), p.shares]));
+		const partial = partialPackagePicks(resolvePackages(data.request), bids, map);
+		if (partial.length === 0) return;
+		const vendor = priced.find((b) => b.id === partial[0].bidId)?.invitation_id;
+		const name = data.request.vendors.find((v) => v.id === vendor)?.name ?? 'A vendor';
+		throw new StoreError(422, `${name} priced ${partial[0].name} as one figure. It is awarded whole or not at all.`);
+	}
+
 	async function saveScenario(principal: ProductionPrincipal, requestId: string, input: ScenarioInput): Promise<StoredScenario> {
 		checkPicks(input.picks);
+		await checkPackages(principal, requestId, input.picks);
 		const t = tenant(principal, 'award_scenarios', input.id ? 'update' : 'insert');
 		const id = await run<string>(
 			db.rpc('sg_save_award_scenario', {

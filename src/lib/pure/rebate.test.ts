@@ -186,6 +186,28 @@ describe('estimateRebate on a labour base', () => {
 	it('does not flag missing detail when no split has a labour base', () => {
 		expect(estimateRebate(plain([split('GB', '100', '39')]), 'USD').labourDetailMissing).toBe(false);
 	});
+
+	it('knows no labour in a package figure: the figure is named, its rows are not', () => {
+		const b = bid({
+			currency: 'USD',
+			lines: [...detailed([]).lines, line('l2', onShot('sh020'), usd(0), { inPackage: true })],
+			packages: [{ package: 'p1', total: usd(5_000) }],
+			rebate: [split('CA-ON', '100', '18', labour)]
+		});
+		const result = estimateRebate(b, 'USD');
+		expect(result.linesWithoutDetail).toEqual(['package:p1']);
+		expect(result.rebate).toBeNull();
+	});
+
+	it('takes a package figure into an all base', () => {
+		const b = bid({
+			currency: 'USD',
+			lines: [line('l2', onShot('sh020'), usd(0), { inPackage: true })],
+			packages: [{ package: 'p1', total: usd(10_000) }],
+			rebate: [split('GB', '100', '10')]
+		});
+		expect(estimateRebate(b, 'USD').rebate?.bid).toEqual(usd(1_000));
+	});
 });
 
 describe('estimateRebate in the base currency', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseId, parseLinks, parseSave, parseVendor } from './wire';
+import { parseId, parseInvitationPackages, parseLinks, parseSave, parseVendor } from './wire';
 
 const header = { code: 'DS_R1', title: 'Main', project: 'Demo', round: 1, baseCurrency: 'EUR', assumptions: ['A'], dueDate: '2026-12-01' };
 const shot = { id: 'shot-1', code: 'sh010', fpt: { type: 'Shot', id: 1 }, omitted: false, assetIds: ['asset-9'], frames: 96, description: 'd', notes: 'n' };
@@ -111,5 +111,47 @@ describe('parseId', () => {
 		expect(parseId('6f1c2a4e-0000-4000-8000-000000000000')).toBe('6f1c2a4e-0000-4000-8000-000000000000');
 		expect(parseId('local-1')).toBeNull();
 		expect(parseId(3)).toBeNull();
+	});
+});
+
+describe('packages on the wire', () => {
+	const packages = [
+		{ id: 'seq:SQ1', name: 'SQ1' },
+		{ id: 'assets', name: 'Assets' }
+	];
+
+	it('takes the packages with the rows that sit in them', () => {
+		const out = parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'seq:SQ1' }], assets: [{ ...asset, package: 'assets' }] }, packages });
+		expect(out.ok && out.value.packages).toEqual(packages);
+		expect(out.ok && out.value.items.shots[0].package).toBe('seq:SQ1');
+	});
+
+	it('takes a save with no packages as before', () => {
+		const out = parseSave({ code: 'X', header, items: { shots: [shot], assets: [] } });
+		expect(out.ok && out.value.packages).toEqual([]);
+	});
+
+	it('refuses a row outside the packages, two packages with one name, a blank name', () => {
+		expect(parseSave({ code: 'X', header, items: { shots: [shot], assets: [] }, packages }).ok).toBe(false);
+		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'nope' }], assets: [] }, packages }).ok).toBe(false);
+		expect(parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'seq:SQ1' }], assets: [] } }).ok).toBe(false);
+		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [] }, packages: [packages[0], { id: 'b', name: 'sq1' }] })).toEqual({ ok: false, message: 'Two packages are named sq1.' });
+		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [] }, packages: [{ id: 'b', name: ' ' }] }).ok).toBe(false);
+	});
+
+	it('takes a vendor invited to some packages, or to every one', () => {
+		const some = parseVendor({ name: 'V', email: 'v@x.test', packages: ['seq:SQ1'] });
+		expect(some.ok && some.value.packages).toEqual(['seq:SQ1']);
+		const every = parseVendor({ name: 'V', email: 'v@x.test', packages: null });
+		expect(every.ok && 'packages' in every.value).toBe(false);
+		expect(parseVendor({ name: 'V', email: 'v@x.test', packages: [] }).ok).toBe(false);
+		expect(parseVendor({ name: 'V', email: 'v@x.test', packages: ['a', 'a'] }).ok).toBe(false);
+	});
+
+	it('reads a change of a vendor packages', () => {
+		const id = '00000000-0000-4000-8000-000000000001';
+		expect(parseInvitationPackages({ invitationId: id, packages: ['a'] })).toEqual({ ok: true, value: { invitationId: id, packages: ['a'] } });
+		expect(parseInvitationPackages({ invitationId: id, packages: null })).toEqual({ ok: true, value: { invitationId: id, packages: null } });
+		expect(parseInvitationPackages({ invitationId: 'x', packages: null }).ok).toBe(false);
 	});
 });

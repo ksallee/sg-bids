@@ -29,6 +29,18 @@
  *   app's rows still needs them (recipe 009), and the rows an earlier run created that the new plan
  *   does not write. Then it updates the rest by key. Nothing is written twice.
  *
+ * Packages (`packages.ts`). Each package of a vendor's bid is a Bid of its own, keyed
+ * `sgbids/<request>/<vendor>/r<round>/p:<package>` and named with the package's name. A package
+ * priced as one figure carries the figure on its Bid; its Bid Lines link the rows with no amount.
+ * A package priced row by row carries the amounts on its Bid Lines, as before, and their sum on its
+ * Bid. A package the vendor declined, or left unpriced, has no Bid. The whole-bid figures (non-shot
+ * costs, discount, tax, the rebate estimate) go on one more Bid with no line, `.../general`, named
+ * General costs, so a vendor's Bids sum to its grand total exactly, in minor units; in the base
+ * currency too, the last Bid taking the rounding. Award status is per Bid: a package priced as one
+ * figure is awarded whole; a split inside a package priced row by row stays per Bid Line. A request
+ * from before packages keeps its one Bid per vendor, keyed as it always was, and gains the general
+ * Bid only when the vendor gave whole-bid figures.
+ *
  * Rows from a breakdown have no Flow PT row. For each kind production chooses:
  *
  * - `create`: the Shot or Asset is created first, from the row (code, description, and the mapped
@@ -51,11 +63,12 @@
 import { BID, BID_FIELDS, LINE, LINE_FIELDS, sameCurrency, toFptCurrency, type FptAmount } from './fpt-fields';
 import type { AppStatus, ItemType } from './fpt-setup';
 import { applyScenario } from './compare';
-import { targetKey, type AwardScenario, type BidRequest, type Day, type EntityRef, type Id, type InvitedVendor, type Target, type VendorBid } from './model';
-import { fromDecimal, minorDigits, toDecimal, type Money, type Rate } from './money';
+import { targetKey, type AwardScenario, type BidLine, type BidRequest, type Day, type EntityRef, type Id, type InvitedVendor, type Target, type VendorBid } from './model';
+import { fromDecimal, minorDigits, money, sum, toDecimal, type Money, type Rate } from './money';
 import { percentOf } from './percent';
 import { estimateRebate } from './rebate';
-import { bidTotals, toBase } from './totals';
+import { ALL_PACKAGE, packagePrices, resolvePackages, type Resolved } from './packages';
+import { bidTotals, toBase, type BidTotals } from './totals';
 
 /** The site's names, from the setup check. */
 export interface FptSite {
@@ -188,6 +201,10 @@ export interface BidPreview {
 	readonly key: string;
 	readonly bidId: Id;
 	readonly vendor: string;
+	/** The package this Bid is for; null for the one Bid of a request from before packages, and the general Bid. */
+	readonly package: string | null;
+	/** The Bid of whole-bid figures: non-shot costs, discount, tax, rebate. */
+	readonly general: boolean;
 	readonly action: 'create' | 'update';
 	readonly status: AppStatus;
 	readonly currency: string;
@@ -216,6 +233,10 @@ export interface LinePreview {
 	readonly share: string | null;
 	readonly awardedBase: Money | null;
 	readonly excluded: boolean;
+	/** The package the item sits in; null in a request from before packages. */
+	readonly package: string | null;
+	/** In a package priced as one figure: the line carries no amount, the package's Bid does. */
+	readonly inPackage: boolean;
 }
 
 export interface GroupPreview {
@@ -286,13 +307,96 @@ export interface AwardPlan {
 	readonly warnings: readonly string[];
 }
 
-/** One Bid per vendor per round of a request. */
+/**
+ * A vendor's bid on one round of a request: the key its Bids start from. In a request from before
+ * packages, the key of its one package's Bid, as it always was.
+ */
 export function bidKey(requestId: Id, vendorId: Id, round: number): string {
 	return `sgbids/${requestId}/${vendorId}/r${round}`;
 }
 
+/** The key of the Bid of one package of a vendor's bid. A package id may hold any character, so it is encoded. */
+export function packageBidKey(base: string, packageId: Id): string {
+	return `${base}/p:${encodeURIComponent(packageId)}`;
+}
+
+/** The key of the Bid that carries a vendor's whole-bid figures: non-shot costs, discount, tax, rebate. */
+export function generalBidKey(base: string): string {
+	return `${base}/general`;
+}
+
+/** The name of the Bid of whole-bid figures. */
+export const GENERAL_COSTS = 'General costs';
+
 export function lineKey(bid: string, target: Target): string {
 	return `${bid}/${targetKey(target)}`;
+}
+
+/** The target key a line key ends with, `shot:sh010`. Item ids hold no slash. */
+function targetOfLine(key: string): string {
+	return key.slice(key.lastIndexOf('/') + 1);
+}
+
+/** The key of the Bid a row's line goes under: its package's Bid, or the one Bid of a request from before packages. */
+export function rowBidKey(packages: Resolved, base: string, target: Target): string {
+	if (packages.implicit) return base;
+	const pkg = packages.of.get(targetKey(target));
+	if (pkg === undefined) throw new Error(`The ${target.kind} ${target.id} is in no package.`);
+	return packageBidKey(base, pkg);
+}
+
+/** Every Bid and Bid Line key a vendor's bid may write, to find the rows an earlier run made. */
+export function bidRowKeys(request: BidRequest, bid: Pick<VendorBid, 'vendorId' | 'round' | 'lines'>): { bids: string[]; lines: string[] } {
+	const packages = resolvePackages(request);
+	const base = bidKey(request.id, bid.vendorId, bid.round);
+	const bids = packages.implicit ? [base] : packages.packages.map((p) => packageBidKey(base, p.id));
+	return { bids: [...bids, generalBidKey(base)], lines: bid.lines.map((l) => lineKey(rowBidKey(packages, base, l.target), l.target)) };
+}
+
+/** What one Bid of a vendor's bid holds: a package's figure or its lines' sum, or the whole-bid figures. */
+interface BidUnit {
+	readonly key: string;
+	/** The package's name, null for the one package of a request from before packages and for the general Bid. */
+	readonly packageName: string | null;
+	readonly general: boolean;
+	/** In the bid currency. */
+	readonly total: Money;
+	readonly lines: readonly BidLine[];
+}
+
+/**
+ * A vendor's bid as Bids: one per package it bid on (a package it declined, or left unpriced, has
+ * none), then one with the whole-bid figures when it has any: non-shot costs, a discount, a tax or
+ * a rebate split. Their totals sum to the bid's grand total exactly. A request from before packages
+ * with no whole-bid figure is one Bid, as it always was.
+ */
+function bidUnits(packages: Resolved, base: string, bid: VendorBid, totals: BidTotals): BidUnit[] {
+	const figures = packagePrices(bid);
+	const whole = totals.costs.bid.minor !== 0 || totals.discount.bid.minor !== 0 || totals.tax.bid.minor !== 0 || bid.rebate.length > 0;
+	const lineSum = (lines: readonly BidLine[]) =>
+		sum(
+			lines.filter((l) => !l.excluded && !l.inPackage).map((l) => l.total),
+			bid.currency
+		);
+	const units: BidUnit[] = [];
+	if (packages.implicit) {
+		const figure = figures.get(ALL_PACKAGE.id);
+		const total = figure ? figure.total : lineSum(bid.lines);
+		if (!whole) return [{ key: base, packageName: null, general: false, total: totals.grand.bid, lines: bid.lines }];
+		units.push({ key: base, packageName: null, general: false, total, lines: bid.lines });
+	} else {
+		for (const pkg of packages.packages) {
+			const lines = bid.lines.filter((l) => packages.of.get(targetKey(l.target)) === pkg.id);
+			const figure = figures.get(pkg.id);
+			if (lines.length === 0 && !figure) continue;
+			units.push({ key: packageBidKey(base, pkg.id), packageName: pkg.name, general: false, total: figure ? figure.total : lineSum(lines), lines });
+		}
+	}
+	if (whole) {
+		const given = units.reduce((n, u) => n + BigInt(u.total.minor), 0n);
+		units.push({ key: generalBidKey(base), packageName: null, general: true, total: money(Number(BigInt(totals.grand.bid.minor) - given), bid.currency), lines: [] });
+	}
+	return units;
 }
 
 /** `Shot:123`, the key of an item in `Existing.groups`. */
@@ -559,6 +663,7 @@ export function planAward(input: AwardInput): AwardPlan {
 	];
 	const missing = resolveRows(input, awarded, warnings);
 	const all = missing.items;
+	const packages = resolvePackages(request);
 
 	// Shares per bid and target, from the scenario.
 	const shares = new Map<string, string>();
@@ -585,97 +690,125 @@ export function planAward(input: AwardInput): AwardPlan {
 			groupIds.set(vendor.id, group);
 			if (group === null) warnings.push(`${vendor.name} has no Flow PT Group. Its Bid is written, and no Shot or Asset is shared with it.`);
 		}
-		const key = bidKey(request.id, bid.vendorId, bid.round);
-		if (seenKeys.has(key)) throw new Error(`Two bids from ${vendor.name} for round ${bid.round}. Publish one.`);
-		seenKeys.add(key);
+		const baseKey = bidKey(request.id, bid.vendorId, bid.round);
+		if (seenKeys.has(baseKey)) throw new Error(`Two bids from ${vendor.name} for round ${bid.round}. Publish one.`);
+		seenKeys.add(baseKey);
 
 		const totals = bidTotals(bid, base);
 		const rebate = estimateRebate(bid, base);
-		const awardedLines = bid.lines.filter((l) => shares.has(`${bid.id}|${targetKey(l.target)}`));
-		const status: AppStatus = awardedLines.length > 0 ? 'awarded' : 'not_awarded';
+		const isAwarded = (l: BidLine) => shares.has(`${bid.id}|${targetKey(l.target)}`);
 		const where = `${vendor.name}'s bid`;
-		const id = bidRows.get(key);
-		const data: Record<string, FieldValue> = {
-			[BID.name]: `${requestCode} ${vendor.name} R${bid.round}`,
-			[BID.key]: key,
-			[BID.vendor]: group === null ? null : { type: 'Group', id: group },
-			[BID.round]: bid.round,
-			[BID.total]: amount(totals.grand.bid, `${where} total`, warnings),
-			[BID.currency]: bid.currency,
-			[BID.totalBase]: amount(totals.grand.base, `${where} total in ${base}`, warnings),
-			[BID.baseCurrency]: base,
-			[BID.rebate]: rebate.rebate ? amount(rebate.rebate.base, `${where} rebate`, warnings) : null,
-			[BID.afterRebate]: rebate.afterRebate ? amount(rebate.afterRebate.base, `${where} total after rebate`, warnings) : null,
-			[BID.rate]: bid.rate?.rate ?? null,
-			[BID.rateDate]: bid.rate?.date ?? null,
-			[BID.requestCode]: requestCode,
-			[BID.submitted]: bid.date,
-			[BID.awarded]: status === 'awarded' ? options.date : null
-		};
 		if (rebate.rebate === null) warnings.push(`${where}: the rebate is unknown. Its estimate is left empty.`);
-		if (/^\d+$/.test(bid.number) && Number(bid.number) <= 2147483647) data[BID.version] = Number(bid.number);
-		else warnings.push(`${where}: bid number '${bid.number}' is not a whole number. Bid Version is left empty.`);
-		const code = site.statuses[status];
-		if (code) data[BID.status] = code;
-		else warnings.push(`${where}: the project has no status for ${status.replace('_', ' ')}. The status is left as it is.`);
-		if (id === undefined) {
-			data.project = project;
-			const link = options.appLinks?.[bid.id];
-			if (link) linkWrites.push({ kind: 'link', key, url: link });
-			bidWrites.push({ kind: 'create', entity: 'bid', key, data });
-		} else bidWrites.push({ kind: 'update', entity: 'bid', key, id, data });
+		const version = /^\d+$/.test(bid.number) && Number(bid.number) <= 2147483647 ? Number(bid.number) : null;
+		if (version === null) warnings.push(`${where}: bid number '${bid.number}' is not a whole number. Bid Version is left empty.`);
 
-		const bidRef: EntityRef | PendingBid = id === undefined ? { pendingBid: key } : { type: site.bidType, id };
-		const lines = options.allLines ? bid.lines : awardedLines;
-		for (const line of lines) {
-			const item = itemOf(all, line.target);
-			const lkey = lineKey(key, line.target);
-			const percent = shares.get(`${bid.id}|${targetKey(line.target)}`) ?? null;
-			const lineWhere = `${where}, ${item.label}`;
-			const lineBase = line.excluded ? null : toBase(line.total, bid, base);
-			const ldata: Record<string, FieldValue> = {
-				[LINE.name]: `${item.label} ${vendor.name}`,
-				[LINE.key]: lkey,
-				[LINE.bid]: bidRef,
-				[LINE.item]: item.ref === null ? null : isPendingRow(item.ref) ? item.ref : { type: item.ref.type, id: item.ref.id },
-				[LINE.amount]: line.excluded ? null : amount(line.total, lineWhere, warnings),
-				[LINE.currency]: bid.currency,
-				[LINE.amountBase]: lineBase ? amount(lineBase, `${lineWhere} in ${base}`, warnings) : null,
-				[LINE.share]: percent === null ? null : share(percent),
-				[LINE.awardedBase]: percent !== null && lineBase ? amount(percentOf(lineBase, percent), `${lineWhere} awarded`, warnings) : null,
-				[LINE.awarded]: percent !== null,
-				[LINE.excluded]: line.excluded
-			};
-			const lid = lineRows.get(lkey);
-			if (lid === undefined) lineWrites.push({ kind: 'create', entity: 'line', key: lkey, data: { ...ldata, project } });
-			else lineWrites.push({ kind: 'update', entity: 'line', key: lkey, id: lid, data: ldata });
-			if (item.ref === null) unlinkedLines++;
-			linePreviews.push({
-				key: lkey,
-				item: item.label,
-				target: item.target,
-				ref: item.ref && !isPendingRow(item.ref) ? item.ref : null,
-				vendor: vendor.name,
-				action: lid === undefined ? 'create' : 'update',
-				amount: line.excluded ? null : line.total,
-				amountBase: lineBase,
-				share: percent,
-				awardedBase: percent !== null && lineBase ? percentOf(lineBase, percent) : null,
-				excluded: line.excluded
-			});
+		const units = bidUnits(packages, baseKey, bid, totals);
+		const single = units.length === 1 && units[0].key === baseKey && packages.implicit && !units[0].general;
+		// Each Bid's base total converted alone; the last takes the rounding, so they sum to the bid's base total exactly.
+		const baseTotals = units.map((u) => toBase(u.total, bid, base));
+		if (baseTotals.length > 0) {
+			const others = baseTotals.slice(0, -1).reduce((n, m) => n + BigInt(m.minor), 0n);
+			baseTotals[baseTotals.length - 1] = money(Number(BigInt(totals.grand.base.minor) - others), base);
 		}
-		previews.push({
-			key,
-			bidId: bid.id,
-			vendor: vendor.name,
-			action: id === undefined ? 'create' : 'update',
-			status,
-			currency: bid.currency,
-			total: totals.grand.bid,
-			totalBase: totals.grand.base,
-			rate: bid.rate,
-			group,
-			lines: lines.length
+		const vendorAwarded = bid.lines.some(isAwarded);
+		const statusSaid = new Set<AppStatus>();
+		units.forEach((unit, u) => {
+			const awardedLines = unit.lines.filter(isAwarded);
+			const status: AppStatus = (unit.general ? vendorAwarded : awardedLines.length > 0) ? 'awarded' : 'not_awarded';
+			const label = unit.general ? GENERAL_COSTS : unit.packageName;
+			const unitWhere = label ? `${where}, ${label}` : where;
+			// The whole-bid figures sit on one Bid: on the general one, or on the one Bid of a bid with no package.
+			const carriesRebate = unit.general || single;
+			const id = bidRows.get(unit.key);
+			const data: Record<string, FieldValue> = {
+				[BID.name]: `${requestCode} ${vendor.name} R${bid.round}${label ? ` ${label}` : ''}`,
+				[BID.key]: unit.key,
+				[BID.vendor]: group === null ? null : { type: 'Group', id: group },
+				[BID.round]: bid.round,
+				[BID.total]: amount(unit.total, `${unitWhere} total`, warnings),
+				[BID.currency]: bid.currency,
+				[BID.totalBase]: amount(baseTotals[u], `${unitWhere} total in ${base}`, warnings),
+				[BID.baseCurrency]: base,
+				[BID.rebate]: carriesRebate && rebate.rebate ? amount(rebate.rebate.base, `${where} rebate`, warnings) : null,
+				[BID.afterRebate]: carriesRebate && rebate.afterRebate ? amount(rebate.afterRebate.base, `${where} total after rebate`, warnings) : null,
+				[BID.rate]: bid.rate?.rate ?? null,
+				[BID.rateDate]: bid.rate?.date ?? null,
+				[BID.requestCode]: requestCode,
+				[BID.submitted]: bid.date,
+				[BID.awarded]: status === 'awarded' ? options.date : null
+			};
+			if (version !== null) data[BID.version] = version;
+			const code = site.statuses[status];
+			if (code) data[BID.status] = code;
+			else if (!statusSaid.has(status)) {
+				statusSaid.add(status);
+				warnings.push(`${where}: the project has no status for ${status.replace('_', ' ')}. The status is left as it is.`);
+			}
+			if (id === undefined) {
+				data.project = project;
+				const link = options.appLinks?.[bid.id];
+				if (link) linkWrites.push({ kind: 'link', key: unit.key, url: link });
+				bidWrites.push({ kind: 'create', entity: 'bid', key: unit.key, data });
+			} else bidWrites.push({ kind: 'update', entity: 'bid', key: unit.key, id, data });
+
+			const bidRef: EntityRef | PendingBid = id === undefined ? { pendingBid: unit.key } : { type: site.bidType, id };
+			const lines = options.allLines ? unit.lines : awardedLines;
+			for (const line of lines) {
+				const item = itemOf(all, line.target);
+				const lkey = lineKey(unit.key, line.target);
+				const percent = shares.get(`${bid.id}|${targetKey(line.target)}`) ?? null;
+				const lineWhere = `${where}, ${item.label}`;
+				// A row in a package price links its Shot or Asset and carries no amount: the figure is on the package's Bid.
+				const priced = !line.excluded && !line.inPackage;
+				const lineBase = priced ? toBase(line.total, bid, base) : null;
+				const ldata: Record<string, FieldValue> = {
+					[LINE.name]: `${item.label} ${vendor.name}`,
+					[LINE.key]: lkey,
+					[LINE.bid]: bidRef,
+					[LINE.item]: item.ref === null ? null : isPendingRow(item.ref) ? item.ref : { type: item.ref.type, id: item.ref.id },
+					[LINE.amount]: priced ? amount(line.total, lineWhere, warnings) : null,
+					[LINE.currency]: bid.currency,
+					[LINE.amountBase]: lineBase ? amount(lineBase, `${lineWhere} in ${base}`, warnings) : null,
+					[LINE.share]: percent === null ? null : share(percent),
+					[LINE.awardedBase]: percent !== null && lineBase ? amount(percentOf(lineBase, percent), `${lineWhere} awarded`, warnings) : null,
+					[LINE.awarded]: percent !== null,
+					[LINE.excluded]: line.excluded
+				};
+				const lid = lineRows.get(lkey);
+				if (lid === undefined) lineWrites.push({ kind: 'create', entity: 'line', key: lkey, data: { ...ldata, project } });
+				else lineWrites.push({ kind: 'update', entity: 'line', key: lkey, id: lid, data: ldata });
+				if (item.ref === null) unlinkedLines++;
+				linePreviews.push({
+					key: lkey,
+					item: item.label,
+					target: item.target,
+					ref: item.ref && !isPendingRow(item.ref) ? item.ref : null,
+					vendor: vendor.name,
+					action: lid === undefined ? 'create' : 'update',
+					amount: priced ? line.total : null,
+					amountBase: lineBase,
+					share: percent,
+					awardedBase: percent !== null && lineBase ? percentOf(lineBase, percent) : null,
+					excluded: line.excluded,
+					package: unit.packageName,
+					inPackage: line.inPackage === true
+				});
+			}
+			previews.push({
+				key: unit.key,
+				bidId: bid.id,
+				vendor: vendor.name,
+				package: unit.packageName,
+				general: unit.general,
+				action: id === undefined ? 'create' : 'update',
+				status,
+				currency: bid.currency,
+				total: unit.total,
+				totalBase: baseTotals[u],
+				rate: bid.rate,
+				group,
+				lines: lines.length
+			});
 		});
 	}
 
@@ -791,7 +924,7 @@ function takeBack(input: AwardInput, all: Map<string, Item>, bidWrites: readonly
 	for (const l of previous.lines) {
 		if (!l.created || plannedLines.has(l.key)) continue;
 		writes.push({ kind: 'delete', entity: 'line', key: l.key, id: l.id });
-		const target = l.key.split('/').slice(4).join('/');
+		const target = targetOfLine(l.key);
 		preview.lines.push({ key: l.key, item: all.get(target)?.label ?? target, vendor: vendorOf(l.key) });
 	}
 	for (const b of previous.bids) {

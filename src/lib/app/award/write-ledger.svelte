@@ -120,7 +120,7 @@
 								{#each plan.preview.bids as b (b.key)}
 									<tr class="border-b last:border-0">
 										<td class="py-2 pr-3">
-											<span class="font-medium">{b.vendor}</span>
+											<span class="font-medium">{b.vendor}{#if b.package}<span class="text-muted-foreground font-normal">, {b.package}</span>{:else if b.general}<span class="text-muted-foreground font-normal">, General costs</span>{/if}</span>
 											<span class="text-muted-foreground block text-xs">{b.group === null ? 'No Group' : `Group ${b.group}`}, {b.lines} lines</span>
 										</td>
 										<td class="px-3 py-2">{STATUS[b.status]}</td>
@@ -133,7 +133,7 @@
 							</tbody>
 						</table>
 					</div>
-					<p class="text-muted-foreground text-xs">A total is the bid's grand total: lines, non-shot costs, discount and tax. A rate is the one locked on the compare page.</p>
+					<p class="text-muted-foreground text-xs">A Bid's total is its package's figure or its lines' sum. A rate is the one locked on the compare page. Each package is a Bid of its own. A package priced as one figure carries the figure on its Bid, and its Bid Lines carry no amount. Non-shot costs, discount, tax and the rebate go on one General costs Bid, so a vendor's Bids sum to its total.</p>
 				{:else if step.label === 'Bid Lines and vendor Groups'}
 					<div class="overflow-x-auto">
 						<table class="w-full min-w-[640px] text-sm" data-slot="preview-lines">
@@ -141,6 +141,7 @@
 								<tr class="text-muted-foreground border-b text-left text-xs">
 									<th class="py-1.5 pr-3 font-medium">Shot or Asset</th>
 									<th class="px-3 py-1.5 font-medium">Vendor</th>
+									<th class="px-3 py-1.5 font-medium">Package</th>
 									<th class="px-3 py-1.5 text-right font-medium">Price</th>
 									<th class="px-3 py-1.5 text-right font-medium">In base</th>
 									<th class="px-3 py-1.5 text-right font-medium">Share</th>
@@ -153,7 +154,10 @@
 										<tr class={cn(j === it.lines.length - 1 && 'border-b', it.split && 'bg-muted/30')} data-split={it.split ? 'true' : undefined}>
 											<td class="py-1.5 pr-3">{#if j === 0}<span class="font-medium">{it.item}</span>{#if it.split}<span class="text-muted-foreground ml-2 text-xs">split</span>{/if}{/if}</td>
 											<td class="px-3 py-1.5">{l.vendor}</td>
-											<td class="px-3 py-1.5 text-right">{l.excluded ? 'Excluded' : amount(l.amount)}</td>
+											<td class="text-muted-foreground px-3 py-1.5">{l.package ?? ''}</td>
+											<td class="px-3 py-1.5 text-right" title={l.inPackage ? 'The package price is on its Bid' : undefined}>
+												{l.excluded ? 'Excluded' : l.inPackage ? 'In package price' : amount(l.amount)}
+											</td>
 											<td class="px-3 py-1.5 text-right">{amount(l.amountBase)}</td>
 											<td class="px-3 py-1.5 text-right">{l.share === null ? '' : `${l.share}%`}</td>
 											<td class="py-1.5 pl-3 text-right">{amount(l.awardedBase)}</td>

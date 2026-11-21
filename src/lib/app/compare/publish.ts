@@ -9,5 +9,5 @@ export const PUBLISH_CONNECTED = true;
 export function publishLine(chosen: boolean, awarded: boolean): string {
 	if (!chosen) return 'Mark a scenario as chosen to publish it.';
 	if (awarded) return 'Published. Publish again to update Flow PT to the chosen scenario.';
-	return 'Writes the chosen scenario to Flow PT: a Bid per vendor, a Bid Line per awarded shot or asset, and the vendor Group on what it wins. A preview comes first.';
+	return 'Writes the chosen scenario to Flow PT: a Bid per vendor and package, a Bid Line per awarded shot or asset, and the vendor Group on what it wins. A preview comes first.';
 }

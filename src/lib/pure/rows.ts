@@ -11,6 +11,10 @@
  *   and where it came from (`source`): Flow PT, or a breakdown with no Flow PT row until matched.
  * - A bid's vendor is its invitation. A line points at its item by kind and key.
  * - A rate is kept as the exact string typed, never a float.
+ * - A request's packages are rows of their own (`request_packages`), keyed by the model's package
+ *   id; an item names its package in `package_key`. An invitation's packages are `package_keys`,
+ *   null for every package. A bid's package figures are `packages`, in the model's shape, and a
+ *   line covered by one has `in_package`.
  */
 
 import type {
@@ -18,10 +22,12 @@ import type {
 	BidLine,
 	BidRequest,
 	EntityRef,
+	Id,
 	InvitedVendor,
 	ItemSource,
 	RequestAsset,
 	RequestHeader,
+	RequestPackage,
 	RequestShot,
 	ScenarioPick,
 	Target,
@@ -68,6 +74,20 @@ export interface ItemColumns {
 	omitted: boolean;
 	/** `fpt` for a row picked from Flow PT, `breakdown` for one pasted, imported or typed. */
 	source: 'fpt' | 'breakdown';
+	/** The package the row sits in. Null in a request from before packages. */
+	package_key?: string | null;
+}
+
+/** A package as written: its key, name and place. */
+export interface PackageColumns {
+	key: string;
+	name: string;
+}
+
+export interface RequestPackageRow extends Tenant, PackageColumns {
+	id: string;
+	request_id: string;
+	position: number;
 }
 
 export interface RequestItemRow extends Tenant, ItemColumns {
@@ -82,6 +102,8 @@ export interface VendorColumns {
 	vendor_group_id: number | null;
 	contact_email: string;
 	details: Json;
+	/** The packages the vendor is invited to. Null: every package. */
+	package_keys: string[] | null;
 }
 
 export interface InvitationRow extends Tenant, VendorColumns {
@@ -101,6 +123,8 @@ export interface BidColumns {
 	header: Json;
 	non_shot_costs: unknown[];
 	rebate_splits: unknown[];
+	/** Packages priced as one figure, in the model's shape. */
+	packages: unknown[];
 }
 
 export interface BidRow extends Tenant, BidColumns {
@@ -121,6 +145,8 @@ export interface LineColumns {
 	total_minor: number;
 	excluded: boolean;
 	detail: Json;
+	/** Covered by its package's figure. */
+	in_package: boolean;
 }
 
 export interface BidLineRow extends Tenant, LineColumns {
@@ -177,10 +203,14 @@ function origin(source: ItemColumns['source'] | undefined): { source?: ItemSourc
 	return source === 'breakdown' ? { source: 'breakdown' } : {};
 }
 
+function inPackage(key: string | null | undefined): { package?: Id } {
+	return key ? { package: key } : {};
+}
+
 export function itemsToRows(shots: readonly RequestShot[], assets: readonly RequestAsset[]): ItemColumns[] {
 	const rows: ItemColumns[] = [];
 	const seen = new Set<string>();
-	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, source: ItemSource | undefined, fields: Json) => {
+	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, source: ItemSource | undefined, pkg: Id | undefined, fields: Json) => {
 		const name = `${kind}:${key}`;
 		if (!key) throw new Error(`A ${kind} needs an id.`);
 		if (seen.has(name)) throw new Error(`Two ${kind}s have the id '${key}'.`);
@@ -194,26 +224,52 @@ export function itemsToRows(shots: readonly RequestShot[], assets: readonly Requ
 			fpt_id: fpt?.id ?? null,
 			fields: defined(fields),
 			omitted,
-			source: source === 'breakdown' ? 'breakdown' : 'fpt'
+			source: source === 'breakdown' ? 'breakdown' : 'fpt',
+			package_key: pkg ?? null
 		});
 	};
-	for (const { id, code, fpt, omitted, source, ...fields } of shots) push('shot', id, code, fpt, omitted, source, fields);
-	for (const { id, name, fpt, source, ...fields } of assets) push('asset', id, name, fpt, false, source, fields);
+	for (const { id, code, fpt, omitted, source, package: pkg, ...fields } of shots) push('shot', id, code, fpt, omitted, source, pkg, fields);
+	for (const { id, name, fpt, source, package: pkg, ...fields } of assets) push('asset', id, name, fpt, false, source, pkg, fields);
 	return rows;
+}
+
+/** A request's packages as written, in order. Ids and names are checked: one each. */
+export function packagesToRows(packages: readonly RequestPackage[]): PackageColumns[] {
+	const ids = new Set<string>();
+	const names = new Set<string>();
+	return packages.map((p) => {
+		const name = p.name.trim();
+		if (!p.id || p.id.length > 200) throw new Error('A package needs an id of 200 characters at most.');
+		if (!name || name.length > 120) throw new Error('A package needs a name of 120 characters at most.');
+		if (ids.has(p.id)) throw new Error(`Two packages have the id '${p.id}'.`);
+		if (names.has(name.toLowerCase())) throw new Error(`Two packages are named ${name}.`);
+		ids.add(p.id);
+		names.add(name.toLowerCase());
+		return { key: p.id, name };
+	});
+}
+
+export function packagesFromRows(rows: readonly (PackageColumns & { position: number })[]): RequestPackage[] {
+	return [...rows].sort((a, b) => a.position - b.position).map((row) => ({ id: row.key, name: row.name }));
 }
 
 export function itemsFromRows(rows: readonly ItemColumns[]): { shots: RequestShot[]; assets: RequestAsset[] } {
 	const sorted = [...rows].sort((a, b) => a.position - b.position);
 	const shots = sorted
 		.filter((row) => row.kind === 'shot')
-		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source) }));
+		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key) }));
 	const assets = sorted
 		.filter((row) => row.kind === 'asset')
-		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source) }));
+		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key) }));
 	return { shots, assets };
 }
 
-export function requestFromRows(row: RequestRow, items: readonly ItemColumns[], vendors: readonly InvitedVendor[]): BidRequest {
+export function requestFromRows(
+	row: RequestRow,
+	items: readonly ItemColumns[],
+	vendors: readonly InvitedVendor[],
+	packages: readonly (PackageColumns & { position: number })[] = []
+): BidRequest {
 	const stored = row.header as Partial<RequestHeader>;
 	const header: RequestHeader = {
 		...stored,
@@ -224,23 +280,24 @@ export function requestFromRows(row: RequestRow, items: readonly ItemColumns[], 
 		baseCurrency: row.base_currency,
 		...(row.due_on ? { dueDate: row.due_on } : {})
 	};
-	return { id: row.id, header, ...itemsFromRows(items), vendors: [...vendors] };
+	return { id: row.id, header, ...itemsFromRows(items), vendors: [...vendors], ...(packages.length > 0 ? { packages: packagesFromRows(packages) } : {}) };
 }
 
 // The vendor, through its invitation.
 
 export function vendorToColumns(vendor: Omit<InvitedVendor, 'id'>): VendorColumns {
 	if (vendor.fpt && vendor.fpt.type !== 'Group') throw new Error(`A vendor's Flow PT entity is a Group, not a ${vendor.fpt.type}.`);
-	const { name, fpt, email, ndaExecuted, ndaFile, tpn, capacity } = vendor;
+	const { name, fpt, email, ndaExecuted, ndaFile, tpn, capacity, packages } = vendor;
 	return {
 		vendor_name: name,
 		vendor_group_id: fpt?.id ?? null,
 		contact_email: email,
-		details: defined({ ndaExecuted, ndaFile, tpn, capacity })
+		details: defined({ ndaExecuted, ndaFile, tpn, capacity }),
+		package_keys: packages ? [...packages] : null
 	};
 }
 
-export function vendorFromRow(row: Pick<InvitationRow, 'id' | keyof VendorColumns>): InvitedVendor {
+export function vendorFromRow(row: Pick<InvitationRow, 'id' | Exclude<keyof VendorColumns, 'package_keys'>> & { package_keys?: string[] | null }): InvitedVendor {
 	const details = row.details as Partial<InvitedVendor>;
 	return {
 		id: row.id,
@@ -248,7 +305,8 @@ export function vendorFromRow(row: Pick<InvitationRow, 'id' | keyof VendorColumn
 		email: row.contact_email,
 		...(row.vendor_group_id !== null ? { fpt: { type: 'Group', id: row.vendor_group_id } } : {}),
 		...defined({ ndaFile: details.ndaFile, tpn: details.tpn, capacity: details.capacity }),
-		ndaExecuted: details.ndaExecuted === true
+		ndaExecuted: details.ndaExecuted === true,
+		...(row.package_keys ? { packages: [...row.package_keys] } : {})
 	};
 }
 
@@ -268,6 +326,8 @@ interface StoredBidHeader {
 	milestones?: VendorBid['milestones'];
 	discount?: VendorBid['discount'];
 	tax?: VendorBid['tax'];
+	/** Packages the vendor is not bidding on. */
+	declined?: string[];
 }
 
 export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumns; lines: LineColumns[] } {
@@ -287,7 +347,8 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 		exclusions: [...bid.exclusions],
 		milestones: bid.milestones,
 		discount: bid.discount,
-		tax: bid.tax
+		tax: bid.tax,
+		...(bid.declined?.length ? { declined: [...bid.declined] } : {})
 	};
 	return {
 		bid: {
@@ -296,14 +357,16 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 			exchange_rate_date: bid.rate?.date ?? null,
 			header: defined({ ...header }),
 			non_shot_costs: [...bid.costs],
-			rebate_splits: [...bid.rebate]
+			rebate_splits: [...bid.rebate],
+			packages: (bid.packages ?? []).map((p) => defined({ package: p.package, total: p.total, notes: p.notes }))
 		},
-		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek }) => ({
+		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, inPackage }) => ({
 			item_kind: target.kind,
 			item_key: target.id,
 			total_minor: total.minor,
 			excluded,
-			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek })
+			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek }),
+			in_package: inPackage === true
 		}))
 	};
 }
@@ -333,13 +396,16 @@ export function bidFromRows(row: BidRow, lines: readonly BidLineRow[], request: 
 				target: { kind: line.item_kind, id: line.item_key } as Target,
 				total: money(line.total_minor, row.currency),
 				excluded: line.excluded,
-				...(line.detail as Partial<BidLine>)
+				...(line.detail as Partial<BidLine>),
+				...(line.in_package ? { inPackage: true } : {})
 			})
 		),
 		costs: row.non_shot_costs as VendorBid['costs'],
 		discount: header.discount ?? null,
 		tax: header.tax ?? null,
-		rebate: row.rebate_splits as VendorBid['rebate']
+		rebate: row.rebate_splits as VendorBid['rebate'],
+		...(Array.isArray(row.packages) && row.packages.length > 0 ? { packages: row.packages as VendorBid['packages'] } : {}),
+		...(Array.isArray(header.declined) && header.declined.length > 0 ? { declined: [...header.declined] } : {})
 	};
 }
 

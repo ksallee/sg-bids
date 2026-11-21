@@ -22,6 +22,19 @@ describe('parseWritten', () => {
 		expect(parseWritten(WRITTEN)).toEqual(WRITTEN);
 	});
 
+	it('takes the Bid of a package and the general Bid, with their lines', () => {
+		const packaged = {
+			...WRITTEN,
+			bids: [
+				{ key: `${KEY}/p:seq%3ASQ%20A`, id: 5002, created: true },
+				{ key: `${KEY}/general`, id: 5003, created: true }
+			],
+			lines: [{ key: `${KEY}/p:seq%3ASQ%20A/shot:shot-101`, id: 6002, created: true }]
+		};
+		expect(parseWritten(packaged)).toEqual(packaged);
+		expect(parseWritten({ ...WRITTEN, bids: [{ key: `${KEY}/p:seq:raw space`, id: 1, created: true }] })).toBeNull();
+	});
+
 	it('refuses a foreign key, a bad id, a field name that is not one, an empty Group list', () => {
 		expect(parseWritten({ ...WRITTEN, bids: [{ key: 'other/1', id: 1, created: true }] })).toBeNull();
 		expect(parseWritten({ ...WRITTEN, lines: [{ key: KEY, id: -1, created: true }] })).toBeNull();

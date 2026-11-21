@@ -9,7 +9,8 @@
 
 import { isCurrency } from './currencies';
 import { isDay } from './header';
-import type { EntityRef, InvitedVendor, RequestAsset, RequestHeader, RequestShot } from './model';
+import type { EntityRef, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot } from './model';
+import { MAX_PACKAGE_NAME } from './packages';
 import { validateVendor } from './invitations';
 import { isWebLink } from './safe-href';
 
@@ -77,14 +78,23 @@ function source(value: unknown): { source?: 'breakdown' } | null {
 	return value === 'breakdown' ? { source: 'breakdown' } : null;
 }
 
+const isKey = (value: unknown): value is string => isText(value) && value.length > 0 && value.length <= 200;
+
+/** Absent, or the id of the row's package. Null for anything else. */
+function inPackage(value: unknown): { package?: Id } | null {
+	if (value === undefined) return {};
+	return isKey(value) ? { package: value } : null;
+}
+
 function parseShot(value: unknown): RequestShot | null {
 	if (!isObject(value) || !isText(value.id) || value.id === '' || !isText(value.code)) return null;
 	const text = texts(value, SHOT_TEXT);
 	const fpt = ref(value.fpt, 'Shot');
 	const from = source(value.source);
-	if (!text || fpt === null || from === null || typeof value.omitted !== 'boolean') return null;
+	const pkg = inPackage(value.package);
+	if (!text || fpt === null || from === null || pkg === null || typeof value.omitted !== 'boolean') return null;
 	if (!Array.isArray(value.assetIds) || !value.assetIds.every(isText)) return null;
-	const out: Json = { id: value.id, code: value.code, ...from, ...text, omitted: value.omitted, assetIds: [...value.assetIds] };
+	const out: Json = { id: value.id, code: value.code, ...from, ...text, omitted: value.omitted, assetIds: [...value.assetIds], ...pkg };
 	if (fpt) out.fpt = fpt;
 	for (const name of ['frames', 'cutCount'] as const) {
 		if (value[name] === undefined) continue;
@@ -99,9 +109,10 @@ function parseAsset(value: unknown): RequestAsset | null {
 	const text = texts(value, ASSET_TEXT);
 	const fpt = ref(value.fpt, 'Asset');
 	const from = source(value.source);
-	if (!text || fpt === null || from === null) return null;
+	const pkg = inPackage(value.package);
+	if (!text || fpt === null || from === null || pkg === null) return null;
 	if (value.omitted !== undefined && typeof value.omitted !== 'boolean') return null;
-	const out: Json = { id: value.id, name: value.name, ...from, ...text };
+	const out: Json = { id: value.id, name: value.name, ...from, ...text, ...pkg };
 	if (fpt) out.fpt = fpt;
 	if (value.omitted !== undefined) out.omitted = value.omitted;
 	return out as unknown as RequestAsset;
@@ -113,6 +124,35 @@ export interface SaveInput {
 	readonly code: string;
 	readonly header: RequestHeader;
 	readonly items: { readonly shots: RequestShot[]; readonly assets: RequestAsset[] };
+	/** The request's packages. Empty: none, every row without one. */
+	readonly packages: RequestPackage[];
+}
+
+/** Most packages a request holds. Far above a real one. */
+export const MAX_PACKAGES = 500;
+
+/** A request's packages: an id and a name each, one of each, every row in one of them. */
+function parsePackages(value: unknown, rows: readonly { package?: Id }[]): Parsed<RequestPackage[]> {
+	if (value === undefined) {
+		return rows.some((r) => r.package !== undefined) ? { ok: false, message: 'A row names a package the request does not have.' } : { ok: true, value: [] };
+	}
+	if (!Array.isArray(value) || value.length > MAX_PACKAGES) return { ok: false, message: 'The packages do not fit a request.' };
+	const ids = new Set<string>();
+	const names = new Set<string>();
+	const out: RequestPackage[] = [];
+	for (const p of value) {
+		if (!isObject(p) || !isKey(p.id) || !isText(p.name)) return { ok: false, message: 'A package needs an id and a name.' };
+		const name = p.name.trim();
+		if (name === '' || name.length > MAX_PACKAGE_NAME) return { ok: false, message: `A package name is 1 to ${MAX_PACKAGE_NAME} characters.` };
+		if (ids.has(p.id)) return { ok: false, message: 'Two packages have one id.' };
+		if (names.has(name.toLowerCase())) return { ok: false, message: `Two packages are named ${name}.` };
+		ids.add(p.id);
+		names.add(name.toLowerCase());
+		out.push({ id: p.id, name });
+	}
+	if (out.length > 0 && rows.some((r) => r.package === undefined || !ids.has(r.package))) return { ok: false, message: 'Every row sits in one of the request’s packages.' };
+	if (out.length === 0 && rows.some((r) => r.package !== undefined)) return { ok: false, message: 'A row names a package the request does not have.' };
+	return { ok: true, value: out };
 }
 
 export function parseSave(body: unknown): Parsed<SaveInput> {
@@ -127,7 +167,9 @@ export function parseSave(body: unknown): Parsed<SaveInput> {
 	const shots = items.shots.map(parseShot);
 	const assets = items.assets.map(parseAsset);
 	if (shots.includes(null) || assets.includes(null)) return { ok: false, message: 'An item does not fit a request.' };
-	return { ok: true, value: { id, code: body.code.trim(), header, items: { shots: shots as RequestShot[], assets: assets as RequestAsset[] } } };
+	const packages = parsePackages(body.packages, [...(shots as RequestShot[]), ...(assets as RequestAsset[])]);
+	if (!packages.ok) return packages;
+	return { ok: true, value: { id, code: body.code.trim(), header, items: { shots: shots as RequestShot[], assets: assets as RequestAsset[] }, packages: packages.value } };
 }
 
 /** A breakdown row and the Flow PT row it gets. */
@@ -161,14 +203,40 @@ export function parseLinks(body: unknown): Parsed<{ requestId: string; links: It
 	return { ok: true, value: { requestId, links } };
 }
 
+/** Absent or null: every package. Else one package id each, at least one. */
+function packageList(value: unknown): Parsed<Id[] | null> {
+	if (value === undefined || value === null) return { ok: true, value: null };
+	if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PACKAGES || !value.every(isKey)) return { ok: false, message: 'Pick at least one package, or every package.' };
+	if (new Set(value).size !== value.length) return { ok: false, message: 'A package is named twice.' };
+	return { ok: true, value: [...value] };
+}
+
 export function parseVendor(body: unknown): Parsed<Omit<InvitedVendor, 'id'>> {
 	if (!isObject(body) || !isText(body.name) || !isText(body.email)) return { ok: false, message: 'Name the vendor and its email.' };
 	const errors = validateVendor({ name: body.name, email: body.email });
 	if (errors.name || errors.email) return { ok: false, message: errors.name ?? errors.email ?? '' };
 	const group = body.groupId === undefined || body.groupId === null ? undefined : body.groupId;
 	if (group !== undefined && !(typeof group === 'number' && Number.isSafeInteger(group) && group > 0)) return { ok: false, message: 'That is not a Group id.' };
+	const packages = packageList(body.packages);
+	if (!packages.ok) return packages;
 	return {
 		ok: true,
-		value: { name: body.name.trim(), email: body.email.trim(), ...(group !== undefined ? { fpt: { type: 'Group', id: group } } : {}), ndaExecuted: false }
+		value: {
+			name: body.name.trim(),
+			email: body.email.trim(),
+			...(group !== undefined ? { fpt: { type: 'Group', id: group } } : {}),
+			ndaExecuted: false,
+			...(packages.value ? { packages: packages.value } : {})
+		}
 	};
+}
+
+/** A vendor's packages changed: the invitation, and the packages, or null for every package. */
+export function parseInvitationPackages(body: unknown): Parsed<{ invitationId: string; packages: Id[] | null }> {
+	if (!isObject(body)) return { ok: false, message: 'Name the invitation and its packages.' };
+	const invitationId = parseId(body.invitationId);
+	if (!invitationId) return { ok: false, message: 'That is not an invitation id.' };
+	const packages = packageList(body.packages);
+	if (!packages.ok) return packages;
+	return { ok: true, value: { invitationId, packages: packages.value } };
 }

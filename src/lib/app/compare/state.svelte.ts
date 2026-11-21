@@ -23,6 +23,7 @@ import {
 	picksToList,
 	setShares,
 	summarize,
+	wholePackages,
 	type Picks,
 	type Share
 } from '$lib/pure/scenario';
@@ -40,8 +41,9 @@ export class CompareState {
 	asked = $state<string[]>([]);
 	problem = $state<string | null>(null);
 
-	// The view.
+	// The view. Grouped by package when the request has packages, else by sequence (`load`).
 	by = $state<GroupBy>('sequence');
+	private grouped = false;
 	sort = $state<SortKey>('order');
 	dir = $state<SortDir>('asc');
 	text = $state('');
@@ -116,6 +118,10 @@ export class CompareState {
 	async load(): Promise<void> {
 		const data = await compareApi.load(this.projectId, this.requestId, this.asked);
 		this.data = data;
+		if (!this.grouped) {
+			this.grouped = true;
+			if ((data.request.packages?.length ?? 0) > 0 || data.bids.some((b) => (b.packages?.length ?? 0) > 0)) this.by = 'package';
+		}
 		this.scenarios = [...data.scenarios];
 		if (this.activeId === null) {
 			const start = data.scenarios.find((s) => s.chosen) ?? data.scenarios[0];
@@ -196,7 +202,21 @@ export class CompareState {
 		this.scenarios = scenarios;
 	}
 
-	private change(picks: Picks): void {
+	/**
+	 * Take the new picks. A package priced as one figure that was given whole and is no longer, by a
+	 * change to another of its rows, is said: it went whole off that vendor.
+	 */
+	private change(picks: Picks, untouched: { bidId: string; package: string } | null = null): void {
+		const grid = this.grid;
+		if (grid) {
+			const after = new Set(wholePackages(grid, picks).map((w) => `${w.bidId}|${w.package}`));
+			const lost = wholePackages(grid, this.picks).filter((w) => !after.has(`${w.bidId}|${w.package}`) && !(untouched && untouched.bidId === w.bidId && untouched.package === w.package));
+			if (lost.length > 0) {
+				const column = grid.columns.findIndex((c) => c.bidId === lost[0].bidId);
+				const name = grid.packages.find((p) => p.id === lost[0].package)?.name ?? 'The package';
+				this.note = `${this.names[column] ?? 'That vendor'} priced ${name} as one figure, so all of ${name} came off it. A package priced as one figure is awarded whole or not at all.`;
+			}
+		}
 		this.picks = picks;
 		this.schedule();
 	}
@@ -205,7 +225,11 @@ export class CompareState {
 		const grid = this.grid;
 		if (!grid) return;
 		if (!this.activeId) await this.create();
-		this.change(pickCell(grid, this.picks, row, column));
+		const cell = row.cells[column];
+		// A click on a row in the package price takes the whole package on or off: no note for that.
+		const own = cell?.kind === 'package' ? { bidId: grid.columns[column].bidId, package: cell.package } : null;
+		this.note = null;
+		this.change(pickCell(grid, this.picks, row, column), own);
 	}
 
 	split(row: Row, shares: readonly Share[]): string | null {
@@ -218,7 +242,8 @@ export class CompareState {
 	}
 
 	clear(row: Row): void {
-		this.change(clearRow(this.picks, row));
+		const grid = this.grid;
+		this.change(grid ? clearRow(this.picks, row, grid) : clearRow(this.picks, row));
 	}
 
 	private async bulk(work: (grid: Grid, picks: Picks) => { picks: Picks; skipped: number }, what: string): Promise<void> {

@@ -20,9 +20,9 @@ import {
 	attachmentOf,
 	awardedTotals,
 	awardedTotalsQuery,
-	bidKey,
+	bidRowKeys,
 	chunk,
-	lineKey,
+
 	mergeWritten,
 	planAward,
 	planUndo,
@@ -100,8 +100,9 @@ function keyOf(row: EntityRow, field: string): string {
 
 /** The Bids and Bid Lines already written for these bids, found by key, and each item's Groups. */
 export async function readExisting(api: FptApi, site: FptSite, request: BidRequest, bids: readonly VendorBid[]): Promise<Existing> {
-	const bidKeys = bids.map((b) => bidKey(request.id, b.vendorId, b.round));
-	const lineKeys = bids.flatMap((b) => b.lines.map((l) => lineKey(bidKey(request.id, b.vendorId, b.round), l.target)));
+	const keys = bids.map((b) => bidRowKeys(request, b));
+	const bidKeys = keys.flatMap((k) => k.bids);
+	const lineKeys = keys.flatMap((k) => k.lines);
 	const bidRows = await byValues(api, site.bidType, site.projectId, BID.key, bidKeys, [BID.key]);
 	const lineRows = await byValues(api, site.lineType, site.projectId, LINE.key, lineKeys, [LINE.key]);
 	return {

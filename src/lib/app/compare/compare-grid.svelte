@@ -7,6 +7,10 @@
 	A cell is a price in the base currency over the vendor's own, the lowest marked, a thin bar for how
 	far it sits over the lowest. Excluded is hatched; not bid is an empty dashed box; a price waiting
 	for a rate shows in its currency and says so. A pick in the scenario is outlined in the primary.
+	A row of a package the vendor priced as one figure says "In package price", never a zero or a
+	gap; a click on it picks, or takes off, the whole package. Grouped by package, each group's row
+	compares the package as a unit: each vendor's one figure, or its row prices summed, the lowest
+	marked (`$lib/pure/compare`, `PackageView`).
 
 	Keyboard: the grid is one tab stop. Arrows move, Home and End go to the row's ends, Page Up and
 	Page Down move a screen. Space picks the vendor of the cell. Enter opens the row's detail, or folds
@@ -16,11 +20,12 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Check from '@lucide/svelte/icons/check';
+	import Package from '@lucide/svelte/icons/package';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
 	import Info from '@lucide/svelte/icons/info';
 	import UserRoundCheck from '@lucide/svelte/icons/user-round-check';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
-	import type { Cell, Row } from '$lib/pure/compare';
+	import type { Cell, PackageCell, Row } from '$lib/pure/compare';
 	import { formatAmount, formatDay, formatSpread } from '$lib/pure/display';
 	import { offsetsOf, scrollToShow, visibleRange, type DisplayRow, type Subtotal } from '$lib/pure/grid-view';
 	import type { Money } from '$lib/pure/money';
@@ -149,6 +154,8 @@
 		const picked = share ? `, picked${share !== '100' ? ` at ${share}%` : ''}` : '';
 		if (cell.kind === 'excluded') return `${row.label}, ${vendor}: excluded`;
 		if (cell.kind === 'missing') return `${row.label}, ${vendor}: not bid`;
+		if (cell.kind === 'package') return `${row.label}, ${vendor}: in the package price${picked}`;
+		if (cell.kind === 'declined') return `${row.label}, ${vendor}: not bidding on this package`;
 		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}, needs a rate${picked}`;
 		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
 	}
@@ -168,6 +175,17 @@
 		if (sub.priced === 0) return { main: '', warn: false };
 		if (sub.base) return { main: money(sub.base), warn: false };
 		return { main: money(sub.bid), warn: true };
+	}
+
+	/** A package as a unit: the figure or the rows summed, in the base currency once known. */
+	function unitText(cell: PackageCell): { main: string; warn: boolean; note: string } {
+		if (cell.kind === 'none') return { main: '', warn: false, note: 'Not bid' };
+		if (cell.kind === 'declined') return { main: '', warn: false, note: 'Not bidding' };
+		const main = cell.amount.base ? money(cell.amount.base) : money(cell.amount.bid);
+		const warn = cell.amount.base === null;
+		if (cell.kind === 'package') return { main, warn, note: 'One figure' };
+		if (!cell.complete) return { main, warn, note: `${cell.priced} of ${cell.priced + cell.excluded + cell.missing} priced` };
+		return { main, warn, note: 'Rows summed' };
 	}
 </script>
 
@@ -316,19 +334,45 @@
 						</DropdownMenu.Root>
 					</div>
 					{#each g.subtotals as sub, c (c)}
-						{@const text = subtotalText(sub)}
-						<div
-							id={cellId(r, c)}
-							class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
-							role="gridcell"
-						>
-							<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
-							{#if sub.excluded || sub.missing}
-								<span class="text-muted-foreground text-[11px] tabular-nums">
-									{[sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
+						{@const unit = g.unit?.cells[c]}
+						{#if unit}
+							{@const text = unitText(unit)}
+							{@const lowest = (unit.kind === 'package' || unit.kind === 'rows') && unit.lowest}
+							<div
+								id={cellId(r, c)}
+								class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
+								role="gridcell"
+								aria-label={`${g.label}, ${s.names[c]}: ${text.main || 'not bid'}${text.note ? `, ${text.note.toLowerCase()}` : ''}${lowest ? ', lowest' : ''}`}
+								data-slot="package-unit"
+								data-kind={unit.kind}
+								data-lowest={lowest ? '' : undefined}
+							>
+								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
+								<span class="text-muted-foreground flex items-center gap-1.5 text-[11px] tabular-nums">
+									{#if unit.kind === 'package'}<Package class="size-3" aria-hidden="true" />{/if}
+									<span>{text.note}</span>
+									{#if lowest}
+										<span class="text-success inline-flex items-center gap-1 font-medium"><span class="bg-success size-1.5 rounded-full"></span>Lowest</span>
+									{:else if (unit.kind === 'package' || unit.kind === 'rows') && unit.spreadBp !== null}
+										<span>{formatSpread(unit.spreadBp)}</span>
+									{/if}
 								</span>
-							{/if}
-						</div>
+							</div>
+						{:else}
+							{@const text = subtotalText(sub)}
+							<div
+								id={cellId(r, c)}
+								class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
+								role="gridcell"
+							>
+								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
+								{#if sub.excluded || sub.missing || sub.inPackage || sub.declined}
+									<span class="text-muted-foreground text-[11px] tabular-nums">
+										{[sub.inPackage ? `${sub.inPackage} in a package price` : '', sub.declined ? `${sub.declined} not bidding` : '', sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
+									</span>
+								{/if}
+							</div>
+						{/if}
 					{/each}
 				</div>
 			{:else}
@@ -368,7 +412,7 @@
 					{#each row.cells as cell, c (c)}
 						{@const share = shares.get(c)}
 						{@const active = cursor.r === r && cursor.c === c}
-						{@const clickable = cell.kind === 'price' && !row.omitted}
+						{@const clickable = (cell.kind === 'price' || cell.kind === 'package') && !row.omitted}
 						<!-- The grid takes the keys (Space picks); a click is the pointer's way to the same pick. -->
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
@@ -420,6 +464,17 @@
 										<Check class="size-2.5" />{share !== '100' ? `${share}%` : ''}
 									</span>
 								{/if}
+							{:else if cell.kind === 'package'}
+								<span class="text-muted-foreground flex items-center gap-1.5 text-xs" title="This vendor priced the whole package as one figure. It is awarded whole or not at all.">
+									<Package class="size-3.5" aria-hidden="true" />In package price
+								</span>
+								{#if share !== undefined}
+									<span class="bg-primary text-primary-foreground absolute top-1 left-1.5 inline-flex h-4 items-center gap-0.5 rounded px-1 text-[10px] font-medium">
+										<Check class="size-2.5" />
+									</span>
+								{/if}
+							{:else if cell.kind === 'declined'}
+								<span class="text-muted-foreground text-xs" title="This vendor is not bidding on this package. It cannot be awarded to it.">Not bidding</span>
 							{:else if cell.kind === 'excluded'}
 								<span class="bg-card/80 text-muted-foreground rounded px-1 text-xs">Excluded</span>
 							{:else}

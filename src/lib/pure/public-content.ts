@@ -70,8 +70,9 @@ export const HOME = {
 			a: 'A web app for the bid round of a VFX show. Production sends a request built from Flow PT, vendors bid through a link, and production compares the bids and awards them to Flow PT.',
 			list: [
 				'Bid requests from your Shots and Assets, or from a pasted breakdown, frozen when issued. A change is a new round.',
+				'Packages: named groups of rows, one per sequence to start with. Invite a vendor to every package or to some.',
 				'One link per vendor. The vendor needs no Flow PT account.',
-				'Bids shot by shot, with costs, discount, tax and rebate splits, in versions.',
+				'Bids shot by shot or one figure per package, with costs, discount, tax and rebate splits, in versions.',
 				'A comparison in one currency, award scenarios, and CSV exports.',
 				'The award written to Flow PT after a preview of every write, with an undo.'
 			]
@@ -120,25 +121,25 @@ export const HOW = {
 		items: [
 			{
 				title: 'Build a request',
-				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. A draft shows the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit and breakdown rows stay in the request. Issuing freezes what you see.',
+				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. A draft shows the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit, the package and breakdown rows stay in the request. Each row sits in a package, its sequence’s to start with. Rename, add, duplicate or delete packages, and move rows between them. Issuing freezes what you see.',
 				app: 'The draft, and the frozen copy once it is issued.',
 				fpt: { kind: 'write', text: 'Reads Shots, Assets and their fields. Writes a field of a Shot or Asset when you edit it in a draft, with Undo. Creates a field only when you ask, from the mapping.' }
 			},
 			{
 				title: 'Invite vendors',
-				line: 'Each vendor gets a link. Name its Flow PT Group if it has one. The award uses it.',
+				line: 'Each vendor gets a link. Name its Flow PT Group if it has one. The award uses it. Invite it to every package or to some: it sees the rows of its packages and nothing else.',
 				app: 'The invitations. Only a hash of each link.',
 				fpt: { kind: 'read', text: 'Reads Groups, to pick one.' }
 			},
 			{
 				title: 'Vendors bid',
-				line: 'A vendor opens its link and bids in its own currency. It needs no Flow PT account.',
+				line: 'A vendor opens its link and bids in its own currency. It needs no Flow PT account. Per package it bids row by row, gives one figure for the whole package, or does not bid.',
 				app: 'Each bid, its lines, costs, rebates and versions.',
 				fpt: { kind: 'none', text: 'Nothing. Vendors never reach Flow PT through the app.' }
 			},
 			{
 				title: 'Compare',
-				line: 'See the bids shot by shot in one currency. Set a rate per bid. Build award scenarios and mark one as chosen.',
+				line: 'See the bids shot by shot in one currency, and package by package. Set a rate per bid. Build award scenarios and mark one as chosen. A package priced as one figure goes to its vendor whole or not at all.',
 				app: 'The rates and the scenarios.',
 				fpt: { kind: 'none', text: 'Nothing.' }
 			},
@@ -159,7 +160,8 @@ export const HOW = {
 			`A link lasts ${LINK_DAYS} days unless production sets another date. Production can revoke it, or send a new link that replaces it. The bid is kept.`,
 			'A vendor saves a draft, then submits it. It can withdraw a submitted bid or send a new version.',
 			'A vendor can discard a draft. A new version it discards leaves the last submitted one in place.',
-			'Prices can be pasted from a spreadsheet: a column of prices, or rows of code and price.'
+			'Prices can be pasted from a spreadsheet: a column of prices, or rows of code and price.',
+				'A vendor invited to some packages sees their rows alone. Per package it prices each row, gives one figure for the package, or marks it Not bidding.'
 		]
 	} satisfies Question,
 	written: {
@@ -168,8 +170,8 @@ export const HOW = {
 		a: 'The award, from your own Flow PT session, after a preview of every write, and the fields an Admin creates for it from the publish page. While you build a request, an edit to a row in a column fed by Flow PT, and a field you create from the mapping.',
 		list: [
 			'While you build a request, the field of a Shot or Asset behind a column marked Live in Flow PT, when you edit it. Several selected rows change together after a confirm. Each edit offers Undo, which leaves a value someone changed in Flow PT since.',
-			'One Bid per awarded vendor. With the switch "every line of every bid" on, one Bid per vendor that bid.',
-			'One Bid Line per awarded Shot or Asset. With the switch on, one per line of every bid.',
+			'One Bid per package each awarded vendor bid on, named with the package, and one General costs Bid with its non-shot costs, discount, tax and rebate. A vendor’s Bids add up to its bid. A request without packages keeps one Bid per vendor. With the switch "every line of every bid" on, the Bids of every vendor that bid.',
+			'One Bid Line per awarded Shot or Asset, under its package’s Bid. A package priced as one figure has its figure on its Bid, and its Bid Lines carry no amount. With the switch on, one per line of every bid.',
 			'The vendor’s Group, added to the vendor groups field (sg_vendor_groups) of each Shot and Asset it wins.',
 			'For rows from a breakdown, the Shots and Assets you choose to create: the code, the description and the mapped fields that hold a value. Or none, and their Bid Lines carry no Shot or Asset.',
 			'While you build a request, a field on Shot or Asset, when you create one from the mapping.'

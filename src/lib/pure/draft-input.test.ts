@@ -113,4 +113,17 @@ describe('readDraft', () => {
 		const line = { target: { kind: 'shot', id: 'a' }, total: usd(1), excluded: false };
 		expect(readDraft({ ...good(), lines: Array.from({ length: 10_001 }, () => line) }).ok).toBe(false);
 	});
+
+	it('takes a package figure and the lines it covers, and refuses a bad one', () => {
+		const covered = { target: { kind: 'shot', id: 'a' }, total: usd(0), excluded: false, inPackage: true };
+		const result = readDraft({ ...good(), lines: [covered], packages: [{ package: 'p1', total: usd(5000), notes: 'all in', extra: 1 }] });
+		expect(result.ok && result.draft.packages).toEqual([{ package: 'p1', total: usd(5000), notes: 'all in' }]);
+		expect(result.ok && result.draft.lines[0].inPackage).toBe(true);
+		expect(readDraft({ ...good(), packages: [{ package: 'p1', total: { minor: -1, currency: 'USD' } }] }).ok).toBe(false);
+		expect(readDraft({ ...good(), packages: [{ total: usd(1) }] }).ok).toBe(false);
+		expect(readDraft({ ...good(), lines: [{ ...covered, inPackage: 'yes' }] }).ok).toBe(false);
+		const declined = readDraft({ ...good(), declined: ['p2'] });
+		expect(declined.ok && declined.draft.declined).toEqual(['p2']);
+		expect(readDraft({ ...good(), declined: [3] }).ok).toBe(false);
+	});
 });

@@ -7,10 +7,12 @@
  * and the shares add up to 100 at most (`bid-limits.ts`).
  *
  * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store. Whether
- * the total is above zero is checked at submit (`bid-limits.submitProblems`).
+ * the total is above zero is checked at submit (`bid-limits.submitProblems`). Whether the package
+ * figures hold together, and stay within the vendor's packages, is `packages.packageProblems`'s,
+ * in the store.
  */
 
-import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PaymentMilestone, RebateSplit } from './model';
+import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PackagePrice, PaymentMilestone, RebateSplit } from './model';
 import type { Money } from './money';
 import { MAX_DISCOUNT_PERCENT, MAX_TAX_PERCENT } from './bid-limits';
 import { isCurrency } from './currencies';
@@ -102,9 +104,20 @@ function line(value: unknown, where: string): BidDraft['lines'][number] {
 		methodology: optionalText(o.methodology, `${where}.methodology`),
 		assumptions: optionalText(o.assumptions, `${where}.assumptions`),
 		elementsNeeded: optionalText(o.elementsNeeded, `${where}.elementsNeeded`),
-		startWeek: optionalText(o.startWeek, `${where}.startWeek`)
+		startWeek: optionalText(o.startWeek, `${where}.startWeek`),
+		inPackage: o.inPackage === undefined || o.inPackage === false ? undefined : bool(o.inPackage, `${where}.inPackage`)
 	});
 	return result;
+}
+
+/** A package priced as one figure: the package's id, the figure, a note. */
+function packagePrice(value: unknown, where: string): PackagePrice {
+	const o = object(value, where);
+	return defined({
+		package: text(o.package, `${where}.package`, 200),
+		total: amount(o.total, `${where}.total`),
+		notes: optionalText(o.notes, `${where}.notes`)
+	});
 }
 
 function adjustment(value: unknown, where: string, max: string): Adjustment | null {
@@ -162,7 +175,9 @@ export function readDraft(value: unknown): DraftInput {
 			}),
 			discount: adjustment(o.discount, 'discount', MAX_DISCOUNT_PERCENT),
 			tax: adjustment(o.tax, 'tax', MAX_TAX_PERCENT),
-			rebate: splits(o.rebate)
+			rebate: splits(o.rebate),
+			packages: o.packages === undefined ? undefined : list(o.packages, 'packages', 500).map((p, i) => packagePrice(p, `packages[${i}]`)),
+			declined: o.declined === undefined ? undefined : list(o.declined, 'declined', 500).map((d, i) => text(d, `declined[${i}]`, 200))
 		});
 		return { ok: true, draft };
 	} catch (error) {

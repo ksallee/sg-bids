@@ -170,3 +170,31 @@ describe('toBase', () => {
 		expect(toBase(money(5, 'USD'), bid({ currency: 'USD' }), 'USD')).toEqual(money(5, 'USD'));
 	});
 });
+
+describe('a package priced as one figure', () => {
+	const usd = (minor: number) => money(minor, 'USD');
+
+	it('counts the figure once with the lines; its rows add nothing', () => {
+		const totals = bidTotals(
+			bid({
+				currency: 'USD',
+				lines: [line('l1', onShot('sh010'), usd(0), { inPackage: true }), line('l2', onShot('sh020'), usd(0), { inPackage: true }), line('l3', onShot('sh030'), usd(400))],
+				packages: [{ package: 'p1', total: usd(1_000) }],
+				discount: { kind: 'percent', percent: '10' }
+			}),
+			'USD'
+		);
+		expect(totals.lines.bid).toEqual(usd(1_400));
+		expect(totals.discount.bid).toEqual(usd(140));
+		expect(totals.grand.bid).toEqual(usd(1_260));
+	});
+
+	it('refuses a figure in another currency', () => {
+		expect(() => bidTotals(bid({ currency: 'USD', packages: [{ package: 'p1', total: money(5, 'EUR') }] }), 'USD')).toThrow(/package p1/);
+	});
+
+	it('refuses a line in a package price that carries a price, or is excluded', () => {
+		expect(() => bidTotals(bid({ currency: 'USD', lines: [line('l1', onShot('sh010'), usd(5), { inPackage: true })] }), 'USD')).toThrow(/l1 is in a package price/);
+		expect(() => bidTotals(bid({ currency: 'USD', lines: [line('l1', onShot('sh010'), usd(0), { inPackage: true, excluded: true })] }), 'USD')).toThrow(/l1 is in a package price/);
+	});
+});

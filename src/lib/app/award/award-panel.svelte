@@ -120,7 +120,7 @@
 			<span class="text-muted-foreground">Bids in Flow PT:</span>
 			{#each links as link (link.id)}
 				<a class="hover:text-foreground text-info inline-flex items-center gap-1 underline-offset-4 hover:underline" href={link.url} target="_blank" rel="noreferrer">
-					{link.name}<ExternalLink class="size-3" aria-hidden="true" />
+					{link.name}{link.label ? `, ${link.label}` : ""}<ExternalLink class="size-3" aria-hidden="true" />
 				</a>
 			{/each}
 		</div>

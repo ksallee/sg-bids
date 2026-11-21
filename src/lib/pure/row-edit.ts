@@ -103,13 +103,16 @@ interface Item {
 	readonly episode?: string;
 	readonly sequence?: string;
 	readonly omitted?: boolean;
+	readonly package?: Id;
 }
 
-/** What the request shows in a cell, a blank as null. */
-export function itemValue(item: Item, key: ColumnKey): CellValue {
+/** What the request shows in a cell, a blank as null. `packages`: package names by id, for the Package column. */
+export function itemValue(item: Item, key: ColumnKey, packages: ReadonlyMap<Id, string> = new Map()): CellValue {
 	switch (key) {
 		case 'code':
 			return item.code ?? item.name ?? null;
+		case 'package':
+			return item.package === undefined ? null : (packages.get(item.package) ?? null);
 		case 'sequence':
 			return [item.episode, item.sequence].filter(Boolean).join(' / ') || null;
 		case 'frames':
@@ -165,7 +168,8 @@ export function applyLocal<T extends Item>(items: readonly T[], writes: readonly
 		if (!mine) return item;
 		const next = { ...item } as Record<string, unknown>;
 		for (const w of mine) {
-			if (w.key === 'code' || w.key === 'sequence') continue;
+			// The code and the Sequence are Flow PT's; a package moves by `packages.moveRows`.
+			if (w.key === 'code' || w.key === 'sequence' || w.key === 'package') continue;
 			if (w.value === null) delete next[w.key];
 			else next[w.key] = w.value;
 		}

@@ -6,7 +6,8 @@
 import type { FieldSchema } from 'sg-widgets-core';
 import { DIFFICULTY_TIERS } from './field-map';
 import { headerForm, toHeader, type HeaderForm, type ProjectPick } from './header';
-import type { BidRequest, Id, RequestAsset, RequestHeader, RequestShot } from './model';
+import type { BidRequest, Id, RequestAsset, RequestHeader, RequestPackage, RequestShot } from './model';
+import { withDefaults } from './packages';
 
 export interface BuilderState {
 	readonly id: Id;
@@ -14,6 +15,8 @@ export interface BuilderState {
 	readonly form: HeaderForm;
 	readonly shots: readonly RequestShot[];
 	readonly assets: readonly RequestAsset[];
+	/** The request's packages. Each row names one; a row with none goes to its default (`packages.ts`). */
+	readonly packages?: readonly RequestPackage[];
 }
 
 /** The tiers offered when the mapped difficulty field brings no list of its own. */
@@ -24,19 +27,24 @@ export function tiersFor(field: FieldSchema | undefined): readonly string[] {
 	return field?.dataType === 'list' && field.validValues && field.validValues.length > 0 ? field.validValues : DEFAULT_TIERS;
 }
 
-/** The request the builder holds now. A shot links only assets in the request; an asset counts the shots in it that use it. */
+/**
+ * The request the builder holds now. A shot links only assets in the request; an asset counts the
+ * shots in it that use it. Every row sits in a package: one with none goes to its default.
+ */
 export function buildRequest(state: BuilderState): BidRequest {
 	const header: RequestHeader = state.project ? toHeader(state.form, state.project) : { ...toHeader(state.form, { id: 0, name: '' }), projectRef: undefined };
-	const assetIds = new Set(state.assets.map((a) => a.id));
-	const shots = state.shots.map((s) => ({ ...s, assetIds: s.assetIds.filter((id) => assetIds.has(id)) }));
+	const packed = withDefaults({ shots: state.shots, assets: state.assets, packages: state.packages ?? [] });
+	const assetIds = new Set(packed.assets.map((a) => a.id));
+	const shots = packed.shots.map((s) => ({ ...s, assetIds: s.assetIds.filter((id) => assetIds.has(id)) }));
 	const uses = new Map<Id, number>();
 	for (const s of shots) if (!s.omitted) for (const id of s.assetIds) uses.set(id, (uses.get(id) ?? 0) + 1);
 	return {
 		id: state.id,
 		header: JSON.parse(JSON.stringify(header)) as RequestHeader,
 		shots,
-		assets: state.assets.map((a) => ({ ...a, timesUsed: uses.get(a.id) ?? 0 })),
-		vendors: []
+		assets: packed.assets.map((a) => ({ ...a, timesUsed: uses.get(a.id) ?? 0 })),
+		vendors: [],
+		packages: packed.packages
 	};
 }
 
@@ -48,7 +56,8 @@ export function restoreState(request: BidRequest): BuilderState {
 		project: ref ? { id: ref.id, name: request.header.project } : null,
 		form: headerForm(request.header),
 		shots: request.shots,
-		assets: request.assets
+		assets: request.assets,
+		packages: request.packages ?? []
 	};
 }
 

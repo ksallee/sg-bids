@@ -9,7 +9,8 @@
  * - `labour`: each live line's total less its compute, plus the non-shot costs marked labour. The
  *   discount is not taken off. A line's labour is known only when it has department detail. When
  *   a live line has none, the split's base and rebate are null and the result says which lines.
- *   The total rebate and the total after rebate are then null too: an unknown is not a zero.
+ *   The total rebate and the total after rebate are then null too: an unknown is not a zero. A
+ *   package priced as one figure carries no detail, so its labour is unknown the same way.
  *
  * Splits may cover less than 100% of the work. The rest earns nothing. Over 100% is an error.
  */
@@ -38,7 +39,10 @@ export interface RebateEstimate {
 	readonly coveredPercent: Percent;
 	/** A split has a labour base and a live line has no department detail. */
 	readonly labourDetailMissing: boolean;
-	/** The live lines with no department detail. Empty unless a split has a labour base. */
+	/**
+	 * The live lines with no department detail, and each package figure as `package:<id>`. Empty
+	 * unless a split has a labour base.
+	 */
 	readonly linesWithoutDetail: readonly Id[];
 }
 
@@ -71,9 +75,12 @@ export function estimateRebate(bid: VendorBid, baseCurrency: string): RebateEsti
 	const beforeTax = subtract(totals.subtotal.bid, totals.discount.bid);
 	const dual = (amount: Money): Dual => ({ bid: amount, base: toBase(amount, bid, baseCurrency) });
 
-	const live = bid.lines.filter((line) => !line.excluded);
+	// A row in a package price has its labour in the figure, which carries no department detail.
+	const live = bid.lines.filter((line) => !line.excluded && !line.inPackage);
 	const hasLabourSplit = bid.rebate.some((split) => split.base.kind === 'labour');
-	const withoutDetail = hasLabourSplit ? live.filter((line) => !line.departments?.length).map((line) => line.id) : [];
+	const withoutDetail = hasLabourSplit
+		? [...live.filter((line) => !line.departments?.length).map((line) => line.id), ...(bid.packages ?? []).map((p) => `package:${p.package}`)]
+		: [];
 	const labour =
 		withoutDetail.length > 0
 			? null

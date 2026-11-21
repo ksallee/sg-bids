@@ -56,8 +56,8 @@
 	} = $props();
 
 	const money = (amount: Money) => format(amount, locale);
-	const all = $derived(result.counts.priced + result.counts.excluded + result.counts.open);
-	const done = $derived(all === 0 ? 0 : Math.round(((result.counts.priced + result.counts.excluded) / all) * 100));
+	const all = $derived(result.counts.priced + result.counts.excluded + result.counts.open + result.counts.packaged);
+	const done = $derived(all === 0 ? 0 : Math.round(((result.counts.priced + result.counts.excluded + result.counts.packaged) / all) * 100));
 	const rows = $derived([
 		{ label: 'Shots and assets', amount: totals.totals.lines.bid },
 		{ label: 'Other costs', amount: totals.totals.costs.bid },
@@ -97,7 +97,7 @@
 			<div class="bg-primary h-full rounded-full transition-[width] motion-reduce:transition-none" style:width={`${done}%`}></div>
 		</div>
 		<p class="text-muted-foreground text-xs">
-			{result.counts.priced} of {all} priced{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
+			{result.counts.priced + result.counts.packaged} of {all} priced{#if result.counts.packaged > 0}, {result.counts.packaged} in a package price{/if}{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
 		</p>
 	</div>
 

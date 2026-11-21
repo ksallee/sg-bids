@@ -3,7 +3,8 @@
 	Flow PT, picked from the site's Groups with the registry's EntityPicker (the award writes it to the
 	Shot later). A problem sits under its field and names it; an invite that does not pass focuses
 	the first field to fix. Checks in `$lib/pure/invitations`. The new link goes to the page, which
-	shows it once.
+	shows it once. A request with packages offers them: every package by default, or some
+	(`packages-dialog.svelte`).
 -->
 <script lang="ts">
 	import { tick } from 'svelte';
@@ -17,13 +18,32 @@
 	import { api } from '$lib/api';
 	import { liveContext } from '$lib/live';
 	import { VENDOR_REQUIRED, validateVendor } from '$lib/pure/invitations';
+	import type { Id, RequestPackage } from '$lib/pure/model';
+	import type { PackageStats } from '$lib/pure/packages';
+	import Package from '@lucide/svelte/icons/package';
+	import PackagesDialog from './packages-dialog.svelte';
 
 	let {
 		projectId,
 		requestId,
 		onInvited,
-		primary = true
-	}: { projectId: number; requestId: string; onInvited: (name: string, token: string) => void; /** Invite is the page's primary action. */ primary?: boolean } = $props();
+		primary = true,
+		packages = [],
+		stats = new Map()
+	}: {
+		projectId: number;
+		requestId: string;
+		onInvited: (name: string, token: string) => void;
+		/** Invite is the page's primary action. */
+		primary?: boolean;
+		/** The request's packages. Empty: one package, nothing to choose. */
+		packages?: readonly RequestPackage[];
+		stats?: ReadonlyMap<Id, PackageStats>;
+	} = $props();
+
+	let chosen = $state<Id[] | null>(null);
+	let choosing = $state(false);
+	const chosenLabel = $derived(chosen === null ? 'Every package' : chosen.length === 1 ? (packages.find((p) => p.id === chosen![0])?.name ?? '1 package') : `${chosen.length} of ${packages.length} packages`);
 
 	let name = $state('');
 	let email = $state('');
@@ -45,11 +65,12 @@
 		sending = true;
 		failure = null;
 		try {
-			const answer = await api.invite(projectId, requestId, { name: name.trim(), email: email.trim(), groupId: group?.id ?? null });
+			const answer = await api.invite(projectId, requestId, { name: name.trim(), email: email.trim(), groupId: group?.id ?? null, packages: packages.length > 0 ? chosen : null });
 			onInvited(answer.invitation.name, answer.token);
 			name = '';
 			email = '';
 			group = null;
+			chosen = null;
 			tried = false;
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
@@ -72,7 +93,7 @@
 		<p class="text-sm font-semibold">Invite a vendor</p>
 		<RequiredLegend />
 	</div>
-	<div class="grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_auto]">
+	<div class={packages.length > 0 ? 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_1fr_auto]' : 'grid items-start gap-3 md:grid-cols-[1fr_1fr_1fr_auto]'}>
 		<div class="flex flex-col gap-1.5">
 			<FieldLabel for="v-name" required>Vendor</FieldLabel>
 			<Input
@@ -113,6 +134,15 @@
 			/>
 			</div>
 		</div>
+		{#if packages.length > 0}
+			<div class="flex flex-col gap-1.5">
+				<FieldLabel for="v-packages">Packages</FieldLabel>
+				<Button id="v-packages" variant="outline" class="justify-start font-normal" onclick={() => (choosing = true)} data-slot="invite-packages">
+					<Package data-icon="inline-start" />
+					<span class="truncate">{chosenLabel}</span>
+				</Button>
+			</div>
+		{/if}
 		<div class="flex flex-col gap-1.5">
 			<span class="text-sm leading-5 md:invisible" aria-hidden="true">Invite</span>
 			<Button type="submit" variant={primary ? 'default' : 'outline'} disabled={sending}>{sending ? 'Inviting…' : 'Invite'}</Button>
@@ -120,3 +150,15 @@
 	</div>
 	{#if failure}<p class="text-destructive text-sm" role="alert">Not invited. {failure}</p>{/if}
 </form>
+
+<PackagesDialog
+	bind:open={choosing}
+	vendor={name.trim()}
+	{packages}
+	{stats}
+	value={chosen}
+	onSave={(next) => {
+		chosen = next;
+		choosing = false;
+	}}
+/>

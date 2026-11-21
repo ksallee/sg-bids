@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, type BidForm } from './bid-form';
+import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, setBidding, switchMode, typedFor, type BidForm } from './bid-form';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
 import { money } from './money';
 
@@ -46,7 +46,7 @@ describe('formToDraft', () => {
 			{ target: onShot('sh010'), total: money(1_250_050, 'USD'), excluded: false },
 			{ target: onAsset('hero'), total: money(0, 'USD'), excluded: false }
 		]);
-		expect(counts).toEqual({ priced: 2, excluded: 0, open: 2 });
+		expect(counts).toEqual({ priced: 2, excluded: 0, open: 2, packaged: 0, declined: 0 });
 	});
 
 	it('keeps an excluded item apart from a zero price, its typed price kept', () => {
@@ -60,7 +60,7 @@ describe('formToDraft', () => {
 			{ target: onShot('sh020'), total: money(0, 'USD'), excluded: true },
 			{ target: onShot('sh030'), total: money(90_000, 'USD'), excluded: true }
 		]);
-		expect(counts).toEqual({ priced: 0, excluded: 2, open: 2 });
+		expect(counts).toEqual({ priced: 0, excluded: 2, open: 2, packaged: 0, declined: 0 });
 	});
 
 	it('reads prices with a comma for a decimal in a comma locale', () => {
@@ -376,3 +376,126 @@ describe('lineDetailTotal', () => {
 		expect(lineDetailTotal(lineOf(form, 'shot:sh020'), 'USD', '.')).toBeNull();
 	});
 });
+
+describe('a package priced as one figure', () => {
+	const packed = {
+		header: req.header,
+		packages: [
+			{ id: 'p1', name: 'Creature' },
+			{ id: 'p2', name: 'Comp' }
+		],
+		shots: [
+			{ id: 'a', package: 'p1' },
+			{ id: 'b', package: 'p1' },
+			{ id: 'c', package: 'p1', omitted: true },
+			{ id: 'd', package: 'p2' }
+		],
+		assets: []
+	};
+	const names = itemNames({ shots: packed.shots.map((s) => ({ id: s.id, code: s.id.toUpperCase() })), assets: [], packages: packed.packages });
+
+	it('starts every package row by row', () => {
+		expect(emptyForm(packed, TODAY).packages).toEqual([
+			{ id: 'p1', name: 'Creature', bidding: true, mode: 'rows', price: '', notes: '' },
+			{ id: 'p2', name: 'Comp', bidding: true, mode: 'rows', price: '', notes: '' }
+		]);
+	});
+
+	it('sends the figure and a line in the package price for each row not omitted', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		form.packages[0].price = '5,000.00';
+		form.packages[0].notes = ' all in ';
+		form.lines.find((l) => l.key === 'shot:d')!.price = '100';
+		const { draft, counts, problems } = formToDraft(form, '.', names);
+		expect(draft.packages).toEqual([{ package: 'p1', total: money(500_000, 'USD'), notes: 'all in' }]);
+		expect(draft.lines).toEqual([
+			{ target: onShot('a'), total: money(0, 'USD'), excluded: false, inPackage: true },
+			{ target: onShot('b'), total: money(0, 'USD'), excluded: false, inPackage: true },
+			{ target: onShot('d'), total: money(10_000, 'USD'), excluded: false }
+		]);
+		expect(counts).toEqual({ priced: 1, excluded: 0, open: 0, packaged: 2, declined: 0 });
+		expect(problems).toEqual([]);
+		expect(formTotals(draft).totals.grand.bid).toEqual(money(510_000, 'USD'));
+	});
+
+	it('leaves a package with a blank figure not bid, and names a figure it cannot read', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		expect(formToDraft(form, '.', names).counts).toEqual({ priced: 0, excluded: 0, open: 3, packaged: 0, declined: 0 });
+		form.packages[0].price = 'lots';
+		const { problems } = formToDraft(form, '.', names);
+		expect(problems[0]).toMatchObject({ key: 'package:p1:price', label: 'Price for Creature', control: 'vf-package:p1:price' });
+	});
+
+	it('counts a figure alone as a price for the submit', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		form.packages[0].price = '10';
+		expect(formToDraft(form, '.', names).problems.some((p) => p.key === 'priced')).toBe(false);
+	});
+
+	it('reads a saved figure back as the package priced as one figure, its rows blank', () => {
+		const form = formFromBid(
+			{
+				number: '1',
+				date: TODAY,
+				currency: 'USD',
+				assumptions: [],
+				exclusions: [],
+				milestones: [],
+				costs: [],
+				discount: null,
+				tax: null,
+				rebate: [],
+				lines: [line('l1', onShot('a'), money(0, 'USD'), { inPackage: true }), line('l2', onShot('b'), money(0, 'USD'), { inPackage: true })],
+				packages: [{ package: 'p1', total: money(250_000, 'USD') }]
+			},
+			packed,
+			'.'
+		);
+		expect(form.packages[0]).toMatchObject({ mode: 'package', price: '2500' });
+		expect(form.lines.find((l) => l.key === 'shot:a')).toMatchObject({ price: '', excluded: false });
+		expect(formToDraft(form, '.').draft.packages).toEqual([{ package: 'p1', total: money(250_000, 'USD') }]);
+	});
+
+	it('says what a switch would clear, and clears it only when switched', () => {
+		const form = emptyForm(packed, TODAY);
+		form.lines.find((l) => l.key === 'shot:a')!.price = '10';
+		form.lines.find((l) => l.key === 'shot:b')!.excluded = true;
+		form.lines.find((l) => l.key === 'shot:d')!.price = '7';
+		expect(typedFor(form, 'p1', 'package')).toEqual({ rows: 2, figure: false });
+		const switched = switchMode(form, 'p1', 'package');
+		expect(switched.lines.filter((l) => l.package === 'p1').every((l) => l.price === '' && !l.excluded)).toBe(true);
+		expect(switched.lines.find((l) => l.key === 'shot:d')!.price).toBe('7');
+		switched.packages[0].price = '99';
+		expect(typedFor(switched, 'p1', 'rows')).toEqual({ rows: 0, figure: true });
+		expect(switchMode(switched, 'p1', 'rows').packages[0]).toMatchObject({ mode: 'rows', price: '' });
+	});
+
+	it('sends no line for a package the vendor is not bidding on, and does not count its rows as open', () => {
+		const form = setBidding(emptyForm(packed, TODAY), 'p1', false);
+		form.lines.find((l) => l.key === 'shot:d')!.price = '100';
+		const { draft, counts, problems } = formToDraft(form, '.', names);
+		expect(draft.declined).toEqual(['p1']);
+		expect(draft.lines).toEqual([{ target: onShot('d'), total: money(10_000, 'USD'), excluded: false }]);
+		expect(counts).toEqual({ priced: 1, excluded: 0, open: 0, packaged: 0, declined: 2 });
+		expect(problems).toEqual([]);
+	});
+
+	it('wants one package bid on at least', () => {
+		const form = setBidding(setBidding(emptyForm(packed, TODAY), 'p1', false), 'p2', false);
+		const { problems, blockers } = formToDraft(form, '.', names);
+		expect(problems.map((p) => p.key)).toEqual(['bidding']);
+		expect(blockers).toEqual(['Bid on one package at least.']);
+	});
+
+	it('says what not bidding would clear, clears it, and reads a declined package back', () => {
+		const form = emptyForm(packed, TODAY);
+		form.lines.find((l) => l.key === 'shot:a')!.price = '10';
+		expect(typedFor(form, 'p1', 'declined')).toEqual({ rows: 1, figure: false });
+		const off = setBidding(form, 'p1', false);
+		expect(off.lines.find((l) => l.key === 'shot:a')!.price).toBe('');
+		expect(setBidding(off, 'p1', true).packages[0]).toMatchObject({ bidding: true, mode: 'rows' });
+		const back = formFromBid({ ...formToDraft(off, '.').draft }, packed, '.');
+		expect(back.packages.map((p) => p.bidding)).toEqual([false, true]);
+	});
+});
+

@@ -1,8 +1,10 @@
 /**
  * A vendor bid's totals, in the bid currency and in the request's base currency.
  *
- * Lines (excluded ones skipped) plus non-shot costs make the subtotal. The discount comes off the
- * subtotal, the tax goes on what is left. A percent discount or tax rounds half away from zero.
+ * Lines (excluded ones skipped) and package figures, plus non-shot costs, make the subtotal. A row
+ * in a package priced as one figure has a line with a zero total: the figure counts once. The
+ * discount comes off the subtotal, the tax goes on what is left. A percent discount or tax rounds
+ * half away from zero.
  *
  * Each base figure is its bid figure converted once at the bid's locked rate. So base figures may
  * not add up to the base grand total by a minor unit: the bid currency is the one that adds up.
@@ -16,7 +18,7 @@ import { add, convert, money, subtract, sum, type Money } from './money';
 import { percentOf } from './percent';
 
 export interface BidTotals {
-	/** Lines, excluded ones skipped. */
+	/** Lines, excluded ones skipped, and package figures. */
 	readonly lines: Dual;
 	/** Non-shot costs: overhead, supervision, on-set, contingency. */
 	readonly costs: Dual;
@@ -44,7 +46,11 @@ export function checkBid(bid: VendorBid, base: string): void {
 		for (const department of line.departments ?? []) {
 			check(department.cost, `the ${department.department} cost of line ${line.id}`);
 		}
+		if (line.inPackage && (line.total.minor !== 0 || line.excluded)) {
+			throw new Error(`Line ${line.id} is in a package price: it takes no price of its own and is not excluded.`);
+		}
 	}
+	for (const price of bid.packages ?? []) check(price.total, `the price of package ${price.package}`);
 	for (const cost of bid.costs) check(cost.amount, `the cost '${cost.label}'`);
 	if (bid.discount?.kind === 'amount') check(bid.discount.amount, 'the discount');
 	if (bid.tax?.kind === 'amount') check(bid.tax.amount, 'the tax');
@@ -78,7 +84,7 @@ export function bidTotals(bid: VendorBid, base: string): BidTotals {
 	checkBid(bid, base);
 	const live = bid.lines.filter((line) => !line.excluded);
 	const lines = sum(
-		live.map((line) => line.total),
+		[...live.map((line) => line.total), ...(bid.packages ?? []).map((p) => p.total)],
 		bid.currency
 	);
 	const costs = sum(

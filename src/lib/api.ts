@@ -97,10 +97,13 @@ async function post<T>(action: string, body: Record<string, unknown>): Promise<T
 export const api = {
 	list: (projectId: number) => call<RequestOverview[]>('list', projectId),
 	get: (projectId: number, id: string) => call<LoadedRequest>('get', projectId, { id }),
-	save: (projectId: number, body: { id: string | null; code: string; header: unknown; items: unknown }) => call<{ request: BidRequest }>('save', projectId, body),
+	save: (projectId: number, body: { id: string | null; code: string; header: unknown; items: unknown; packages?: unknown }) => call<{ request: BidRequest }>('save', projectId, body),
 	issue: (projectId: number, id: string) => call<{ request: BidRequest }>('issue', projectId, { id }),
 	newRound: (projectId: number, id: string) => call<{ request: BidRequest }>('new-round', projectId, { id }),
-	invite: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null }) => call<Invited>('invite', projectId, { requestId, vendor }),
+	invite: (projectId: number, requestId: string, vendor: { name: string; email: string; groupId: number | null; packages?: string[] | null }) =>
+		call<Invited>('invite', projectId, { requestId, vendor }),
+	/** A vendor's packages: some, or null for every one. Refused once the vendor has submitted a bid. */
+	invitePackages: (projectId: number, invitationId: string, packages: string[] | null) => call<{ invitation: InvitedVendor }>('invite-packages', projectId, { invitationId, packages }),
 	revoke: (projectId: number, invitationId: string) => call<{ ok: true }>('revoke', projectId, { invitationId }),
 	reissue: (projectId: number, invitationId: string) => call<{ token: string; expiresAt: string }>('reissue', projectId, { invitationId }),
 	/** What deleting the request would take with it, or the award that stops it. */

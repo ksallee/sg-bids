@@ -8,6 +8,8 @@ import {
 	headerToColumns,
 	itemsFromRows,
 	itemsToRows,
+	packagesFromRows,
+	packagesToRows,
 	requestFromRows,
 	scenarioFromRows,
 	scenarioToRows,
@@ -137,7 +139,8 @@ describe('vendor', () => {
 			vendor_name: 'Vendor A',
 			vendor_group_id: 12,
 			contact_email: 'a@example.com',
-			details: { ndaExecuted: true, tpn: 'Gold', capacity: '40 shots' }
+			details: { ndaExecuted: true, tpn: 'Gold', capacity: '40 shots' },
+			package_keys: null
 		});
 		const row: InvitationRow = {
 			id: 'inv-a',
@@ -220,7 +223,8 @@ describe('bid', () => {
 			item_key: 'sh010',
 			total_minor: 1_000_000,
 			excluded: false,
-			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers', assumptions: 'clean plate given' }
+			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers', assumptions: 'clean plate given' },
+			in_package: false
 		});
 		expect(lines[1]).toMatchObject({ item_kind: 'asset', item_key: 'hero', total_minor: 0, excluded: true });
 	});
@@ -285,5 +289,69 @@ describe('scenario', () => {
 
 	it('refuses a share that is not a percent', () => {
 		expect(() => scenarioToRows([{ target: onShot('a'), shares: [{ bidId: 'b', percent: '-5' }] }])).toThrow();
+	});
+});
+
+describe('packages in the rows', () => {
+	it('writes each row package in its own column and reads it back', () => {
+		const rows = itemsToRows([{ id: 'a', code: 'A', omitted: false, assetIds: [], package: 'p1' }], [{ id: 'x', name: 'X', package: 'p2' }]);
+		expect(rows.map((r) => [r.key, r.package_key, 'package' in r.fields])).toEqual([
+			['a', 'p1', false],
+			['x', 'p2', false]
+		]);
+		const back = itemsFromRows(rows);
+		expect(back.shots[0].package).toBe('p1');
+		expect(back.assets[0].package).toBe('p2');
+		expect(itemsFromRows(itemsToRows([{ id: 'b', code: 'B', omitted: false, assetIds: [] }], [])).shots[0]).not.toHaveProperty('package');
+	});
+
+	it('writes the packages in order and refuses two with one id or one name', () => {
+		expect(packagesToRows([{ id: 'p1', name: ' Creature ' }, { id: 'p2', name: 'Comp' }])).toEqual([
+			{ key: 'p1', name: 'Creature' },
+			{ key: 'p2', name: 'Comp' }
+		]);
+		expect(() => packagesToRows([{ id: 'p1', name: 'A' }, { id: 'p1', name: 'B' }])).toThrow(/Two packages have the id/);
+		expect(() => packagesToRows([{ id: 'p1', name: 'A' }, { id: 'p2', name: 'a' }])).toThrow(/Two packages are named/);
+		expect(packagesFromRows([{ key: 'p2', name: 'B', position: 1 }, { key: 'p1', name: 'A', position: 0 }])).toEqual([
+			{ id: 'p1', name: 'A' },
+			{ id: 'p2', name: 'B' }
+		]);
+	});
+
+	it('round-trips an invitation to some packages', () => {
+		const columns = vendorToColumns({ name: 'V', email: 'v@example.com', ndaExecuted: false, packages: ['p1'] });
+		expect(columns.package_keys).toEqual(['p1']);
+		expect(vendorFromRow({ id: 'i', ...columns }).packages).toEqual(['p1']);
+		expect(vendorFromRow({ id: 'i', ...columns, package_keys: null })).not.toHaveProperty('packages');
+	});
+
+	it('round-trips a bid with a package priced as one figure', () => {
+		const draft = {
+			number: '1',
+			date: '2026-11-25',
+			currency: 'USD',
+			rate: null,
+			assumptions: [],
+			exclusions: [],
+			milestones: [],
+			lines: [{ target: { kind: 'shot' as const, id: 'a' }, total: money(0, 'USD'), excluded: false, inPackage: true }],
+			costs: [],
+			discount: null,
+			tax: null,
+			rebate: [],
+			packages: [{ package: 'p1', total: money(5000, 'USD'), notes: 'all in' }],
+			declined: ['p2']
+		};
+		const rows = bidToRows(draft, 'USD');
+		expect(rows.bid.packages).toEqual([{ package: 'p1', total: money(5000, 'USD'), notes: 'all in' }]);
+		expect(rows.lines[0].in_package).toBe(true);
+		const back = bidFromRows(
+			{ ...rows.bid, id: 'b', invitation_id: 'i', request_id: 'r', site_host: 'h', project_id: 1, version: 1, status: 'draft', submitted_at: null, withdrawn_at: null, created_at: '', updated_at: '' },
+			rows.lines.map((l, i) => ({ ...l, id: `l${i}`, bid_id: 'b', invitation_id: 'i', request_id: 'r', site_host: 'h', project_id: 1 })),
+			{ round: 1, baseCurrency: 'USD' }
+		);
+		expect(back.packages).toEqual(draft.packages);
+		expect(back.declined).toEqual(['p2']);
+		expect(back.lines[0].inPackage).toBe(true);
 	});
 });

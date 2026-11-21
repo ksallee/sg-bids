@@ -65,7 +65,8 @@
 	}
 	const totals = $derived(result ? formTotals(result.draft) : null);
 	const snapshot = $derived(result ? JSON.stringify(result.draft) : '');
-	const prices = $derived(new Map(result ? result.draft.lines.filter((l) => !l.excluded).map((l) => [targetKey(l.target), l.total]) : []));
+	const prices = $derived(new Map(result ? result.draft.lines.filter((l) => !l.excluded && !l.inPackage).map((l) => [targetKey(l.target), l.total]) : []));
+	const figures = $derived(new Map(result ? (result.draft.packages ?? []).map((p) => [p.package, p.total]) : []));
 	const stage = $derived<Stage>(
 		request?.status === 'closed' ? 'closed' : view?.bid?.status === 'submitted' ? 'submitted' : view?.bid?.status === 'withdrawn' ? 'withdrawn' : 'draft'
 	);
@@ -293,9 +294,9 @@
 				<Section
 					id="items"
 					title="Shots and assets"
-					note={readOnly ? undefined : 'A price for each, all in. Leave one blank to not bid it, or exclude what you will not do.'}
+					note={readOnly ? undefined : 'A price for each, all in, or one figure for a whole package. Leave one blank to not bid it, or exclude what you will not do.'}
 				>
-					<ItemGrid bind:this={grid} bind:form {request} errors={result.errors} {prices} {mark} {locale} {readOnly} />
+					<ItemGrid bind:this={grid} bind:form {request} errors={result.errors} {prices} {figures} {mark} {locale} {readOnly} />
 				</Section>
 
 				<Section id="costs" title="Other costs, discount and tax" note="Costs that sit outside the shots and assets.">
@@ -371,6 +372,8 @@
 		<ProblemList problems={result.problems} onPick={(p) => void goTo(p)} />
 		<dl class="flex flex-col">
 			<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Priced</dt><dd class="tabular-nums">{result.counts.priced}</dd></div>
+			{#if result.counts.packaged > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">In a package price</dt><dd class="tabular-nums">{result.counts.packaged}</dd></div>{/if}
+			{#if result.counts.declined > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bidding</dt><dd class="tabular-nums">{result.counts.declined}</dd></div>{/if}
 			{#if result.counts.excluded > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Excluded</dt><dd class="tabular-nums">{result.counts.excluded}</dd></div>{/if}
 			{#if result.counts.open > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bid</dt><dd class="tabular-nums">{result.counts.open}</dd></div>{/if}
 			<div class="flex justify-between gap-3 border-t pt-2 font-semibold"><dt>Total</dt><dd class="tabular-nums">{format(totals.totals.grand.bid, locale)}</dd></div>

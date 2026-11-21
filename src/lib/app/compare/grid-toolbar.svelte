@@ -46,6 +46,7 @@
 			label="Group rows by"
 			value={s.by}
 			options={[
+				{ value: 'package', label: 'Package' },
 				{ value: 'sequence', label: 'Sequence' },
 				{ value: 'episode', label: 'Episode' },
 				{ value: 'none', label: 'No groups' }
