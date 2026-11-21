@@ -48,7 +48,8 @@ metaphors, no "not X, Y", no filler.
   duplicate and delete dialogs under `request/`, the comparison's grid, scenario rail and page state
   under `compare/`, the vendor form's pieces (the rate card among them) under `vendor/`. A draft's
   bids and rows are `pure/request-draft.ts`, its vendor rows `pure/vendor-rows.ts`, what blocks the
-  issue `pure/readiness.ts`, the vendor's rates `pure/rate-card.ts`.
+  issue `pure/readiness.ts`, the vendor's rates `pure/rate-card.ts`, creating a vendor's Group from its row `pure/group-create.ts`
+  with its calls in `io/fpt-group.ts`.
 - `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.
 - `src/lib/drafts.ts`: the one place a draft request is stored. Storage plugs in there.
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
