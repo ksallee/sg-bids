@@ -38,6 +38,9 @@
 //      when the site has the field; the drive creates no field), the Groups on the Shots; undoes from
 //      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
+//   8b. round 1 had no Omit column and no Omit on the selection; starts round 2 from the issued
+//      request, omits one Seq A row with a double click on its Omit cell, issues it, answers as
+//      Vendor A (the cut row takes no price), and reads the comparison's mark on the row;
 //   9. on the list: opens the request from its row's link; reads back its Bids, Shots and Assets
 //      (both bids by name, the totals by unit, the counted row as 120) and the copy's; filters to
 //      the drive's rows and ticks them with the header box; duplicates both with their rows and reads
@@ -431,6 +434,14 @@ const stages = {
 		await page.waitForTimeout(800);
 		// One Flow PT Shot moves from Seq A to Creature, from the selection bar.
 		await page.locator('[data-slot=request-table] tr', { hasText: state.moved.code }).getByRole('checkbox').first().click();
+		// Round 1 has no Omit: removing a row does it.
+		const omitCells = await page.locator('[data-slot=request-table] td[data-column=c_omitted]').count();
+		const omitButton = await page.locator('[data-slot=bulk-omit]').count();
+		await page.setViewportSize({ width: 1920, height: 1080 });
+		await page.waitForTimeout(600);
+		await shoot(page, 'round1-no-omit-1920');
+		await page.setViewportSize({ width: 1440, height: 900 });
+		expect(omitCells === 0 && omitButton === 0, 'a round 1 draft has no Omit column and no Omit on the selection');
 		await page.locator('[data-slot=bulk-move]').click();
 		await page.locator('[data-slot=bulk-move-to][data-bid="Creature"]').click();
 		await saved();
@@ -789,6 +800,66 @@ const stages = {
 		);
 	},
 
+	async nextRound() {
+		await page.goto(`${APP}/requests/${state.requestId}?project=${state.projectId}`);
+		await page.waitForLoadState('networkidle');
+		await page.locator('[data-slot=request-more]').click();
+		await page.locator('[data-slot=new-round]').click();
+		await page.waitForURL((url) => /\/requests\/[0-9a-f-]{36}/.test(url.pathname) && !url.pathname.includes(state.requestId), { timeout: 30_000 });
+		state.round2Id = new URL(page.url()).pathname.split('/').pop();
+		await page.locator('[data-slot=items-panel]').waitFor({ timeout: 60_000 });
+		await page.waitForTimeout(1500);
+		// Round 2 keeps Omit. A double click opens the cell's editor, and a press on its control writes it.
+		const cut = state.seqShots[0].code;
+		const cell = page.locator('[data-slot=request-table] tr[data-row-key]', { hasText: cut }).locator('td[data-column=c_omitted]');
+		await cell.dblclick();
+		await cell.locator('[data-slot=entity-table-editor] button').first().click();
+		await saved();
+		const [row2] = await sql`select header->>'round' as round from public.bid_requests where id = ${state.round2Id}`;
+		const [item] = await sql`select omitted from public.production_bid_items where request_id = ${state.round2Id} and code = ${cut}`;
+		await page.setViewportSize({ width: 1920, height: 1080 });
+		await page.waitForTimeout(600);
+		await shoot(page, 'round2-omitted-1920');
+		await page.setViewportSize({ width: 1440, height: 900 });
+		expect(row2?.round === '2' && item?.omitted === true, `round 2 started from the issued request; a double click on ${cut}'s Omit cell and a press omitted it, saved in the draft`);
+		// Issued, Vendor A answers: the cut row takes no price.
+		await page.locator('[data-slot=issue]').click();
+		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
+		await page.locator('[data-slot=vendor-links]').waitFor({ timeout: 60_000 });
+		const links = await page.locator('[data-slot=link-value]').evaluateAll((els) => els.map((e) => e.value));
+		const vctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		const vp = await vctx.newPage();
+		await vp.goto(links[0].replace(/^https?:\/\/[^/]+/, APP));
+		await vp.waitForLoadState('networkidle');
+		await vp.locator('[data-slot=package-head]').first().waitFor({ timeout: 30_000 });
+		await vp.locator('[data-slot=package-head]', { hasText: 'Creature' }).getByRole('radio', { name: 'Not bidding' }).click();
+		const offered = await vp.locator('[data-slot=rate-input]').evaluateAll((els) => els.map((e) => e.getAttribute('data-difficulty') ?? ''));
+		for (const d of offered) await vp.locator(`[data-slot=rate-input][data-difficulty="${d}"]`).fill('1000');
+		const cutRow = vp.locator('[data-row]', { hasText: cut });
+		const cutWords = await cutRow.locator('[data-slot=line-omitted]').innerText();
+		const cutInputs = await cutRow.locator('input[data-price]').count();
+		await vp.waitForTimeout(800);
+		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+		await shoot(vp, 'round2-vendor-cut-row');
+		await vp.getByRole('button', { name: 'Review and submit' }).first().click();
+		await vp.getByRole('button', { name: 'Submit answer' }).click();
+		await vp.getByText('Submitted.').first().waitFor({ timeout: 20_000 });
+		await vctx.close();
+		const lines = await sql`select i.code from public.bid_lines l join public.bids b on b.id = l.bid_id join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.request_id = ${state.round2Id} and b.status = 'submitted'`;
+		expect(
+			/Cut this round/.test(cutWords) && cutInputs === 0 && lines.length === 5 && !lines.some((l) => l.code === cut),
+			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field; Vendor A submitted ${lines.length} lines, none for the cut row`
+		);
+		// The comparison marks the row.
+		await page.goto(`${APP}/requests/${state.round2Id}/compare?project=${state.projectId}`);
+		await page.waitForLoadState('networkidle');
+		const compareRow = page.locator('[data-slot=item-row]', { hasText: cut }).first();
+		await compareRow.waitFor({ timeout: 30_000 });
+		const compareText = (await compareRow.locator('[role=rowheader]').innerText()).replace(/\s+/g, ' ').trim();
+		await shoot(page, 'round2-compare');
+		expect(/omitted/.test(compareText), `round 2's comparison marks ${cut}: "${compareText}"`);
+	},
+
 	async bulk() {
 		const rows = page.locator('[data-slot=requests] tbody tr');
 		const rowOf = (title) => rows.filter({ has: page.locator('a', { hasText: new RegExp(`^${esc(title)}$`) }) });
@@ -938,7 +1009,7 @@ try {
 	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 	page = await ctx.newPage();
 	page.on('pageerror', (e) => log('page error:', e.message.slice(0, 200)));
-	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate', 'bulk']) {
+	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate', 'nextRound', 'bulk']) {
 		log('stage', name);
 		await stages[name]();
 	}

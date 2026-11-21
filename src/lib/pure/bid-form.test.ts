@@ -396,6 +396,19 @@ describe('a package priced as one figure', () => {
 	};
 	const names = itemNames({ shots: packed.shots.map((s) => ({ id: s.id, code: s.id.toUpperCase() })), assets: [], packages: packed.packages });
 
+	it('sends no line for a row omitted in a later round when the bid is priced row by row, and does not count it open', () => {
+		const form = emptyForm(packed, TODAY);
+		form.lines.find((l) => l.key === 'shot:a')!.price = '100';
+		form.lines.find((l) => l.key === 'shot:b')!.price = '200';
+		form.lines.find((l) => l.key === 'shot:c')!.price = '300';
+		form.lines.find((l) => l.key === 'shot:d')!.price = '400';
+		const { draft, counts } = formToDraft(form, '.', names);
+		expect(draft.lines.map((l) => l.target.id)).toEqual(['a', 'b', 'd']);
+		expect(counts).toEqual({ priced: 3, excluded: 0, open: 0, packaged: 0, declined: 0 });
+		const blank = emptyForm(packed, TODAY);
+		expect(formToDraft(blank, '.', names).counts.open).toBe(3);
+	});
+
 	it('starts every package row by row', () => {
 		expect(emptyForm(packed, TODAY).packages).toEqual([
 			{ id: 'p1', name: 'Creature', bidding: true, mode: 'rows', price: '', notes: '' },

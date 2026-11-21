@@ -7,8 +7,9 @@
 	this request only. A cell that cannot be edited says why on hover.
 
 	Select rows (a press, Shift for a range) and edit one cell: the value goes to that column in every
-	selected row, after a confirm that says what changes where. The bar over the table omits,
-	includes, moves the selected rows to another bid, or takes them out. Every edit offers Undo; a
+	selected row, after a confirm that says what changes where. The bar over the table moves the
+	selected rows to another bid or takes them out; from round 2 it also omits and includes them (a
+	round 1 draft has Omit only while a row is omitted already, `offersOmit`). Every edit offers Undo; a
 	write Flow PT refused, or one that answered and changed nothing (028), is listed with Retry. Rules
 	in `$lib/pure/live-columns`, `$lib/pure/row-edit` and `$lib/pure/edit-words`.
 
@@ -49,7 +50,7 @@
 	import { liveContext } from '$lib/live';
 	import { cn } from '$lib/utils.js';
 	import type { ItemKind } from '$lib/pure/field-map';
-	import { cellTarget, columnByKey, descriptionAdvice, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
+	import { cellTarget, columnByKey, descriptionAdvice, omitActions, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
 	import { itemValue, type CellChange, type Change, type Refusal } from '$lib/pure/row-edit';
 	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
 	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
@@ -185,6 +186,8 @@
 
 	let selection = $state<EntityRef[]>([]);
 	const selectedItems = $derived(selection.flatMap((ref) => itemOfRef(ref) ?? []));
+	/** Omit and Include on the selection: Omit from round 2, Include while a selected row is omitted. */
+	const omitOffered = $derived(omitActions(builder.round, selectedItems.map((item) => item.omitted === true)));
 
 	/* writes --------------------------------------------------------------- */
 
@@ -506,8 +509,8 @@
 		{#if selection.length > 0}
 			<div class="bg-muted flex min-w-0 items-center gap-1 rounded-lg py-1 pr-1 pl-3" role="toolbar" aria-label={`${selection.length} selected`} data-slot="bulk-bar">
 				<span class="mr-2 text-sm font-medium tabular-nums" aria-live="polite">{selection.length} selected</span>
-				<Button size="sm" variant="ghost" onclick={() => void setOmitted(true)} data-slot="bulk-omit">Omit</Button>
-				<Button size="sm" variant="ghost" onclick={() => void setOmitted(false)} data-slot="bulk-include">Include</Button>
+				{#if omitOffered.omit}<Button size="sm" variant="ghost" onclick={() => void setOmitted(true)} data-slot="bulk-omit">Omit</Button>{/if}
+				{#if omitOffered.include}<Button size="sm" variant="ghost" onclick={() => void setOmitted(false)} data-slot="bulk-include">Include</Button>{/if}
 				{#if builder.bids.length > 1}
 					<DropdownMenu.Root>
 						<DropdownMenu.Trigger class="hover:bg-accent focus-visible:ring-ring/50 inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-2" data-slot="bulk-move">

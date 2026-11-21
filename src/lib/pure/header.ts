@@ -197,10 +197,15 @@ export function suggestCode(projectName: string, taken: readonly string[]): stri
 	}
 }
 
+/** The form's round. One it cannot read is 1. */
+export function roundOf(form: HeaderForm): number {
+	return ROUND.test(form.round.trim()) ? Number(form.round.trim()) : 1;
+}
+
 /** The model's header from the form, blank fields left out. A round it cannot read is 1. */
 export function toHeader(form: HeaderForm, project: ProjectPick): RequestHeader {
 	const text = (value: string): string | undefined => (value.trim() === '' ? undefined : value.trim());
-	const round = ROUND.test(form.round.trim()) ? Number(form.round.trim()) : 1;
+	const round = roundOf(form);
 	const header: RequestHeader = {
 		code: text(form.code),
 		title: text(form.title),

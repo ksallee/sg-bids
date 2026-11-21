@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeFields } from 'sg-widgets-core';
 import { ASSET_FIELDS_A, ASSET_FIELDS_B, SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
 import { shot, asset } from './fixtures';
-import { cellTarget, columnByKey, descriptionAdvice, requestColumns, BID_DESCRIPTION } from './live-columns';
+import { cellTarget, columnByKey, descriptionAdvice, offersOmit, omitActions, requestColumns, BID_DESCRIPTION } from './live-columns';
 
 const shotA = normalizeFields(SHOT_FIELDS_A);
 const shotB = normalizeFields(SHOT_FIELDS_B);
@@ -122,6 +122,33 @@ describe('descriptionAdvice', () => {
 describe('the widths', () => {
 	it('gives the code room for a long code', () => {
 		expect(columnByKey(requestColumns('shot', mappingA, shotA), 'code').width).toBeGreaterThanOrEqual(300);
+	});
+});
+
+describe('Omit, by round', () => {
+	it('is offered from round 2 on, where a row the earlier round held can be cut', () => {
+		expect(offersOmit(2, false)).toBe(true);
+		expect(offersOmit(5, false)).toBe(true);
+	});
+
+	it('is not offered on a round 1 draft: there, removing the row does it', () => {
+		expect(offersOmit(1, false)).toBe(false);
+	});
+
+	it('stays on a round 1 draft while a row is omitted already, so it can be brought back', () => {
+		expect(offersOmit(1, true)).toBe(true);
+	});
+
+	it('drops the column when not offered, and keeps every other in order', () => {
+		const columns = requestColumns('shot', mappingB, shotB, {}, { omit: false });
+		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'notes']);
+		expect(requestColumns('asset', mappingB, assetB, {}, { omit: false }).map((c) => c.key)).not.toContain('omitted');
+	});
+
+	it('offers Omit on the selection from round 2, and Include whenever a selected row is omitted', () => {
+		expect(omitActions(1, [false, false])).toEqual({ omit: false, include: false });
+		expect(omitActions(1, [false, true])).toEqual({ omit: false, include: true });
+		expect(omitActions(2, [false])).toEqual({ omit: true, include: true });
 	});
 });
 

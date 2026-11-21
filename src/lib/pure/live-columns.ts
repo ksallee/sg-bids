@@ -13,6 +13,10 @@
  * here, and a count (`count.ts`); a row linked to Flow PT keeps its code and a count of 1.
  *
  * A row belongs to a bid because it was added to it: there is no column for its group.
+ *
+ * Omit marks a row the earlier round held as cut, so vendors and the comparison see it was dropped.
+ * A round 1 draft has no earlier round: removing the row does it, so it has no Omit column, unless a
+ * row there is omitted already (a draft from before), which keeps the column so it can be brought back.
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
@@ -99,8 +103,15 @@ function cellTypeOf(field: FieldSchema): CellType | null {
  * The table's columns for a kind. `denied`: the fields the preflight write was refused on, with
  * what the site said (094).
  */
-export function requestColumns(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>, denied: Readonly<Record<string, string>> = {}): RequestColumn[] {
-	return (kind === 'shot' ? SHOT_SPECS : ASSET_SPECS).map((spec): RequestColumn => {
+export function requestColumns(
+	kind: ItemKind,
+	mapping: Mapping,
+	schema: Record<string, FieldSchema>,
+	denied: Readonly<Record<string, string>> = {},
+	options: { readonly omit: boolean } = { omit: true }
+): RequestColumn[] {
+	const specs = (kind === 'shot' ? SHOT_SPECS : ASSET_SPECS).filter((spec) => options.omit || spec.key !== 'omitted');
+	return specs.map((spec): RequestColumn => {
 		const name = spec.field(mapping);
 		const field = typeof name === 'string' ? schema[name] : undefined;
 		if (!field) {
@@ -126,6 +137,17 @@ export function requestColumns(kind: ItemKind, mapping: Mapping, schema: Record<
 			width: spec.width
 		};
 	});
+}
+
+/** Whether a draft of this round offers Omit. `anyOmitted`: a row of it is omitted already. */
+export function offersOmit(round: number, anyOmitted: boolean): boolean {
+	return round >= 2 || anyOmitted;
+}
+
+/** What the bar over a selection offers: Omit from round 2, Include while a selected row is omitted. */
+export function omitActions(round: number, selectedOmitted: readonly boolean[]): { readonly omit: boolean; readonly include: boolean } {
+	const later = round >= 2;
+	return { omit: later, include: later || selectedOmitted.some(Boolean) };
 }
 
 export function columnByKey(columns: readonly RequestColumn[], key: ColumnKey): RequestColumn {

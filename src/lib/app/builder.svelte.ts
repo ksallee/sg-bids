@@ -14,7 +14,7 @@ import type { EntityRow, FieldSchema } from 'sg-widgets-core';
 import { liveAuth, liveContext, liveState, liveWriter } from '$lib/live';
 import type { LoadedRequest } from '$lib/api';
 import { drafts } from '$lib/drafts';
-import { requestColumns, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
+import { offersOmit, requestColumns, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
 import { liveItems, liveKeys } from '$lib/pure/live-read';
 import { applyLocal, changesOf, itemValue, planEdits, readBack, undoPlan, type CellChange, type Change, type FptWrite, type Refusal, type WriteOutcome } from '$lib/pure/row-edit';
 import { loadMapping, storeMapping } from '$lib/app/mapping-store';
@@ -27,7 +27,7 @@ import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } f
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
-import { headerForm, type HeaderForm, type ProjectPick } from '$lib/pure/header';
+import { headerForm, roundOf, type HeaderForm, type ProjectPick } from '$lib/pure/header';
 import { addPicked } from '$lib/pure/pick';
 import { applyBreakdown, type BreakdownPlan } from '$lib/pure/breakdown';
 import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
@@ -440,7 +440,13 @@ export class Builder {
 	/** The table's columns for a kind: live where a field feeds them, locked where the person may not write. */
 	columns(kind: ItemKind): RequestColumn[] {
 		if (!this.mapping) return [];
-		return requestColumns(kind, this.mapping[kind], this.schemaOf(kind), this.denied[kind]);
+		const omit = offersOmit(this.round, this.itemsOf(kind).some((item) => item.omitted === true));
+		return requestColumns(kind, this.mapping[kind], this.schemaOf(kind), this.denied[kind], { omit });
+	}
+
+	/** The draft's round: Omit is for a round after the first (`offersOmit`). */
+	get round(): number {
+		return roundOf(this.form);
 	}
 
 	private keysOf(kind: ItemKind): ReadonlySet<string> {
