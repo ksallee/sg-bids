@@ -1,6 +1,6 @@
 /**
- * Picking Shots and Assets: the filter the table reads with, and the picked items kept as frozen
- * copies while the selection changes. Pure, no I/O.
+ * Picking Shots and Assets: the filter the Add from Flow PT list reads with, and the picked items
+ * kept as frozen copies. Pure, no I/O.
  *
  * Every read carries the project filter: the endpoint is not scoped (entity_types/Shot). Text is
  * matched with `contains`, every word required; status, type and links with `in` (017). An
@@ -8,7 +8,7 @@
  * list of that Episode's Sequences, so no dotted path ending on a link is needed.
  */
 
-import type { ColumnSpec, EntityRef, EntityRow, FieldSchema, WireCondition, WireGroup } from 'sg-widgets-core';
+import type { EntityRow, FieldSchema, WireCondition, WireGroup } from 'sg-widgets-core';
 import { EPISODE_FROM_SEQUENCE, type ItemKind, type Mapping } from './field-map';
 
 /** One choice in a list filter. */
@@ -100,32 +100,6 @@ interface Picked {
 }
 
 /**
- * The picked items for a new selection: an item still picked keeps its edited copy and its place, a
- * new pick is frozen from its row and goes after, an unpicked item leaves. A breakdown row stays
- * whatever the table selects: it leaves only when taken out. `missing` names the picks with no row
- * at hand.
- */
-export function mergePicked<T extends Picked>(
-	current: readonly T[],
-	selected: readonly number[],
-	rows: readonly EntityRow[],
-	freeze: (row: EntityRow, position: number) => T
-): { items: T[]; missing: number[] } {
-	const wanted = new Set(selected);
-	const items: T[] = current.filter((item) => item.source === 'breakdown' || (item.fpt && wanted.has(item.fpt.id)));
-	const have = new Set(items.flatMap((item) => (item.fpt ? [item.fpt.id] : [])));
-	const rowById = new Map(rows.map((row) => [row.id, row]));
-	const missing: number[] = [];
-	for (const id of selected) {
-		if (have.has(id)) continue;
-		const row = rowById.get(id);
-		if (row) items.push(freeze(row, items.length + 1));
-		else missing.push(id);
-	}
-	return { items, missing };
-}
-
-/**
  * Every item picked from Flow PT copied again from its row, in place; one whose row is gone leaves.
  * A breakdown row stays as typed: its values never came from Flow PT.
  */
@@ -148,28 +122,6 @@ export function addPicked<T extends Picked>(current: readonly T[], rows: readonl
 	return [...current, ...rows.filter((row) => !have.has(row.id)).map((row, i) => freeze(row, current.length + i + 1))];
 }
 
-/**
- * The table's columns: the thumbnail (081, free on the same read), the code, where it sits, the
- * status, then the mapped fields, each only when the schema has it. Nothing is editable here.
- */
-export function pickColumns(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>): ColumnSpec[] {
-	const wanted: ColumnSpec[] = [
-		{ path: 'image', width: 96, sortable: false },
-		{ path: 'code', width: 200 },
-		...(kind === 'shot' ? [{ path: mapping.sequence ?? '', width: 130 }] : []),
-		...(kind === 'shot' && mapping.episode !== EPISODE_FROM_SEQUENCE ? [{ path: mapping.episode ?? '', width: 120 }] : []),
-		{ path: 'sg_status_list', width: 150 },
-		{ path: mapping.type ?? '', width: 130 },
-		{ path: mapping.difficulty ?? '', width: 120 },
-		...(kind === 'shot' ? [{ path: mapping.frames ?? '', width: 100, align: 'right' as const }] : []),
-		{ path: mapping.description ?? '', width: 340 }
-	];
-	const seen = new Set<string>();
-	return wanted
-		.filter((spec) => spec.path in schema && !seen.has(spec.path) && seen.add(spec.path))
-		.map((spec) => ({ ...spec, editable: false }));
-}
-
 /** Filter options from the project's Sequences: each Sequence, and each Episode they link. */
 export function sequenceOptions(sequences: SequenceIndex): { sequences: ListOption[]; episodes: ListOption[] } {
 	const all = [...sequences.values()].sort((a, b) => a.code.localeCompare(b.code));
@@ -184,9 +136,4 @@ export function sequenceOptions(sequences: SequenceIndex): { sequences: ListOpti
 /** The type filter's options: a list field's values. A text field gets none, so no filter. */
 export function typeOptions(field: FieldSchema | undefined): ListOption[] {
 	return field?.dataType === 'list' ? (field.validValues ?? []).map((value) => ({ code: value, label: value })) : [];
-}
-
-/** The picked items as the table's selection. */
-export function selectionRefs(items: readonly (Picked & { code?: string; name?: string })[]): EntityRef[] {
-	return items.filter((item) => item.fpt).map((item) => ({ type: item.fpt!.type, id: item.fpt!.id, name: item.code ?? item.name }));
 }

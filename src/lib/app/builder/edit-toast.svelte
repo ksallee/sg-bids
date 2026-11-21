@@ -1,6 +1,6 @@
 <!--
 	The line after an edit to the draft's rows, with Undo. It sits at the foot of the page, bottom
-	right, over the table, and reads out once (`aria-live`). It stays while the pointer or the keyboard is on it, and
+	centre, over the table, and reads out once (`aria-live`). It stays while the pointer or the keyboard is on it, and
 	leaves after a while otherwise. Undo runs once; the line then says what came back and what was
 	left because Flow PT changed since.
 -->
@@ -58,8 +58,8 @@
 	}
 </script>
 
-<!-- Bottom right, over the note column, so it covers no value that just changed. -->
-<div class="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-end px-6" aria-live="polite" data-slot="edit-toast-region">
+<!-- Bottom centre of the viewport, where a line after an action is looked for. -->
+<div class="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-center px-6" aria-live="polite" data-slot="edit-toast-region">
 	{#if toast}
 		<!-- svelte-ignore a11y_no_static_element_interactions: the pointer and focus only hold the line on screen -->
 		<div

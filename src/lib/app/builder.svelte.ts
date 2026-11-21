@@ -28,7 +28,7 @@ import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-c
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
 import { emptyHeaderForm, suggestCode, type HeaderForm, type ProjectPick } from '$lib/pure/header';
-import { addPicked, mergePicked } from '$lib/pure/pick';
+import { addPicked } from '$lib/pure/pick';
 import { applyBreakdown, type BreakdownPlan } from '$lib/pure/breakdown';
 import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
 import type { ItemLink } from '$lib/pure/wire';
@@ -370,23 +370,11 @@ export class Builder {
 		return kind === 'shot' ? (row, position) => freezeShot(row, mapping, sequences, position) : (row, position) => freezeAsset(row, mapping, position);
 	}
 
-	/** The table's selection changed. Rows not at hand are read by id. */
-	async select(kind: ItemKind, ids: number[], rows: EntityRow[]): Promise<void> {
-		const type = kind === 'shot' ? 'Shot' : 'Asset';
-		const current = kind === 'shot' ? this.state.shots : this.state.assets;
-		let merged = kind === 'shot' ? mergePicked(current as RequestShot[], ids, rows, this.freezer('shot')) : mergePicked(current as RequestAsset[], ids, rows, this.freezer('asset'));
-		if (merged.missing.length > 0) {
-			const extra = await rowsByIds(liveContext().client, type, merged.missing, this.fieldsFor(kind));
-			merged = kind === 'shot' ? mergePicked(current as RequestShot[], ids, [...rows, ...extra], this.freezer('shot')) : mergePicked(current as RequestAsset[], ids, [...rows, ...extra], this.freezer('asset'));
-		}
-		this.setItems(kind, merged.items);
-		void this.askRights(kind, rows[0]);
-	}
-
-	/** Select all: every row the filter matches joins the picks. */
+	/** Rows ticked in the Add from Flow PT dialog join the request; one already in it stays as it is. */
 	addRows(kind: ItemKind, rows: EntityRow[]): void {
 		if (kind === 'shot') this.setItems('shot', addPicked(this.state.shots, rows, this.freezer('shot')));
 		else this.setItems('asset', addPicked(this.state.assets, rows, this.freezer('asset')));
+		void this.askRights(kind, rows[0]);
 	}
 
 	clear(kind: ItemKind): void {
