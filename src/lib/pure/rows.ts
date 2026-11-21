@@ -9,6 +9,8 @@
  *   request learns nothing of the others.
  * - A shot or asset is a request item: kind, key (the model's id), code (shot code or asset name),
  *   and where it came from (`source`): Flow PT, or a breakdown with no Flow PT row until matched.
+ *   Its count is a column, `unit_count`, 1 unless the row stands for several (`count.ts`). A line's
+ *   unit price, on such a row, is in its detail.
  * - A bid's vendor is its invitation. A line points at its item by kind and key.
  * - A rate is kept as the exact string typed, never a float.
  * - A request's packages are rows of their own (`request_packages`), keyed by the model's package
@@ -37,6 +39,7 @@ import type {
 	VendorBid
 } from './model';
 import { targetKey } from './model';
+import { countOf, isCount } from './count';
 import { minorDigits, money } from './money';
 import { isPercent } from './percent';
 import { checkBid } from './totals';
@@ -79,6 +82,8 @@ export interface ItemColumns {
 	source: 'fpt' | 'breakdown';
 	/** The package the row sits in. Null in a request from before packages. */
 	package_key?: string | null;
+	/** How many the row stands for (`count.ts`). 1 for a row linked to Flow PT; absent reads as 1. */
+	unit_count?: number;
 }
 
 /** A package as written: its key, name and place. */
@@ -232,10 +237,15 @@ function inPackage(key: string | null | undefined): { package?: Id } {
 	return key ? { package: key } : {};
 }
 
+/** A row's count as stored: on a row in this request only, above 1. A row from before counts reads as 1. */
+function counted(row: Pick<ItemColumns, 'unit_count' | 'fpt_id'>): { count?: number } {
+	return row.fpt_id === null && row.unit_count !== undefined && isCount(row.unit_count) && row.unit_count > 1 ? { count: row.unit_count } : {};
+}
+
 export function itemsToRows(shots: readonly RequestShot[], assets: readonly RequestAsset[]): ItemColumns[] {
 	const rows: ItemColumns[] = [];
 	const seen = new Set<string>();
-	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, source: ItemSource | undefined, pkg: Id | undefined, fields: Json) => {
+	const push = (kind: 'shot' | 'asset', key: string, code: string, fpt: EntityRef | undefined, omitted: boolean, source: ItemSource | undefined, pkg: Id | undefined, count: number | undefined, fields: Json) => {
 		const name = `${kind}:${key}`;
 		if (!key) throw new Error(`A ${kind} needs an id.`);
 		if (seen.has(name)) throw new Error(`Two ${kind}s have the id '${key}'.`);
@@ -250,11 +260,12 @@ export function itemsToRows(shots: readonly RequestShot[], assets: readonly Requ
 			fields: defined(fields),
 			omitted,
 			source: source === 'breakdown' ? 'breakdown' : 'fpt',
-			package_key: pkg ?? null
+			package_key: pkg ?? null,
+			unit_count: countOf({ count, fpt })
 		});
 	};
-	for (const { id, code, fpt, omitted, source, package: pkg, ...fields } of shots) push('shot', id, code, fpt, omitted, source, pkg, fields);
-	for (const { id, name, fpt, source, package: pkg, ...fields } of assets) push('asset', id, name, fpt, false, source, pkg, fields);
+	for (const { id, code, fpt, omitted, source, package: pkg, count, ...fields } of shots) push('shot', id, code, fpt, omitted, source, pkg, count, fields);
+	for (const { id, name, fpt, source, package: pkg, count, ...fields } of assets) push('asset', id, name, fpt, false, source, pkg, count, fields);
 	return rows;
 }
 
@@ -292,10 +303,10 @@ export function itemsFromRows(rows: readonly ItemColumns[]): { shots: RequestSho
 	const sorted = [...rows].sort((a, b) => a.position - b.position);
 	const shots = sorted
 		.filter((row) => row.kind === 'shot')
-		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key) }));
+		.map((row): RequestShot => ({ id: row.key, code: row.code, omitted: row.omitted, assetIds: [], ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key), ...counted(row) }));
 	const assets = sorted
 		.filter((row) => row.kind === 'asset')
-		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key) }));
+		.map((row): RequestAsset => ({ id: row.key, name: row.code, ...row.fields, ...entity(row.fpt_type, row.fpt_id), ...origin(row.source), ...inPackage(row.package_key), ...counted(row) }));
 	return { shots, assets };
 }
 
@@ -398,12 +409,12 @@ export function bidToRows(bid: BidDraft, baseCurrency: string): { bid: BidColumn
 			rebate_splits: [...bid.rebate],
 			packages: (bid.packages ?? []).map((p) => defined({ package: p.package, total: p.total, notes: p.notes }))
 		},
-		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, inPackage, fromRate }) => ({
+		lines: lines.map(({ target, total, excluded, departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, inPackage, fromRate, unit }) => ({
 			item_kind: target.kind,
 			item_key: target.id,
 			total_minor: total.minor,
 			excluded,
-			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, fromRate: fromRate === true ? true : undefined }),
+			detail: defined({ departments, compute, markup, notes, methodology, assumptions, elementsNeeded, startWeek, fromRate: fromRate === true ? true : undefined, unit }),
 			in_package: inPackage === true
 		}))
 	};

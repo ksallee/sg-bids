@@ -9,38 +9,46 @@
 // pointing at a throwaway database, not one a running app reads. And in the environment:
 // `E2E_SANDBOX_PROJECT`, the one Flow PT project it may write to, by name, and `E2E_GROUP_A`,
 // `E2E_GROUP_B`, two Group ids the vendors are linked to. `E2E_SCREENS=1` also shoots the main screens
-// at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`.
+// at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`, or `E2E_SCREENS_DIR` under
+// `shots/`.
 //
-// It starts `vite dev` on 5182 (docs/development.md: a drive takes its own port), then:
+// It starts its own `vite dev` on a free port it picks, and never uses an app it did not start: two
+// worktrees driving at once each talk to their own app and database (docs/development.md), then:
 //   1. makes a request from the Requests list: a name and the project, in the New request dialog;
 //   2. on its one page: 4 Shots of the sandbox from Flow PT (`zzsgbids_*` fixtures when it has
-//      fewer) and 2 breakdown Shots with a difficulty into Bid 1, renamed Seq A; Add bid, renamed
-//      Creature, a breakdown Shot and Asset into it; one Flow PT Shot moved from Seq A to Creature;
+//      fewer) and 2 breakdown Shots with a difficulty into Bid 1, renamed Seq A; a row typed by hand
+//      into Seq A with Add row, its code then Tab then a count of 120, Enter adding the next row
+//      (taken out again); Add bid, renamed Creature, a breakdown Shot and Asset into it; one Flow PT
+//      Shot moved from Seq A to Creature; the side panel hidden and shown;
 //   3. two vendors typed in their rows: Vendor A on every bid, Vendor B on Creature alone;
 //   4. presses Issue with the due day left blank: the list names it, a press marks the field; the
 //      day set, it issues, and the page shows the links once: Copy all and Email checked;
 //   5. answers as each vendor in its own browser context: A fills its rate card (a rate per
-//      difficulty and one for rows with none), overrides one row, declines Creature; B prices
-//      Creature as one figure in GBP;
+//      difficulty and one for rows with none, which prices the counted row per unit: its line is
+//      the rate times 120), overrides one row, declines Creature; B prices Creature as one figure in
+//      GBP;
 //   6. sets B's rate, gives Seq A to A and Creature whole to B, chooses the scenario;
 //   7. publishes (breakdown rows without a Shot or Asset), reads Flow PT back: the Bids, the Bid
-//      Lines, their sums, the Groups on the Shots; undoes from the request page and reads it again;
+//      Lines, their sums, the counted row's Bid Line (its amount, its count in the name, and in Count
+//      when the site has the field; the drive creates no field), the Groups on the Shots; undoes from
+//      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
 //   9. deletes what the drive made, in Flow PT and in the database, also on a failure part way.
 // Screenshots go to `shots/e2e-live/`. It prints ids and counts, never a token, a key or the site.
 
 import { spawn } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import postgres from 'postgres';
 import { chromium } from 'playwright';
 import { loadEnv } from 'vite';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PORT = 5182;
-const APP = `http://localhost:${PORT}`;
+/** The app this drive starts, on a free port picked at the start. Set by `startApp`. */
+let APP = '';
 const OUT = `${ROOT}shots/e2e-live/`;
-const SCREENS = `${ROOT}shots/one-page/`;
+const SCREENS = `${ROOT}shots/${(process.env.E2E_SCREENS_DIR ?? 'one-page').replace(/^\/+|\/+$/g, '')}/`;
 const env = { ...loadEnv('development', ROOT, ''), ...process.env };
 for (const name of ['FPT_API_SITE_URL', 'FPT_API_SCRIPT_NAME', 'FPT_API_API_KEY', 'SUPABASE_URL', 'SUPABASE_SECRET_KEY', 'POSTGRES_URL_NON_POOLING', 'E2E_SANDBOX_PROJECT', 'E2E_GROUP_A', 'E2E_GROUP_B']) {
 	if (!env[name]) {
@@ -55,6 +63,8 @@ const GROUP_A = Number(env.E2E_GROUP_A);
 const GROUP_B = Number(env.E2E_GROUP_B);
 const STAMP = new Date().toISOString().slice(0, 16).replace(/\D/g, '');
 const NAME = `zzsgbids drive ${STAMP}`;
+/** The row typed by hand, and how many shots it stands for. */
+const COUNTED = { code: 'zzsgbids_SIMPLE', count: 120 };
 const log = (...parts) => console.log('[e2e]', ...parts);
 const state = {};
 const evidence = [];
@@ -98,12 +108,25 @@ const search = (type, filters, fields) => fpt('POST', `/entity/${type}/_search?p
 const local = /@(localhost|127\.0\.0\.1)[:/]/.test(env.POSTGRES_URL_NON_POOLING);
 const sql = postgres(env.POSTGRES_URL_NON_POOLING.replace(/[?&]sslmode=[^&]*/, ''), { ...(local ? {} : { ssl: { rejectUnauthorized: false } }), max: 1, onnotice: () => {} });
 
+/** A port nothing listens on now, from the system. */
+function freePort() {
+	return new Promise((resolve, reject) => {
+		const server = createServer();
+		server.unref();
+		server.on('error', reject);
+		server.listen(0, '127.0.0.1', () => {
+			const { port } = server.address();
+			server.close(() => resolve(port));
+		});
+	});
+}
+
 async function startApp() {
-	if (await fetch(APP).then((r) => r.ok).catch(() => false)) {
-		log(`an app already answers on ${PORT}; using it`);
-		return null;
-	}
-	const child = spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(PORT), '--strictPort'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
+	const port = await freePort();
+	APP = `http://localhost:${port}`;
+	log('app on its own port', port);
+	// `--strictPort`: if the port is taken in the meantime, vite stops, and the drive with it.
+	const child = spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(port), '--strictPort'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } });
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => reject(new Error('vite dev did not start.')), 60_000);
 		child.stdout.on('data', (d) => {
@@ -261,6 +284,37 @@ const stages = {
 		await dialog.waitFor({ state: 'detached' });
 		// Two breakdown Shots with a difficulty, into Seq A too.
 		await breakdown(`Shot\tDescription\tFrames\tDifficulty\nzzsgbids_SQ900\tRooftop wide\t60\tHard\nzzsgbids_SQ910\tRooftop close\t40\tEasy`);
+		// A row typed by hand: Add row opens its code; Tab writes it and opens the Count; Enter on the last row adds the next.
+		const table = page.locator('[data-slot=request-table]');
+		const before = await table.locator('tr[data-row-key]').count();
+		await page.locator('[data-slot=add-row]').click();
+		await table.locator('[data-slot=entity-table-editor] input').first().waitFor({ timeout: 10_000 });
+		await page.keyboard.type(COUNTED.code, { delay: 15 });
+		await page.keyboard.press('Tab');
+		await page.waitForTimeout(500);
+		const opened = await page.evaluate(() => document.activeElement?.closest('td')?.getAttribute('data-column') ?? '');
+		await page.keyboard.type(String(COUNTED.count), { delay: 15 });
+		await page.keyboard.press('Enter');
+		// The next row comes with its code open to type in.
+		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=request-table] tr[data-row-key]').length === n, before + 2, { timeout: 10_000 });
+		await page.waitForTimeout(500);
+		const after = await table.locator('tr[data-row-key]').count();
+		const nextOpen = await page.evaluate(() => document.activeElement?.closest('td')?.getAttribute('data-column') ?? '');
+		const typedRow = table.locator('tr[data-row-key]', { hasText: COUNTED.code });
+		const shownCount = (await typedRow.locator('[data-slot=row-count]').innerText()).replace(/\D/g, '');
+		const header = await table.locator('[data-slot=bid-group-counts]').first().innerText();
+		await shoot(page, 'row-typed-by-hand');
+		await screens(page, 'table-counted-rows');
+		expect(
+			opened === 'c_count' && nextOpen === 'c_code' && after === before + 2 && shownCount === String(COUNTED.count) && / in \d+ rows/.test(header),
+			`a row typed by hand: Add row opened its code, Tab wrote it and opened the Count (${opened}), Enter on the last row added the next one, its code open (${nextOpen}); the row shows ${shownCount} and its bid says "${header}"`
+		);
+		// The empty row goes again: a row with no code would stop the issue.
+		await page.keyboard.press('Escape');
+		await table.locator('[data-slot=row-no-code]').waitFor({ timeout: 10_000 });
+		await table.locator('tr[data-row-key]', { has: page.locator('[data-slot=row-no-code]') }).getByRole('checkbox').first().click();
+		await page.locator('[data-slot=bulk-remove]').click();
+		await table.locator('[data-slot=row-no-code]').waitFor({ state: 'detached', timeout: 10_000 });
 		// A second bid, Creature: a breakdown Shot and an Asset.
 		await page.locator('[data-slot=add-bid]').click();
 		const rename = page.locator('[data-slot=bid-rename]');
@@ -289,7 +343,9 @@ const stages = {
 		const of = (name) => rows.filter((r) => r.name === name).map((r) => r.code);
 		const seq = of('Seq A');
 		const creature = of('Creature');
-		expect(seq.length === 5 && creature.length === 3 && creature.includes(state.moved.code) && !seq.includes(state.moved.code), `two bids stored with their rows: Seq A holds ${seq.join(', ')}; Creature holds ${creature.join(', ')}, ${state.moved.code} moved in from Seq A`);
+		expect(seq.length === 6 && creature.length === 3 && creature.includes(state.moved.code) && !seq.includes(state.moved.code), `two bids stored with their rows: Seq A holds ${seq.join(', ')}; Creature holds ${creature.join(', ')}, ${state.moved.code} moved in from Seq A`);
+		const [counted] = await sql`select unit_count, source, fpt_id from public.production_bid_items where request_id = ${state.requestId} and code = ${COUNTED.code}`;
+		expect(counted?.unit_count === COUNTED.count && counted.source === 'breakdown' && counted.fpt_id === null, `the typed row is stored in this request only with unit_count ${counted?.unit_count}`);
 	},
 
 	async vendors() {
@@ -310,6 +366,15 @@ const stages = {
 		await page.waitForTimeout(600);
 		await shoot(page, 'draft-vendors');
 		await screens(page, 'draft-two-bids');
+		// The side panel hides to give the table its room, and this browser keeps the choice.
+		await page.locator('[data-slot=side-panel-toggle]').click();
+		await page.locator('[data-slot=side-panel][data-state=closed]').waitFor();
+		await page.waitForTimeout(400);
+		await screens(page, 'draft-panel-hidden');
+		const kept = await page.evaluate(() => localStorage.getItem('sg-bids:side-panel'));
+		await page.locator('[data-slot=side-panel-toggle]').click();
+		await page.locator('[data-slot=side-panel][data-state=open]').waitFor();
+		expect(kept === 'closed' && (await page.evaluate(() => localStorage.getItem('sg-bids:side-panel'))) === 'open', 'the side panel hides and shows again, the choice kept in this browser');
 		const inv = await sql`select vendor_name, vendor_group_id, package_keys, link_pending from public.invitations where request_id = ${state.requestId} order by vendor_name`;
 		const creatureKey = (await sql`select key from public.request_packages where request_id = ${state.requestId} and name = 'Creature'`)[0]?.key;
 		expect(
@@ -356,7 +421,9 @@ const stages = {
 		const [req] = await sql`select status from public.bid_requests where id = ${state.requestId}`;
 		const items2 = await sql`select code, package_key from public.request_items where request_id = ${state.requestId} order by position`;
 		const [{ n }] = await sql`select count(*)::int as n from public.production_bids where request_id = ${state.requestId}`;
-		expect(req.status === 'issued' && items2.length === 8 && n === 0, `issued: ${items2.length} rows copied into the request under their bids, the draft's bids gone`);
+		const [countedItem] = await sql`select key, unit_count from public.request_items where request_id = ${state.requestId} and code = ${COUNTED.code}`;
+		state.countedKey = countedItem?.key;
+		expect(req.status === 'issued' && items2.length === 9 && n === 0 && countedItem?.unit_count === COUNTED.count, `issued: ${items2.length} rows copied into the request under their bids, the counted row with its count ${countedItem?.unit_count}, the draft's bids gone`);
 		expect(links.length === 2 && links.every((l) => copied.includes(l)), 'one link per vendor on the page, shown once; Copy all put both on the clipboard, one per line');
 		expect(mail?.startsWith('mailto:') && mail.includes(encodeURIComponent(links[0])) && mail.includes('subject='), 'Email opens a mailto with the subject and the link in the body; the app sends nothing');
 	},
@@ -383,6 +450,7 @@ const stages = {
 		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
 		const useRate = await vp.locator('[data-row]', { hasText: first }).locator('[data-slot=line-use-rate]').count();
 		const fromRate = await vp.locator('[data-slot=line-from-rate]').count();
+		const extended = await vp.locator('[data-row]', { hasText: COUNTED.code }).locator('[data-slot=line-extended]').innerText();
 		await shoot(vp, 'vendor-a-rates');
 		await screens(vp, 'vendor-rate-card');
 		await vp.getByRole('button', { name: 'Review and submit' }).first().click();
@@ -391,14 +459,21 @@ const stages = {
 		await shoot(vp, 'vendor-a-submitted');
 		await vctx.close();
 		const [b] = await sql`select b.id, b.header->'declined' as declined, b.header->'rateCard' as card from public.bids b join public.invitations i on i.id = b.invitation_id where i.request_id = ${state.requestId} and i.vendor_name = 'Vendor A (drive)' and b.status = 'submitted'`;
-		const lines = await sql`select l.total_minor, l.detail->>'fromRate' as from_rate, i.code, i.fields->>'difficulty' as difficulty from public.bid_lines l join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.bid_id = ${b.id}`;
+		const lines = await sql`select l.total_minor, l.detail->>'fromRate' as from_rate, l.detail->'unit' as unit, i.code, i.unit_count, i.fields->>'difficulty' as difficulty from public.bid_lines l join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.bid_id = ${b.id}`;
 		const total = lines.reduce((n, l) => n + Number(l.total_minor), 0);
-		const want = lines.reduce((n, l) => n + (l.code === first ? 120_000 : (RATES[l.difficulty ?? ''] ?? 1500) * 100), 0);
+		const want = lines.reduce((n, l) => n + (l.code === first ? 120_000 : (RATES[l.difficulty ?? ''] ?? 1500) * 100 * l.unit_count), 0);
+		const countedLine = lines.find((l) => l.code === COUNTED.code);
 		state.totalA = total;
-		expect(useRate === 1 && fromRate === 4, 'the vendor form marks 4 rows as from its rates and the typed row as its own, with Use rate');
+		state.countedMinor = Number(countedLine?.total_minor);
+		expect(useRate === 1 && fromRate === 5, 'the vendor form marks 5 rows as from its rates, the counted row among them, and the typed row as its own, with Use rate');
+		expect(/× 120/.test(extended), `the counted row shows its count and its line under the unit price: "${extended.replace(/\s+/g, ' ').trim()}"`);
 		expect(
-			lines.length === 5 && total === want && lines.filter((l) => l.from_rate === 'true').length === 4 && lines.find((l) => l.code === first)?.from_rate === null && b.card && JSON.stringify(b.declined).includes('bid:'),
-			`Vendor A submitted Seq A from its rate card (${offered.map((d) => `${d || 'no difficulty'} ${RATES[d] ?? 1500}`).join(', ')}), ${first} overridden at 1,200: 5 lines summing to ${total / 100} USD, 4 from the rates, the card kept with the answer; Creature declined`
+			!!countedLine && Number(countedLine.total_minor) === RATES[''] * 100 * COUNTED.count && countedLine.unit?.minor === RATES[''] * 100 && countedLine.from_rate === 'true',
+			`the counted row's line: unit ${countedLine?.unit?.minor / 100} USD from the rate for rows with no difficulty, times ${COUNTED.count}, total ${Number(countedLine?.total_minor) / 100} USD in whole minor units`
+		);
+		expect(
+			lines.length === 6 && total === want && lines.filter((l) => l.from_rate === 'true').length === 5 && lines.find((l) => l.code === first)?.from_rate === null && b.card && JSON.stringify(b.declined).includes('bid:'),
+			`Vendor A submitted Seq A from its rate card (${offered.map((d) => `${d || 'no difficulty'} ${RATES[d] ?? 1500}`).join(', ')}), ${first} overridden at 1,200: 6 lines summing to ${total / 100} USD, 5 from the rates, the card kept with the answer; Creature declined`
 		);
 	},
 
@@ -441,7 +516,7 @@ const stages = {
 		await page.getByRole('button', { name: 'Set the rate' }).click();
 		await page.waitForTimeout(2000);
 		// Seq A's rows to A, one by one; Creature to B, whole, from one of its rows.
-		for (const code of [...state.seqShots.map((s) => s.code), 'zzsgbids_SQ900', 'zzsgbids_SQ910']) {
+		for (const code of [...state.seqShots.map((s) => s.code), 'zzsgbids_SQ900', 'zzsgbids_SQ910', COUNTED.code]) {
 			await page.getByRole('gridcell', { name: new RegExp(`^${esc(code)}, Vendor A \\(drive\\):`) }).click();
 			await page.waitForTimeout(700);
 		}
@@ -449,10 +524,12 @@ const stages = {
 		await page.waitForTimeout(1500);
 		await page.getByRole('button', { name: 'Mark as the chosen scenario' }).click();
 		await page.waitForTimeout(1500);
+		const cell = await page.getByRole('gridcell', { name: new RegExp(`^${esc(COUNTED.code)}, Vendor A \\(drive\\):`) }).getAttribute('aria-label');
 		await shoot(page, 'compare-scenario');
 		await screens(page, 'comparison');
 		const [sc] = await sql`select s.id, (select count(*)::int from public.award_scenario_items i where i.scenario_id = s.id) as picks from public.award_scenarios s where s.request_id = ${state.requestId} and s.chosen`;
-		expect(sc?.picks === 8, `scenario chosen: ${sc?.picks} rows picked, Seq A to Vendor A, Creature whole to Vendor B, B's rate 1.27 GBP to USD`);
+		expect(/each times 120/.test(cell ?? ''), `the comparison shows the counted row's line total with its unit price and count: "${cell}"`);
+		expect(sc?.picks === 9, `scenario chosen: ${sc?.picks} rows picked, Seq A to Vendor A with the counted row whole, Creature whole to Vendor B, B's rate 1.27 GBP to USD`);
 	},
 
 	async publish() {
@@ -469,6 +546,7 @@ const stages = {
 		const anyway = page.locator('[data-slot=publish-anyway]');
 		if (await anyway.count()) await anyway.click();
 		await shoot(page, 'publish-preview');
+		await screens(page, 'publish-preview');
 		await page.locator('[data-slot=gate-rail] [data-slot=publish]').click();
 		await page.locator('[data-slot=published], [data-slot=publish-failed]').first().waitFor({ timeout: 120_000 });
 		await page.waitForTimeout(1000);
@@ -479,7 +557,8 @@ const stages = {
 	async readBack() {
 		const prefix = `sgbids/${state.requestId}/`;
 		const bids = await search(state.bidType, [['sg_sgbids_key', 'starts_with', prefix]], ['code', 'sg_vendor', 'sg_total', 'sg_currency', 'sg_total_base', 'sg_exchange_rate', 'sg_status_list', 'sg_sgbids_key']);
-		const lines = await search(state.lineType, [['sg_sgbids_key', 'starts_with', prefix]], ['code', 'sg_item', 'sg_amount', 'sg_currency', 'sg_amount_base', 'sg_bid', 'sg_sgbids_key']);
+		// Count is optional on Bid Line: a site without it answers the read and leaves the name out (028).
+		const lines = await search(state.lineType, [['sg_sgbids_key', 'starts_with', prefix]], ['code', 'sg_item', 'sg_amount', 'sg_currency', 'sg_amount_base', 'sg_bid', 'sg_sgbids_key', 'sg_count']);
 		const minor = (v) => Math.round(Number(v ?? 0) * 100);
 		const line = (b) => `${b.attributes.code}: ${b.attributes.sg_total} ${b.attributes.sg_currency} (base ${b.attributes.sg_total_base} USD)`;
 		expect(bids.length === 2 && bids.every((b) => b.attributes.code.startsWith(NAME)), `Flow PT holds 2 Bids, named after the request: ${bids.map(line).join('; ')}`);
@@ -489,12 +568,24 @@ const stages = {
 			const sum = ls.reduce((n, l) => n + minor(l.attributes.sg_amount), 0);
 			const figure = ls.every((l) => l.attributes.sg_amount === null);
 			expect(
-				figure ? ls.length === 3 && minor(b.attributes.sg_total) === 420000 : ls.length === 5 && sum === minor(b.attributes.sg_total) && sum === state.totalA,
+				figure ? ls.length === 3 && minor(b.attributes.sg_total) === 420000 : ls.length === 6 && sum === minor(b.attributes.sg_total) && sum === state.totalA,
 				figure
 					? `${b.attributes.code}: one figure ${b.attributes.sg_total} ${b.attributes.sg_currency} on the Bid, ${ls.length} Bid Lines with no amount`
 					: `${b.attributes.code}: ${ls.length} Bid Lines summing to ${sum / 100}, the Bid's total ${b.attributes.sg_total}, rate card and override as typed`
 			);
 		}
+		const counted = lines.find((l) => l.attributes.sg_sgbids_key.endsWith(`/shot:${state.countedKey}`));
+		const hasField = Object.prototype.hasOwnProperty.call(counted?.attributes ?? {}, 'sg_count');
+		expect(
+			!!counted &&
+				minor(counted.attributes.sg_amount) === state.countedMinor &&
+				counted.attributes.code.includes(`${COUNTED.code} x${COUNTED.count} `) &&
+				(counted.relationships.sg_item?.data ?? null) === null &&
+				(!hasField || counted.attributes.sg_count === COUNTED.count),
+			`the counted row's Bid Line reads back: "${counted?.attributes.code}", amount ${counted?.attributes.sg_amount} ${counted?.attributes.sg_currency}, no Shot; its count ${hasField ? `${counted?.attributes.sg_count} in sg_count` : 'in the name alone: the site has no Count field, and the drive creates none'}`
+		);
+		const madeShots = await search('Shot', [['project', 'is', { type: 'Project', id: state.projectId }], ['code', 'is', COUNTED.code]], ['code']);
+		expect(madeShots.length === 0, 'no Shot was created for the counted row');
 		const groups = {};
 		for (const r of await search('Shot', [['id', 'in', state.shots.map((s) => s.id)]], ['sg_vendor_groups'])) groups[r.id] = (r.relationships.sg_vendor_groups?.data ?? []).map((g) => g.id);
 		expect(state.seqShots.every((s) => groups[s.id]?.includes(GROUP_A)) && groups[state.moved.id]?.includes(GROUP_B), `Vendor A's Group on the ${state.seqShots.length} Seq A Shots, Vendor B's on ${state.moved.code} in Creature`);

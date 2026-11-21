@@ -5,7 +5,8 @@
  * A world is a request with its rows and bids (packages), its vendors and their answers, and an
  * award scenario that holds together. Answers come in several currencies with a locked rate, row by
  * row or as one figure per bid, with bids declined, rows excluded or left open, non-shot costs, a
- * discount, a tax and rebate splits. Sizes stay small, so a run stays fast.
+ * discount, a tax and rebate splits. Breakdown rows may stand for several (`count.ts`), and their
+ * lines are priced per unit, the total the unit times the count. Sizes stay small, so a run stays fast.
  *
  * In CI the seed is fixed, so a run is the same run. `FC_SEED=<seed>` replays a failure anywhere;
  * fast-check prints the seed, the path and the shrunk counterexample when a property fails.
@@ -35,6 +36,7 @@ import { targetKey } from './model';
 import { minorDigits, money, rate, type Money, type Rate } from './money';
 import type { AwardInput, AwardPlan, Existing, FptSite, Write, Written } from './fpt-award';
 import { resolvePackages } from './packages';
+import { countOf, extend } from './count';
 
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 const seed = env.FC_SEED ? Number(env.FC_SEED) : env.CI ? 40 : undefined;
@@ -120,6 +122,8 @@ export interface World {
 export interface WorldOptions {
 	/** Rows with no Flow PT row, from a breakdown. On by default. */
 	readonly breakdown?: boolean;
+	/** Breakdown rows that stand for several (`count.ts`), priced per unit. On by default. */
+	readonly counts?: boolean;
 	/** The highest rebate rate. 50 by default: the real ones sit below. */
 	readonly maxRebateRate?: number;
 	/** The most vendors. */
@@ -181,8 +185,10 @@ function packagesOf(g: G): RequestPackage[] | undefined {
 	return Array.from({ length: int(g, 1, 3) }, (_, i) => ({ id: packageId(g, i), name: `${pickOne(g, names)} ${i + 1}` }));
 }
 
-function rowsOf(g: G, packages: readonly RequestPackage[] | undefined, breakdown: boolean): { shots: RequestShot[]; assets: RequestAsset[] } {
+function rowsOf(g: G, packages: readonly RequestPackage[] | undefined, breakdown: boolean, counts: boolean): { shots: RequestShot[]; assets: RequestAsset[] } {
 	const pkg = () => (packages ? pickOne(g, packages).id : undefined);
+	/** A breakdown row may stand for several: 2 to 500 of its kind. */
+	const counted = (fromBreakdown: boolean) => (fromBreakdown && counts && chance(g, 40) ? { count: int(g, 2, 500) } : {});
 	const shots = Array.from({ length: int(g, 1, 7) }, (_, i): RequestShot => {
 		const fromBreakdown = breakdown && chance(g, 15);
 		const frames = chance(g, 70) ? int(g, 1, 400) : undefined;
@@ -195,7 +201,8 @@ function rowsOf(g: G, packages: readonly RequestPackage[] | undefined, breakdown
 			...(sequence ? { sequence } : {}),
 			omitted: chance(g, 15),
 			assetIds: [],
-			...(packages ? { package: pkg() } : {})
+			...(packages ? { package: pkg() } : {}),
+			...counted(fromBreakdown)
 		};
 	});
 	const assets = Array.from({ length: int(g, 0, 3) }, (_, i): RequestAsset => {
@@ -205,7 +212,8 @@ function rowsOf(g: G, packages: readonly RequestPackage[] | undefined, breakdown
 			name: `Asset ${i + 1}`,
 			...(fromBreakdown ? { source: 'breakdown' as const } : { fpt: { type: 'Asset', id: 200 + i } }),
 			...(chance(g, 10) ? { omitted: true } : {}),
-			...(packages ? { package: pkg() } : {})
+			...(packages ? { package: pkg() } : {}),
+			...counted(fromBreakdown)
 		};
 	});
 	return { shots, assets };
@@ -255,9 +263,14 @@ function adjustment(g: G, currency: string, of: number, maxPercent: number): Adj
 	return null;
 }
 
-function lineOf(g: G, bidIndex: number, target: Target, currency: string): BidLine | null {
+/** A line on its row. A counted row's is priced per unit: its total is the unit times the count. */
+function lineOf(g: G, bidIndex: number, target: Target, currency: string, count: number): BidLine | null {
 	if (chance(g, 12)) return null;
 	const id = `l${bidIndex}-${targetKey(target)}`;
+	if (count > 1) {
+		const unit = amount(g, currency, 2_000);
+		return { id, target, total: extend(unit, count), unit, excluded: chance(g, 10) };
+	}
 	if (chance(g, 10)) return { id, target, total: chance(g, 50) ? money(0, currency) : amount(g, currency, 200_000), excluded: true };
 	const total = amount(g, currency, 200_000);
 	const detail = chance(g, 50);
@@ -275,6 +288,7 @@ function bidOf(g: G, j: number, request: BidRequest, vendor: InvitedVendor, maxR
 	if (declined.length === invited.length) declined.shift();
 	const lines: BidLine[] = [];
 	const packages: PackagePrice[] = [];
+	const counts = new Map([...request.shots.map((s) => [targetKey({ kind: 'shot', id: s.id }), countOf(s)] as const), ...request.assets.map((a) => [targetKey({ kind: 'asset', id: a.id }), countOf(a)] as const)]);
 	for (const pkg of invited) {
 		if (declined.includes(pkg)) continue;
 		const live = resolved.live.get(pkg) ?? [];
@@ -283,7 +297,7 @@ function bidOf(g: G, j: number, request: BidRequest, vendor: InvitedVendor, maxR
 			for (const target of live) lines.push({ id: `l${j}-${targetKey(target)}`, target, total: money(0, currency), excluded: false, inPackage: true });
 		} else {
 			for (const target of live) {
-				const line = lineOf(g, j, target, currency);
+				const line = lineOf(g, j, target, currency, counts.get(targetKey(target)) ?? 1);
 				if (line) lines.push(line);
 			}
 		}
@@ -352,7 +366,7 @@ function scenarioOf(g: G, request: BidRequest, bids: readonly VendorBid[]): Awar
 
 export function buildWorld(g: G, options: WorldOptions = {}): World {
 	const packages = packagesOf(g);
-	const { shots, assets } = rowsOf(g, packages, options.breakdown ?? true);
+	const { shots, assets } = rowsOf(g, packages, options.breakdown ?? true, options.counts ?? true);
 	const vendors = vendorsOf(g, packages, options.maxVendors ?? 3);
 	const request: BidRequest = {
 		id: REQUEST_ID,

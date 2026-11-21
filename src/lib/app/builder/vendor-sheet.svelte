@@ -9,6 +9,7 @@
 	import type { BidRequest } from '$lib/pure/model';
 	import { summarize, vendorView } from '$lib/pure/request';
 	import { safeHref } from '$lib/pure/safe-href';
+	import { countOf, unitsLine } from '$lib/pure/count';
 
 	let { request }: { request: BidRequest } = $props();
 
@@ -18,6 +19,9 @@
 	/** The bid a row sits in, by its package, when the request has more than one. */
 	const bidNames = $derived(new Map((request.packages ?? []).map((p) => [p.id, p.name])));
 	const several = $derived(bidNames.size > 1);
+	/** A Count column shows when some row stands for several. */
+	const shotCounts = $derived(view.shots.some((s) => countOf(s) > 1));
+	const assetCounts = $derived(view.assets.some((a) => countOf(a) > 1));
 	const number = new Intl.NumberFormat();
 	const dayFormat = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
 	const day = (value?: string) => (value ? dayFormat.format(new Date(`${value}T00:00:00Z`)) : null);
@@ -41,10 +45,8 @@
 				</p>
 			</div>
 			<h2 class="text-2xl leading-tight font-semibold tracking-tight text-balance sm:text-3xl">{h.title ?? 'Untitled request'}</h2>
-			<p class="text-sm">
-				{counts.shots}
-				{counts.shots === 1 ? 'shot' : 'shots'}, {number.format(counts.frames)} frames, {counts.assets}
-				{counts.assets === 1 ? 'asset' : 'assets'}.
+			<p class="text-sm" data-slot="sheet-counts">
+				{unitsLine(counts.shots, counts.shotRows, 'shot', (n) => number.format(n))}, {number.format(counts.frames)} frames, {unitsLine(counts.assets, counts.assetRows, 'asset', (n) => number.format(n))}.
 			</p>
 			{#if facts.length > 0}
 				<dl class="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -85,9 +87,10 @@
 						<thead>
 							<tr class="text-muted-foreground border-border border-b text-left text-xs">
 								<th class="py-2 pr-3 font-medium">Shot</th>
+								{#if shotCounts}<th class="px-3 py-2 text-right font-medium">Count</th>{/if}
 								{#if several}<th class="px-3 py-2 font-medium">Bid</th>{/if}
 								<th class="px-3 py-2 font-medium">Where</th>
-								<th class="px-3 py-2 text-right font-medium">Frames</th>
+								<th class="px-3 py-2 text-right font-medium">Frames{#if shotCounts}, each{/if}</th>
 								<th class="px-3 py-2 font-medium">Difficulty</th>
 								<th class="py-2 pl-3 font-medium">Description</th>
 							</tr>
@@ -96,6 +99,7 @@
 							{#each view.shots as s (s.id)}
 								<tr class="border-border border-b align-top last:border-0">
 									<td class="py-2 pr-3 font-mono text-xs font-medium">{s.code}</td>
+									{#if shotCounts}<td class="px-3 py-2 text-right tabular-nums">{countOf(s).toLocaleString()}</td>{/if}
 									{#if several}<td class="px-3 py-2 text-xs">{s.package ? (bidNames.get(s.package) ?? '') : ''}</td>{/if}
 									<td class="text-muted-foreground px-3 py-2 text-xs">{[s.episode, s.sequence].filter(Boolean).join(' / ')}</td>
 									<td class="px-3 py-2 text-right tabular-nums">{s.frames ?? ''}</td>
@@ -123,6 +127,7 @@
 						<thead>
 							<tr class="text-muted-foreground border-border border-b text-left text-xs">
 								<th class="py-2 pr-3 font-medium">Asset</th>
+								{#if assetCounts}<th class="px-3 py-2 text-right font-medium">Count</th>{/if}
 								{#if several}<th class="px-3 py-2 font-medium">Bid</th>{/if}
 								<th class="px-3 py-2 font-medium">Type</th>
 								<th class="px-3 py-2 text-right font-medium">Used in</th>
@@ -134,6 +139,7 @@
 							{#each view.assets as a (a.id)}
 								<tr class="border-border border-b align-top last:border-0">
 									<td class="py-2 pr-3 font-mono text-xs font-medium">{a.name}</td>
+									{#if assetCounts}<td class="px-3 py-2 text-right tabular-nums">{countOf(a).toLocaleString()}</td>{/if}
 									{#if several}<td class="px-3 py-2 text-xs">{a.package ? (bidNames.get(a.package) ?? '') : ''}</td>{/if}
 									<td class="px-3 py-2">{a.type ?? ''}</td>
 									<td class="px-3 py-2 text-right tabular-nums">{a.timesUsed ?? 0}</td>

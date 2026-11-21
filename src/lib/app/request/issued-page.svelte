@@ -35,6 +35,7 @@
 	import { requestName, deletedLine } from '$lib/pure/request-delete';
 	import { requestHref } from '$lib/pure/routes';
 	import { summarize } from '$lib/pure/request';
+	import { unitsLine } from '$lib/pure/count';
 
 	let {
 		loaded,
@@ -127,7 +128,7 @@
 		<StatusChip status={loaded.status} />
 		<span class="text-foreground">{r.header.project}</span>
 		{#if r.header.round > 1}<span>Round {r.header.round}</span>{/if}
-		<span class="tabular-nums">{plural(packages.length || 1, 'bid')}, {plural(counts.shots, 'shot')}{counts.assets > 0 ? `, ${plural(counts.assets, 'asset')}` : ''}</span>
+		<span class="tabular-nums" data-slot="issued-counts">{plural(packages.length || 1, 'bid')}, {unitsLine(counts.shots, counts.shotRows, 'shot')}{counts.assets > 0 ? `, ${unitsLine(counts.assets, counts.assetRows, 'asset')}` : ''}</span>
 		{#if due}<span>Answers due {due}</span>{/if}
 	{/snippet}
 	{#snippet actions()}

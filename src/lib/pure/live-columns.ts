@@ -8,16 +8,19 @@
  *
  * The person may not edit a field when the schema says `editable` false for them, or when the
  * preflight write was refused (094, recipe 017). The code and the Sequence are read live and never
- * written here: the code names the Shot in the pipeline, and a Sequence is a link.
+ * written here: the code names the Shot in the pipeline, and a Sequence is a link. A row in this
+ * request only (a breakdown row with no Flow PT row, typed by hand or pasted) takes a code typed
+ * here, and a count (`count.ts`); a row linked to Flow PT keeps its code and a count of 1.
  *
  * A row belongs to a bid because it was added to it: there is no column for its group.
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
+import { countLock } from './count';
 import { slotsFor, type ItemKind, type Mapping } from './field-map';
 import { DEFAULT_TIERS } from './request';
 
-export type ColumnKey = 'code' | 'sequence' | 'frames' | 'description' | 'type' | 'difficulty' | 'notes' | 'omitted';
+export type ColumnKey = 'code' | 'count' | 'sequence' | 'frames' | 'description' | 'type' | 'difficulty' | 'notes' | 'omitted';
 
 export type CellType = 'text' | 'number' | 'list' | 'checkbox';
 
@@ -54,9 +57,11 @@ interface ColumnSpec {
 // The code gets room for a long code and its marks: the last column takes what is left.
 const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Shot', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
+	// In this request only: how many shots of a kind the row stands for. Frames are per unit.
+	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'sequence', label: 'Sequence', width: 150, fallback: 'text', field: (m) => m.sequence, fixedLock: 'Move a Shot to another Sequence in Flow PT.' },
 	{ key: 'frames', label: 'Frames', width: 120, fallback: 'number', field: (m) => m.frames },
-	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
+	{ key: 'description', label: 'Description', width: 320, fallback: 'text', field: (m) => m.description },
 	{ key: 'type', label: 'Type', width: 140, fallback: 'text', field: (m) => m.type },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
 	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
@@ -66,6 +71,7 @@ const SHOT_SPECS: readonly ColumnSpec[] = [
 
 const ASSET_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Asset', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
+	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'type', label: 'Type', width: 150, fallback: 'text', field: (m) => m.type },
 	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
@@ -133,6 +139,12 @@ interface Item {
 	readonly source?: 'breakdown';
 }
 
+/** A code or Sequence a row keeps: a linked breakdown row keeps what it was matched with. */
+function keeps(key: 'code' | 'sequence', linked: boolean): string {
+	if (key === 'code') return linked ? 'A breakdown row linked to Flow PT keeps the code it was matched with.' : 'A breakdown row keeps the code it came with.';
+	return 'A breakdown row keeps the Sequence it came with.';
+}
+
 /** Where one cell's edit lands: the Flow PT field of the row, the request, or nowhere and why. */
 export type CellTarget =
 	| { readonly kind: 'fpt'; readonly type: string; readonly id: number; readonly field: string }
@@ -142,8 +154,11 @@ export type CellTarget =
 /** `gone`: Flow PT did not answer for the row when the draft was read. */
 export function cellTarget(column: RequestColumn, item: Item, gone: boolean): CellTarget {
 	const breakdown = item.source === 'breakdown' || !item.fpt;
+	// A row in this request only takes a count and a code typed here; a row linked to Flow PT is one Shot or Asset.
+	if (column.key === 'count') return item.fpt ? { kind: 'locked', reason: countLock(column.kind) } : { kind: 'request' };
+	if (column.key === 'code' && breakdown && !item.fpt) return { kind: 'request' };
 	if (column.key === 'code' || column.key === 'sequence') {
-		if (breakdown) return { kind: 'locked', reason: `A breakdown row keeps the ${column.key === 'code' ? 'code' : 'Sequence'} it came with.` };
+		if (breakdown) return { kind: 'locked', reason: keeps(column.key, item.fpt !== undefined) };
 	}
 	if (!column.live || !column.field || breakdown) return { kind: 'request' };
 	if (gone) return { kind: 'locked', reason: `This ${noun(column.kind)} is gone from Flow PT, or you cannot read it.` };

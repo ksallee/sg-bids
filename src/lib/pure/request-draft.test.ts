@@ -67,8 +67,16 @@ describe('renaming a bid', () => {
 describe('the rows of a bid', () => {
 	it('counts shots and assets in, frames of the shots in, and the omitted ones', () => {
 		const stats = bidStats(two, rows);
-		expect(stats.get('bid:a')).toEqual({ shots: 1, assets: 0, omitted: 1, frames: 48, rows: 2 });
-		expect(stats.get('bid:b')).toEqual({ shots: 1, assets: 1, omitted: 0, frames: 100, rows: 2 });
+		expect(stats.get('bid:a')).toEqual({ shots: 1, shotRows: 1, assets: 0, assetRows: 0, omitted: 1, frames: 48, rows: 2 });
+		expect(stats.get('bid:b')).toEqual({ shots: 1, shotRows: 1, assets: 1, assetRows: 1, omitted: 0, frames: 100, rows: 2 });
+	});
+
+	it('counts a counted row as many as it stands for, and its frames per unit times its count', () => {
+		const counted: DraftRows = {
+			shots: [shot('simple', 'bid:a', { source: 'breakdown', frames: 80, count: 120 }), shot('hard', 'bid:a', { source: 'breakdown', count: 10, omitted: true }), shot('sh010', 'bid:a', { frames: 48 })],
+			assets: [asset('props', 'bid:a', { source: 'breakdown', count: 12 })]
+		};
+		expect(bidStats(two, counted).get('bid:a')).toEqual({ shots: 121, shotRows: 2, assets: 12, assetRows: 1, omitted: 1, frames: 9648, rows: 4 });
 	});
 
 	it('gives rows with no bid to the one named', () => {

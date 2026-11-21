@@ -1,7 +1,8 @@
 <!--
 	The main work: the request's rows, in one table grouped by bid, filling the rest of the page. One
 	bar: Shots, and Assets once there is one (else a quiet way to add some), the two buttons that add
-	(from Flow PT, from a breakdown) to the bid picked, and the counts. Under it the bids, one chip each
+	(from Flow PT, from a breakdown, a row typed by hand) to the bid picked, and the counts: shots as
+	the sum of the rows' counts, with the rows beside it where they differ. Under it the bids, one chip each
 	(`bids-bar`). The table is the request's own rows, edited in place and in bulk, live to Flow PT
 	where a field feeds the column (`request-table`). Add from Flow PT opens a dialog with a plain list
 	(`fpt-add-dialog.svelte`); the rows it adds come back here marked and in view. The section carries
@@ -23,6 +24,7 @@
 	import type { ItemKind } from '$lib/pure/field-map';
 	import type { Id } from '$lib/pure/model';
 	import { controlId } from '$lib/pure/readiness';
+	import { unitsLine } from '$lib/pure/count';
 	import type { Builder } from '$lib/app/builder.svelte';
 
 	let {
@@ -57,6 +59,12 @@
 			before = new Set(ids(k));
 			fresh = new Set();
 		});
+	});
+
+	// The cursor the page asks for may be on the other kind: its tab opens.
+	$effect(() => {
+		const cursor = builder.cursor;
+		if (cursor && cursor.kind !== untrack(() => kind)) kind = cursor.kind;
 	});
 
 	/** Add from Flow PT, to the bid named or the one picked. */
@@ -94,15 +102,20 @@
 	const number = new Intl.NumberFormat();
 	const totals = $derived.by(() => {
 		let shots = 0;
+		let shotRows = 0;
 		let frames = 0;
 		let assets = 0;
+		let assetRows = 0;
 		for (const s of builder.stats.values()) {
 			shots += s.shots;
+			shotRows += s.shotRows;
 			frames += s.frames;
 			assets += s.assets;
+			assetRows += s.assetRows;
 		}
-		return { shots, frames, assets };
+		return { shots, shotRows, frames, assets, assetRows };
 	});
+	const format = (n: number) => number.format(n);
 </script>
 
 <section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Bids and rows" tabindex="-1" data-slot="items-panel">
@@ -143,12 +156,13 @@
 		<div class="flex items-center gap-2">
 			<Button id="add-from-fpt" size="sm" variant="outline" onclick={() => openPicker()} data-slot="fpt-open"><ListPlus data-icon="inline-start" />Add from Flow PT</Button>
 			<Button size="sm" variant="outline" onclick={() => openBreakdown()} data-slot="breakdown-open"><FileSpreadsheet data-icon="inline-start" />Add from a breakdown</Button>
+			<Button size="sm" variant="outline" onclick={() => builder.addRow(kind)} title="An empty row in this request only. Type its code, then how many it stands for." data-slot="add-row"><Plus data-icon="inline-start" />Add row</Button>
 			<span class="text-muted-foreground text-xs">to <span class="text-foreground font-medium">{builder.bidName(builder.current)}</span></span>
 		</div>
 		<p class="text-muted-foreground ml-auto hidden items-baseline gap-3 py-2 text-sm whitespace-nowrap lg:flex" aria-label="In the request" data-slot="request-counts">
-			<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.shots)}</span> {totals.shots === 1 ? 'shot' : 'shots'}</span>
+			<span title={unitsLine(totals.shots, totals.shotRows, 'shot', format)}><span class="text-foreground font-semibold tabular-nums">{number.format(totals.shots)}</span> {totals.shots === 1 ? 'shot' : 'shots'}{#if totals.shots !== totals.shotRows}{' '}in <span class="tabular-nums">{number.format(totals.shotRows)}</span> {totals.shotRows === 1 ? 'row' : 'rows'}{/if}</span>
 			<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.frames)}</span> {totals.frames === 1 ? 'frame' : 'frames'}</span>
-			{#if totals.assets > 0 || kind === 'asset'}<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.assets)}</span> {totals.assets === 1 ? 'asset' : 'assets'}</span>{/if}
+			{#if totals.assets > 0 || kind === 'asset'}<span><span class="text-foreground font-semibold tabular-nums">{number.format(totals.assets)}</span> {totals.assets === 1 ? 'asset' : 'assets'}{#if totals.assets !== totals.assetRows}{' '}in <span class="tabular-nums">{number.format(totals.assetRows)}</span> {totals.assetRows === 1 ? 'row' : 'rows'}{/if}</span>{/if}
 		</p>
 	</div>
 	<BidsBar {builder} {kind} {marked} onAdd={(bid) => openPicker(bid)} onBreakdown={(bid) => openBreakdown(bid)} onDelete={(bid) => ((deleting = bid), (deleteOpen = true))} />

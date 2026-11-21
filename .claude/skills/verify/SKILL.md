@@ -14,7 +14,8 @@ Done means the change ran. Run this once per feature PR, at the end, not per edi
 2. Name the sandbox and two Groups the vendors link to:
    `E2E_SANDBOX_PROJECT="<sandbox project name>" E2E_GROUP_A=<id> E2E_GROUP_B=<id>`. The sandbox name
    is sg-groundtruth's `FPT_PROBE_SANDBOX_PROJECT`. Never print it, a key, or the site's address.
-3. Run `pnpm e2e:live`. It takes port 5182 or uses the app already there. `E2E_SCREENS=1` also shoots
+3. Run `pnpm e2e:live`. It starts its own app on a free port it picks and never uses one it did not
+   start, so a running dev server or another worktree's drive is never shared. `E2E_SCREENS=1` also shoots
    the main screens at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`.
 4. It cleans up what it made in Flow PT and in the database, also on a failure. Report the evidence
    lines it prints: they say what was read back from Flow PT and the database.

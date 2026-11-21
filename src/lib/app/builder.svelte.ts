@@ -30,7 +30,7 @@ import { addPicked } from '$lib/pure/pick';
 import { applyBreakdown, type BreakdownPlan } from '$lib/pure/breakdown';
 import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
 import type { ItemLink } from '$lib/pure/wire';
-import { removeItems, tiersFor } from '$lib/pure/request';
+import { handAsset, handShot, removeItems, tiersFor } from '$lib/pure/request';
 import type { Id, RequestAsset, RequestShot, Target } from '$lib/pure/model';
 import { addBid, bidKey, bidStats, deleteBid, draftFrom, inBid, moveRows, renameBid, type BidStats, type DraftBid } from '$lib/pure/request-draft';
 import { blankVendor, fromInvited, isBlank, withoutBid, type VendorRow } from '$lib/pure/vendor-rows';
@@ -93,6 +93,12 @@ export class Builder {
 	mappingKept = $state(false);
 	/** A draft is always editable. The match dialog reads it. */
 	readonly readOnly = false;
+	/**
+	 * A row the table should take the cursor to, its first cell open to type in: a row just added by
+	 * hand, or one the issue list points at. The table clears it once it is there.
+	 */
+	cursor = $state<{ kind: ItemKind; id: Id; seq: number } | null>(null);
+	private cursorSeq = 0;
 
 	readonly ready: Promise<void>;
 
@@ -564,6 +570,23 @@ export class Builder {
 		const place = <T extends { id: Id; package?: Id }>(k: 'shot' | 'asset', rows: readonly T[]): T[] => rows.map((r) => ({ ...r, package: was.get(`${k}:${r.id}`) ?? r.package ?? to }));
 		this.state = { ...this.state, shots: place('shot', next.shots), assets: place('asset', next.assets) };
 		this.save();
+	}
+
+	/**
+	 * One empty row typed by hand, in this request only, last in the bid named (the one picked by
+	 * default), and the cursor in its first cell. Answers its id.
+	 */
+	addRow(kind: ItemKind, to: Id = this.current): Id {
+		const id = this.breakdownId(kind);
+		if (kind === 'shot') this.setItems('shot', [...this.state.shots, handShot(id, to)]);
+		else this.setItems('asset', [...this.state.assets, handAsset(id, to)]);
+		this.focusRow(kind, id);
+		return id;
+	}
+
+	/** Take the table's cursor to a row, its first cell open. */
+	focusRow(kind: ItemKind, id: Id): void {
+		this.cursor = { kind, id, seq: ++this.cursorSeq };
 	}
 
 	/** A new id for a breakdown row. Never `shot-<n>`: that is a Flow PT row's. */

@@ -1,7 +1,8 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, setBidding, switchMode, typedFor, type BidForm } from './bid-form';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
-import { typePrice } from './rate-card';
+import { applyRates, typePrice } from './rate-card';
 import { money } from './money';
 
 const req = request({ shots: [shot('sh010'), shot('sh020'), shot('sh030')], assets: [asset('hero', { name: 'Hero' })] });
@@ -499,3 +500,107 @@ describe('a package priced as one figure', () => {
 	});
 });
 
+
+describe('a counted row in the vendor form', () => {
+	const counted = request({ shots: [shot('simple', { source: 'breakdown', count: 120, difficulty: 'Simple' }), shot('sh010')], assets: [asset('props', { source: 'breakdown', count: 12 })] });
+
+	it('carries its count; the price typed is per unit, the line total is unit times count, the unit kept', () => {
+		const form = emptyForm(counted, TODAY);
+		expect(form.lines.map((l) => l.count)).toEqual([120, undefined, 12]);
+		form.lines[0].price = '1,500';
+		form.lines[1].price = '900';
+		form.lines[2].price = '250.25';
+		const { draft, errors } = formToDraft(form, '.');
+		expect(errors).toEqual({});
+		expect(draft.lines).toEqual([
+			{ target: onShot('simple'), total: money(18_000_000, 'USD'), unit: money(150_000, 'USD'), excluded: false },
+			{ target: onShot('sh010'), total: money(90_000, 'USD'), excluded: false },
+			{ target: onAsset('props'), total: money(300_300, 'USD'), unit: money(25_025, 'USD'), excluded: false }
+		]);
+		expect(formTotals(draft).totals.lines.bid).toEqual(money(18_390_300, 'USD'));
+	});
+
+	it('takes its unit price from the rate card', () => {
+		const form = { ...emptyForm(counted, TODAY) };
+		form.rates = { tiers: [{ difficulty: 'Simple', price: '1500' }], fallback: '' };
+		const { draft } = formToDraft(applyRates(form), '.');
+		expect(draft.lines[0]).toEqual({ target: onShot('simple'), total: money(18_000_000, 'USD'), unit: money(150_000, 'USD'), excluded: false, fromRate: true });
+	});
+
+	it('reads a saved counted line back as its unit price', () => {
+		const saved = bid({ currency: 'USD', lines: [line('l1', onShot('simple'), money(18_000_000, 'USD'), { unit: money(150_000, 'USD') })] });
+		expect(formFromBid(saved, counted, '.').lines[0].price).toBe('1500');
+	});
+
+	it('names a unit price whose total would not hold exactly', () => {
+		const form = emptyForm(counted, TODAY);
+		form.lines[0].price = '1000000000000';
+		const { errors, draft } = formToDraft(form, '.');
+		expect(errors['line:shot:simple:price']).toMatch(/Too large/);
+		expect(draft.lines).toEqual([]);
+	});
+
+	it('lets an excluded counted row go with no price as a zero, and with one as unit times count', () => {
+		const form = emptyForm(counted, TODAY);
+		form.lines[0].excluded = true;
+		form.lines[2].excluded = true;
+		form.lines[2].price = '10';
+		expect(formToDraft(form, '.').draft.lines).toEqual([
+			{ target: onShot('simple'), total: money(0, 'USD'), excluded: true },
+			{ target: onAsset('props'), total: money(12_000, 'USD'), unit: money(1000, 'USD'), excluded: true }
+		]);
+	});
+});
+
+describe('count 1 is the form as before (properties)', () => {
+	const priceArb = fc.oneof(
+		fc.constant(''),
+		fc.integer({ min: 0, max: 9_999_999 }).map(String),
+		fc.tuple(fc.integer({ min: 0, max: 99_999 }), fc.integer({ min: 0, max: 99 })).map(([u, c]) => `${u}.${String(c).padStart(2, '0')}`)
+	);
+	const rowsArb = fc.array(fc.record({ price: priceArb, excluded: fc.boolean(), count: fc.integer({ min: 1, max: 5000 }) }), { minLength: 1, maxLength: 10 });
+	const build = (rows: { price: string; excluded: boolean; count: number }[], counts: 'absent' | 'one' | 'own') => {
+		const r = request({ shots: rows.map((row, i) => shot(`s${i}`, { source: 'breakdown', ...(counts === 'one' ? { count: 1 } : counts === 'own' ? { count: row.count } : {}) })) });
+		const form = emptyForm(r, TODAY);
+		rows.forEach((row, i) => {
+			form.lines[i].price = row.price;
+			form.lines[i].excluded = row.excluded;
+		});
+		return formToDraft(form, '.');
+	};
+
+	it('a count of 1 makes the same draft as a row with no count (differential)', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				expect(build(rows, 'one')).toEqual(build(rows, 'absent'));
+				expect(build(rows, 'absent').draft.lines.every((l) => l.unit === undefined)).toBe(true);
+			})
+		);
+	});
+
+	it('a count scales each line: the total is the count-1 total times the count, the unit is that total', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				const one = build(rows, 'absent').draft.lines;
+				const own = build(rows, 'own').draft.lines;
+				expect(own.map((l) => l.target)).toEqual(one.map((l) => l.target));
+				own.forEach((l, i) => {
+					const row = rows[Number(l.target.id.slice(1))];
+					expect(BigInt(l.total.minor)).toBe(BigInt(one[i].total.minor) * BigInt(row.count));
+					if (row.count > 1 && row.price !== '') expect(l.unit).toEqual(one[i].total);
+					else expect(l.unit).toBeUndefined();
+				});
+			})
+		);
+	});
+
+	it('the line totals sum to the subtotal of lines', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				const { draft } = build(rows, 'own');
+				const live = draft.lines.filter((l) => !l.excluded).reduce((n, l) => n + BigInt(l.total.minor), 0n);
+				expect(BigInt(formTotals(draft).totals.lines.bid.minor)).toBe(live);
+			})
+		);
+	});
+});

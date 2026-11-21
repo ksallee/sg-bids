@@ -7,6 +7,7 @@
  * package for that bid. Deleting a bid takes its rows with it or moves them to another bid.
  */
 
+import { countOf, framesOf } from './count';
 import type { BidRequest, Id, RequestAsset, RequestShot, Target } from './model';
 
 export const MAX_BID_NAME = 120;
@@ -55,12 +56,16 @@ export function renameBid(bids: readonly DraftBid[], key: Id, typed: string): { 
 }
 
 export interface BidStats {
-	/** Shots not omitted. */
+	/** Shots not omitted: a counted row counts as many as it stands for (`count.ts`). */
 	readonly shots: number;
-	/** Assets not omitted. */
+	/** Rows of shots not omitted. */
+	readonly shotRows: number;
+	/** Assets not omitted, counted rows as many as they stand for. */
 	readonly assets: number;
+	/** Rows of assets not omitted. */
+	readonly assetRows: number;
 	readonly omitted: number;
-	/** Frames of the shots not omitted. */
+	/** Frames of the shots not omitted: per unit, times the count. */
 	readonly frames: number;
 	/** Every row, omitted or not. */
 	readonly rows: number;
@@ -68,15 +73,18 @@ export interface BidStats {
 
 /** Each bid's counts, by key. */
 export function bidStats(bids: readonly DraftBid[], rows: DraftRows): Map<Id, BidStats> {
-	const out = new Map<Id, { shots: number; assets: number; omitted: number; frames: number; rows: number }>(bids.map((b) => [b.key, { shots: 0, assets: 0, omitted: 0, frames: 0, rows: 0 }]));
+	const out = new Map<Id, { shots: number; shotRows: number; assets: number; assetRows: number; omitted: number; frames: number; rows: number }>(
+		bids.map((b) => [b.key, { shots: 0, shotRows: 0, assets: 0, assetRows: 0, omitted: 0, frames: 0, rows: 0 }])
+	);
 	for (const s of rows.shots) {
 		const stats = s.package ? out.get(s.package) : undefined;
 		if (!stats) continue;
 		stats.rows++;
 		if (s.omitted) stats.omitted++;
 		else {
-			stats.shots++;
-			stats.frames += s.frames ?? 0;
+			stats.shots += countOf(s);
+			stats.shotRows++;
+			stats.frames += framesOf(s) ?? 0;
 		}
 	}
 	for (const a of rows.assets) {
@@ -84,7 +92,10 @@ export function bidStats(bids: readonly DraftBid[], rows: DraftRows): Map<Id, Bi
 		if (!stats) continue;
 		stats.rows++;
 		if (a.omitted) stats.omitted++;
-		else stats.assets++;
+		else {
+			stats.assets += countOf(a);
+			stats.assetRows++;
+		}
 	}
 	return out;
 }

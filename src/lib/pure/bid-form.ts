@@ -13,6 +13,9 @@
  *   each row of the package not omitted goes as a line in the package price. A figure left blank
  *   leaves the package's rows not bid. Switching clears what the other way held, so nothing typed
  *   is kept out of sight: `typedFor` says what would go, for a confirm first.
+ * - A row that stands for several (`count.ts`) is priced per unit: the line's total is the unit
+ *   price times the count, in whole minor units, and the line keeps its unit price. The rate card
+ *   fills the unit price. Its department detail and compute are for the whole row.
  * - The vendor may decline a package it was invited to: "Not bidding". Its rows need no price and
  *   go as no line; it bids on one package at least. Declining clears what the package held, after
  *   the same confirm (`typedFor`).
@@ -29,6 +32,7 @@ import { estimateRebate, type RebateEstimate } from './rebate';
 import type { BidDraft } from './rows';
 import { bidTotals, type BidTotals } from './totals';
 import { applyRates, followsRate, rateForm, type RateForm } from './rate-card';
+import { countOf, extend } from './count';
 
 export interface DepartmentForm {
 	department: string;
@@ -46,6 +50,9 @@ export interface LineForm {
 	readonly omitted?: boolean;
 	/** The row's difficulty, which picks its rate. */
 	readonly difficulty?: string;
+	/** How many the row stands for (`count.ts`). Absent: 1. The price is then per unit. */
+	readonly count?: number;
+	/** The price as typed: per unit on a counted row. */
 	price: string;
 	/** The vendor typed this price: an override of any rate, kept whatever the rates do. */
 	typed: boolean;
@@ -123,8 +130,8 @@ export type BidSource = Pick<VendorBid, 'number' | 'date' | 'currency' | 'validU
 
 /** The request as the form reads it: rows with their package, and the packages. */
 export type FormRequest = Pick<BidRequest, 'header'> & {
-	readonly shots: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }[];
-	readonly assets: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }[];
+	readonly shots: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string; readonly count?: number }[];
+	readonly assets: readonly { readonly id: Id; readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string; readonly count?: number }[];
 	readonly packages?: readonly RequestPackage[];
 };
 
@@ -230,13 +237,15 @@ function isDay(text: string): boolean {
 	return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-function blankLine(target: Target, row: { readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string }): LineForm {
+function blankLine(target: Target, row: { readonly omitted?: boolean; readonly package?: Id; readonly difficulty?: string; readonly count?: number }): LineForm {
+	const count = countOf(row);
 	return {
 		key: targetKey(target),
 		target,
 		...(row.package !== undefined ? { package: row.package } : {}),
 		...(row.omitted ? { omitted: true } : {}),
 		...(row.difficulty?.trim() ? { difficulty: row.difficulty.trim() } : {}),
+		...(count > 1 ? { count } : {}),
 		price: '',
 		typed: false,
 		excluded: false,
@@ -288,9 +297,11 @@ export function formFromBid(bid: BidSource, request: FormRequest, mark: DecimalM
 	form.lines = form.lines.map((blank) => {
 		const saved = byKey.get(blank.key);
 		if (!saved) return blank;
+		// A counted row's price is its unit price; the line's total is that times the count.
+		const price = saved.unit ?? saved.total;
 		return {
 			...blank,
-			price: saved.excluded && saved.total.minor === 0 ? '' : shown(saved.total, mark),
+			price: saved.excluded && saved.total.minor === 0 ? '' : shown(price, mark),
 			// A line from before rates, or one the vendor typed, is its own price.
 			typed: saved.fromRate !== true,
 			excluded: saved.excluded,
@@ -435,7 +446,18 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 			if (!line.excluded) counts.open++;
 			continue;
 		}
-		const price = amount(line.price, `${at}:price`);
+		const unit = amount(line.price, `${at}:price`);
+		// A counted row is priced per unit: its total is the unit price times its count, exact.
+		const count = line.count ?? 1;
+		let price = unit;
+		if (unit !== undefined && count > 1) {
+			try {
+				price = extend(unit, count);
+			} catch {
+				errors[`${at}:price`] = `Too large: ${count} times this price does not hold exactly.`;
+				price = undefined;
+			}
+		}
 		const departments: DepartmentCost[] = [];
 		for (const [index, row] of line.departments.entries()) {
 			const name = row.department.trim();
@@ -463,7 +485,8 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 			...(departments.length > 0 ? { departments } : {}),
 			...(compute !== undefined ? { compute } : {}),
 			...Object.fromEntries(Object.entries(texts).filter(([, v]) => v !== '')),
-			...(viaRate && price !== undefined ? { fromRate: true } : {})
+			...(viaRate && price !== undefined ? { fromRate: true } : {}),
+			...(count > 1 && price !== undefined && unit !== undefined ? { unit } : {})
 		});
 	}
 

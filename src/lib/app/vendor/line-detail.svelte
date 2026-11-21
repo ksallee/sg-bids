@@ -48,7 +48,7 @@
 	<div class="flex flex-col gap-2">
 		<div class="flex flex-wrap items-baseline gap-x-2">
 			<p class="text-xs font-medium">Days and cost by department</p>
-			<p class="text-muted-foreground text-xs">Optional. Your price stays the price.</p>
+			<p class="text-muted-foreground text-xs">Optional. {#if (line.count ?? 1) > 1}For the whole row, all {line.count?.toLocaleString()}. {/if}Your price stays the price.</p>
 		</div>
 		{#if line.departments.length > 0}
 			<div class="grid max-w-xl grid-cols-[minmax(0,1fr)_5rem_8rem_2rem] items-start gap-x-2 gap-y-1.5">

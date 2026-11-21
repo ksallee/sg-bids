@@ -16,6 +16,7 @@
 
 import type { BidRequest, BidStatus, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot, Target, VendorBid } from './model';
 import { targetKey } from './model';
+import { countOf, unitsLine } from './count';
 import { resolvePackages } from './packages';
 import type { VendorKeys } from './vendor-keys';
 
@@ -173,10 +174,24 @@ export function itemMatches(item: Partial<RequestShot> | Partial<RequestAsset>, 
  * with their rows, then who and when. The request's name is the page's title. It always has the bids, so the box is never empty.
  * `day` writes a `YYYY-MM-DD` day for the reader.
  */
+/**
+ * What a bid holds, in words: its rows, or where rows stand for several (`count.ts`), its shots and
+ * assets in its rows: `170 shots in 3 rows`.
+ */
+function bidRows(request: Pick<VendorRequestView, 'shots' | 'assets'>, id: Id): string {
+	const shots = request.shots.filter((s) => s.package === id && !s.omitted);
+	const assets = request.assets.filter((a) => a.package === id && !a.omitted);
+	const rows = shots.length + assets.length;
+	if (![...shots, ...assets].some((r) => countOf(r) > 1)) return `${rows} ${rows === 1 ? 'row' : 'rows'}`;
+	const parts: string[] = [];
+	if (shots.length > 0) parts.push(unitsLine(shots.reduce((n, s) => n + countOf(s), 0), shots.length, 'shot'));
+	if (assets.length > 0) parts.push(unitsLine(assets.reduce((n, a) => n + countOf(a), 0), assets.length, 'asset'));
+	return parts.join(', ');
+}
+
 export function requestFacts(request: Pick<VendorRequestView, 'header' | 'packages' | 'shots' | 'assets'>, day: (text: string) => string): [string, string][] {
 	const h = request.header;
-	const rows = (id: Id) => request.shots.filter((s) => s.package === id && !s.omitted).length + request.assets.filter((a) => a.package === id && !a.omitted).length;
-	const bids = request.packages.map((p) => `${p.name} (${rows(p.id)} ${rows(p.id) === 1 ? 'row' : 'rows'})`).join(', ');
+	const bids = request.packages.map((p) => `${p.name} (${bidRows(request, p.id)})`).join(', ');
 	const facts: [string, string | undefined][] = [
 		[request.packages.length === 1 ? 'Bid' : 'Bids', bids || undefined],
 		['Studio', h.studio],

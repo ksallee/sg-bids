@@ -152,11 +152,12 @@
 								{#each items as it (it.lines[0].key)}
 									{#each it.lines as l, j (l.key)}
 										<tr class={cn(j === it.lines.length - 1 && 'border-b', it.split && 'bg-muted/30')} data-split={it.split ? 'true' : undefined}>
-											<td class="py-1.5 pr-3">{#if j === 0}<span class="font-medium">{it.item}</span>{#if it.split}<span class="text-muted-foreground ml-2 text-xs">split</span>{/if}{/if}</td>
+											<td class="py-1.5 pr-3">{#if j === 0}<span class="font-medium">{it.item}</span>{#if l.count > 1}<span class="ml-1.5 rounded border px-1 text-[11px] tabular-nums" data-slot="line-count">×{l.count.toLocaleString()}</span>{/if}{#if it.split}<span class="text-muted-foreground ml-2 text-xs">split</span>{/if}{/if}</td>
 											<td class="px-3 py-1.5">{l.vendor}</td>
 											<td class="text-muted-foreground px-3 py-1.5">{l.package ?? ''}</td>
 											<td class="px-3 py-1.5 text-right" title={l.inPackage ? 'The figure is on its Bid' : undefined}>
 												{l.excluded ? 'Excluded' : l.inPackage ? "In the bid's figure" : amount(l.amount)}
+												{#if l.unit && !l.excluded}<span class="text-muted-foreground block text-[11px]" data-slot="line-unit">{amount(l.unit)} × {l.count.toLocaleString()}</span>{/if}
 											</td>
 											<td class="px-3 py-1.5 text-right">{amount(l.amountBase)}</td>
 											<td class="px-3 py-1.5 text-right">{l.share === null ? '' : `${l.share}%`}</td>
@@ -191,11 +192,20 @@
 </ol>
 
 {#if plan.preview.unlinked.length}
+	{@const counted = plan.preview.unlinked.filter((u) => u.count > 1)}
+	{@const plain = plan.preview.unlinked.filter((u) => u.count === 1)}
 	<div class="mt-6 flex flex-col gap-1" data-slot="plan-unlinked">
 		<h3 class="text-sm font-semibold">Published with no Flow PT row</h3>
-		<p class="text-muted-foreground text-sm">
-			Their Bid Lines are written with no Shot or Asset, and no vendor Group is added: {plan.preview.unlinked.map((u) => u.item).join(', ')}.
-		</p>
+		{#if plain.length}
+			<p class="text-muted-foreground text-sm">
+				Their Bid Lines are written with no Shot or Asset, and no vendor Group is added: {plain.map((u) => u.item).join(', ')}.
+			</p>
+		{/if}
+		{#if counted.length}
+			<p class="text-muted-foreground text-sm" data-slot="plan-counted">
+				Rows by count make no Shots or Assets. Each is one Bid Line with its amount and its count: {counted.map((u) => `${u.item} (${u.count.toLocaleString()})`).join(', ')}.
+			</p>
+		{/if}
 	</div>
 {/if}
 

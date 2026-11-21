@@ -2,7 +2,8 @@
 	A draft request, on one page. The name is the title, typed in place. Issue is always in sight, with
 	what still stops it beside it (`issue-bar`). The rows take the rest of the width: one table grouped
 	by bid, the bids as chips above it (`items-panel`). The side panel holds the details and the
-	vendors, always in sight, nothing in steps. Everything saves as it changes, in one write
+	vendors, nothing in steps. It hides to a narrow rail to give the table its room, and this browser
+	remembers which (`side-panel.svelte.ts`); the issue list opens it when a problem is there. Everything saves as it changes, in one write
 	(`$lib/drafts`). The menu duplicates or deletes the request.
 -->
 <script lang="ts">
@@ -11,6 +12,9 @@
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import Ellipsis from '@lucide/svelte/icons/ellipsis';
 	import Settings2 from '@lucide/svelte/icons/settings-2';
+	import PanelRightClose from '@lucide/svelte/icons/panel-right-close';
+	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
+	import { sidePanel } from '$lib/app/side-panel.svelte';
 	import Notice from '$lib/app/notice.svelte';
 	import StatusChip from '$lib/app/status-chip.svelte';
 	import SetupNotice from '$lib/app/setup-notice.svelte';
@@ -51,6 +55,8 @@
 				.map((p) => p.target.slice(4))
 		)
 	);
+	/** What the issue asks for in the panel: shown on its toggle while it is hidden. */
+	const sideProblems = $derived(readiness.toIssue.filter((p) => !(p.target === 'title' || p.target === 'items' || p.target.startsWith('bid:') || p.target.startsWith('row:'))).length);
 	const unmapped = $derived(builder.mappingStatus ? mappingWords(builder.mappingStatus).unmapped.length : 0);
 	const round = $derived(Number(builder.form.round) || 1);
 	const title = $derived(builder.form.title.trim() || 'Untitled request');
@@ -115,11 +121,36 @@
 
 <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
 	<ItemsPanel {builder} {marked} onFields={() => (fieldsOpen = true)} />
-	<aside class="border-border bg-muted/20 flex shrink-0 flex-col gap-6 overflow-y-auto border-t px-5 py-4 lg:w-[26rem] lg:border-t-0 lg:border-l xl:w-[30rem] 2xl:w-[34rem]" aria-label="Details and vendors" data-slot="side-panel">
-		<DetailsPanel form={builder.form} problems={readiness.problems} {revealed} onChange={(f) => builder.setForm(f)} />
-		<div class="bg-border h-px shrink-0"></div>
-		<VendorsPanel {builder} {revealed} />
-	</aside>
+	{#if sidePanel.open}
+		<aside class="border-border bg-muted/20 flex shrink-0 flex-col overflow-y-auto border-t lg:w-[26rem] lg:border-t-0 lg:border-l xl:w-[28rem] 2xl:w-[30rem]" aria-label="Details and vendors" data-slot="side-panel" data-state="open">
+			<div class="flex items-center justify-between gap-2 px-5 pt-3">
+				<span class="text-muted-foreground text-xs font-medium tracking-wide uppercase">Details and vendors</span>
+				<Button size="sm" variant="ghost" class="text-muted-foreground" onclick={() => (sidePanel.open = false)} title="Hide the details and vendors. The table takes the room." aria-expanded="true" data-slot="side-panel-toggle">
+					<PanelRightClose data-icon="inline-start" />Hide
+				</Button>
+			</div>
+			<div class="flex flex-col gap-6 px-5 pt-2 pb-4">
+				<DetailsPanel form={builder.form} problems={readiness.problems} {revealed} onChange={(f) => builder.setForm(f)} />
+				<div class="bg-border h-px shrink-0"></div>
+				<VendorsPanel {builder} {revealed} />
+			</div>
+		</aside>
+	{:else}
+		<aside class="border-border bg-muted/20 flex shrink-0 items-center border-t px-3 py-2 lg:w-12 lg:flex-col lg:border-t-0 lg:border-l lg:px-0 lg:py-3" aria-label="Details and vendors, hidden" data-slot="side-panel" data-state="closed">
+			<button
+				type="button"
+				class="hover:bg-accent focus-visible:ring-ring/50 text-muted-foreground hover:text-foreground flex items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none focus-visible:ring-2 lg:flex-col lg:gap-3 lg:px-1.5 lg:py-2"
+				onclick={() => (sidePanel.open = true)}
+				title="Show the details and vendors"
+				aria-expanded="false"
+				data-slot="side-panel-toggle"
+			>
+				<PanelRightOpen class="size-4" aria-hidden="true" />
+				<span class="lg:[writing-mode:vertical-rl]">Details and vendors</span>
+				{#if sideProblems > 0}<span class="border-destructive/50 text-destructive rounded-full border px-1.5 text-xs leading-4 tabular-nums" title={`${sideProblems} to fix in the details or vendors`}>{sideProblems}</span>{/if}
+			</button>
+		</aside>
+	{/if}
 </div>
 
 <FieldsDialog {builder} bind:open={fieldsOpen} />

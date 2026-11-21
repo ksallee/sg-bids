@@ -183,6 +183,11 @@ describe('requestFacts', () => {
 		expect(requestFacts(base, day)).toEqual([['Bids', 'SEQ010 (1 row), Creature (1 row)']]);
 	});
 
+	it('says shots in rows where a row stands for several', () => {
+		const counted = { ...base, shots: [...base.shots, { id: 's3', code: 'SIMPLE', omitted: false, assetIds: [], package: 'p1', count: 120 }], assets: [{ id: 'a1', name: 'Hero', package: 'p2', count: 3 }] };
+		expect(requestFacts(counted, day)).toEqual([['Bids', 'SEQ010 (121 shots in 2 rows), Creature (3 assets in 1 row)']]);
+	});
+
 	it('lists what production set, and leaves out what it did not; the name is the page’s title', () => {
 		const facts = requestFacts({ ...base, packages: [base.packages[0]], header: { ...base.header, title: 'Main', director: 'Ada', deliveryDate: '2027-02-01', studio: ' ' } }, day);
 		expect(facts).toEqual([

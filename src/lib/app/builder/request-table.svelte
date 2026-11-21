@@ -12,6 +12,11 @@
 	write Flow PT refused, or one that answered and changed nothing (028), is listed with Retry. Rules
 	in `$lib/pure/live-columns`, `$lib/pure/row-edit` and `$lib/pure/edit-words`.
 
+	Add row puts an empty row in this request only last in the bid picked, its first cell open to type
+	in, as quick as a spreadsheet: Tab writes the cell and opens the next one, Enter on the last row of
+	a bid adds another. Such a row, like a pasted one, takes a code and a Count: how many shots of a
+	kind it stands for. A row linked to Flow PT is one, and its Count says why on hover.
+
 	Each code carries where its row comes from, in the columns' marks: live from Flow PT, or from a
 	breakdown and in this request only. A source filter shows when the request holds both
 	(`$lib/pure/row-source`). A bid with no row of this kind says so under the table, with a way to
@@ -20,6 +25,7 @@
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
 	import FileText from '@lucide/svelte/icons/file-text';
+	import Plus from '@lucide/svelte/icons/plus';
 	import Radio from '@lucide/svelte/icons/radio';
 	import Search from '@lucide/svelte/icons/search';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -42,6 +48,7 @@
 	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
 	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
 	import Segmented from '$lib/app/segmented.svelte';
+	import { countOf, framesOf, isCounted, unitsLine } from '$lib/pure/count';
 	import type { Id, RequestAsset, RequestShot, Target } from '$lib/pure/model';
 	import type { Builder, EditOutcome } from '$lib/app/builder.svelte';
 
@@ -95,7 +102,7 @@
 	const pathOf = (key: ColumnKey): string => `c_${key}`;
 	const keyOf = (path: string): ColumnKey => path.slice(2) as ColumnKey;
 
-	/** The bid column: the table groups on it. Its value sorts in the bids' order; the cell shows the name. */
+	/** The bid path the table groups on, drawn as no column. Its value sorts in the bids' order. */
 	const BID = '__bid';
 	const bidOrder = $derived(new Map(builder.bids.map((b, i) => [b.key, i])));
 	const bidValue = (key: Id | undefined) => `${String(bidOrder.get(key ?? '') ?? 9999).padStart(4, '0')}|${key ?? ''}`;
@@ -141,8 +148,8 @@
 		return { name: column.key, displayName: column.label, entityType: '', dataType: 'list', editable: true, mandatory: false, unique: false, validValues: [...(column.validValues ?? [])] };
 	}
 
+	// The rows group by bid and each group's header names it: no Bid column (sg-widgets PR #384).
 	const columns = $derived<CollectionColumn[]>([
-		{ path: BID, header: 'Bid', dataType: 'text', editable: false, align: 'left' as const, sortable: false, field: null, width: 110 },
 		...requestColumns.map((column) => ({
 			path: pathOf(column.key),
 			header: column.label,
@@ -158,7 +165,6 @@
 	]);
 
 	function editLock(row: EntityRow, column: CollectionColumn): string | null {
-		if (column.path === BID) return 'Move a row to another bid: select it, then Move to.';
 		const item = byItem.get(String(row.attributes.__item));
 		const request = requestColumns.find((c) => c.key === keyOf(column.path));
 		if (!item || !request) return null;
@@ -304,6 +310,99 @@
 		};
 	}
 
+	/* rows typed by hand ---------------------------------------------------- */
+
+	/** One empty row in this request only, last in the bid named (the one picked), its first cell open. */
+	function addRow(bid?: Id): void {
+		builder.addRow(kind, bid ?? builder.current);
+	}
+
+	/** The row's element once the table draws it: a few frames after the change, at most. */
+	async function rowElement(ref: EntityRef): Promise<HTMLElement | null> {
+		const key = CSS.escape(`${ref.type}:${ref.id}`);
+		for (let i = 0; i < 20; i++) {
+			await tick();
+			const tr = document.querySelector<HTMLElement>(`[data-slot=request-table] tr[data-row-key="${key}"]`);
+			if (tr) return tr;
+			await new Promise((done) => requestAnimationFrame(() => done(null)));
+		}
+		return null;
+	}
+
+	/**
+	 * Open the editor of a cell, as Enter on it does. The registry's table opens one from a key on the
+	 * focused cell; the page asks it the same way.
+	 */
+	function openCell(cell: HTMLElement | null): void {
+		if (!cell) return;
+		cell.focus({ preventScroll: true });
+		cell.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		// The table focuses the editor's first control, which on a number is its minus button
+		// (sg-widgets issue #385): the field is what a person types in.
+		void tick().then(() => cell.querySelector<HTMLElement>('[data-slot=entity-table-editor] input, [data-slot=entity-table-editor] textarea')?.focus({ preventScroll: true }));
+	}
+
+	// The cursor the page asks for: a row just added, or one the issue list points at. Its first cell
+	// a person may type in opens.
+	$effect(() => {
+		const cursor = builder.cursor;
+		if (!cursor || cursor.kind !== kind) return;
+		const item = untrack(() => allItems.find((i) => i.id === cursor.id));
+		if (!item) return;
+		// A filter could hide the row, a new one with no code above all.
+		untrack(() => {
+			if (!shown.some((i) => i.id === item.id)) {
+				query = '';
+				from = 'all';
+			}
+		});
+		void (async () => {
+			const tr = await rowElement(refOf(item));
+			if (builder.cursor?.seq !== cursor.seq) return;
+			builder.cursor = null;
+			if (!tr) return;
+			const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+			tr.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+			openCell(tr.querySelector<HTMLElement>('td[data-editable]'));
+		})();
+	});
+
+	/** The item a key event's row is for. */
+	function itemOfEvent(event: KeyboardEvent): Item | undefined {
+		const key = (event.target as HTMLElement | null)?.closest<HTMLElement>('tr[data-row-key]')?.dataset['rowKey'];
+		if (!key) return undefined;
+		const [refType, refId] = [key.slice(0, key.lastIndexOf(':')), Number(key.slice(key.lastIndexOf(':') + 1))];
+		return itemOfRef({ type: refType, id: refId });
+	}
+
+	/**
+	 * Typing in a row of this request only goes as in a spreadsheet: Tab writes the cell and opens the
+	 * next, Enter in the last row of a bid writes it and adds a row under it. Read on the way down,
+	 * before the table's editor writes the cell; the table does its part as always.
+	 */
+	function typing(event: KeyboardEvent): void {
+		if (event.defaultPrevented || event.isComposing) return;
+		const target = event.target as HTMLElement | null;
+		const editor = target?.closest('[data-slot=entity-table-editor]');
+		if (!editor || !(event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey))) return;
+		const item = itemOfEvent(event);
+		if (!item || item.fpt) return;
+		if (event.key === 'Tab') {
+			// The table writes the cell and focuses the next one it may edit; that one opens. The editor
+			// is gone by then, so the row is the key it was in.
+			const rowKey = target?.closest<HTMLElement>('tr[data-row-key]')?.dataset['rowKey'];
+			setTimeout(() => {
+				const next = document.activeElement as HTMLElement | null;
+				if (next?.matches('td[data-editable]') && next.closest<HTMLElement>('tr[data-row-key]')?.dataset['rowKey'] === rowKey) openCell(next);
+			}, 0);
+			return;
+		}
+		const inBid = allItems.filter((i) => i.package === item.package);
+		if (inBid.at(-1)?.id !== item.id) return;
+		const bid = item.package;
+		setTimeout(() => addRow(bid), 0);
+	}
+
 	/** The bids with no row of this kind, under the table. */
 	const emptyBids = $derived(builder.bids.filter((b) => !allItems.some((i) => i.package === b.key)));
 
@@ -359,24 +458,32 @@
 	{@const key = bidOfValue(value)}
 	{@const s = builder.stats.get(key)}
 	<span class="truncate font-semibold" data-slot="bid-group">{builder.bidName(key) || 'No bid'}</span>
-	<span class="text-muted-foreground text-xs font-normal tabular-nums">
-		{count}
-		{count === 1 ? noun : `${noun}s`}{#if kind === 'shot' && s && s.frames > 0}{' '}· {s.frames.toLocaleString()} frames{/if}
+	<span class="text-muted-foreground text-xs font-normal tabular-nums" data-slot="bid-group-counts">
+		{#if s}{unitsLine(kind === 'shot' ? s.shots : s.assets, kind === 'shot' ? s.shotRows : s.assetRows, noun)}{:else}{count} {count === 1 ? noun : `${noun}s`}{/if}{#if kind === 'shot' && s && s.frames > 0}{' '}· {s.frames.toLocaleString()} frames{/if}
 	</span>
 {/snippet}
 
 {#snippet cell({ row, column, value }: EntityTableCellContext)}
 	{@const item = byItem.get(String(row.attributes.__item))}
-	{#if column.path === BID}
-		<span class="text-muted-foreground block truncate text-xs">{builder.bidName(bidOfValue(value))}</span>
-	{:else if column.path === pathOf('code') && item}
+	{#if column.path === pathOf('code') && item}
 		<span class="flex min-w-0 items-center gap-2">
 			{@render sourceMark(rowSource(item))}
-			<span class={cn('truncate font-mono text-xs font-medium', item.omitted && 'text-muted-foreground line-through')} title={String(value ?? '')}>{value}</span>
+			{#if value === null || value === ''}
+				<span class="text-muted-foreground truncate text-xs italic" data-slot="row-no-code">Type a code</span>
+			{:else}
+				<span class={cn('truncate font-mono text-xs font-medium', item.omitted && 'text-muted-foreground line-through')} title={String(value ?? '')}>{value}</span>
+			{/if}
 			{#if builder.gone.has(item.id)}
 				<span class="border-destructive/60 text-destructive shrink-0 rounded-full border px-1.5 text-[11px] leading-4" title={`This ${type} is gone from Flow PT, or you cannot read it. It keeps its last values.`} data-slot="row-gone">Not in Flow PT</span>
 			{/if}
 			{#if fresh.has(item.id)}<span class="bg-info/15 text-foreground shrink-0 rounded-full px-1.5 text-[11px] leading-4" data-slot="row-fresh">Added</span>{/if}
+		</span>
+	{:else if column.path === pathOf('count') && item}
+		<span class={cn('block text-right tabular-nums', isCounted(item) ? 'font-semibold' : 'text-muted-foreground')} data-slot="row-count">{countOf(item).toLocaleString()}</span>
+	{:else if column.path === pathOf('frames') && item && isCounted(item) && typeof value === 'number'}
+		{@const all = framesOf(item) ?? 0}
+		<span class="block truncate text-right tabular-nums" title={`${value.toLocaleString()} frames each, ${all.toLocaleString()} in all.`} data-slot="row-frames">
+			{value.toLocaleString()}<span class="text-muted-foreground">&nbsp;·&nbsp;{all.toLocaleString()}</span>
 		</span>
 	{:else if value === null || value === undefined || value === ''}
 		<!-- An empty cell stays empty: its hover says it can be filled. -->
@@ -481,7 +588,8 @@
 		</div>
 	{/if}
 
-	<div class="min-h-0 flex-1 px-6 pb-4" data-slot="request-table">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="min-h-0 flex-1 px-6 pb-4" data-slot="request-table" onkeydowncapture={typing}>
 		{#key generation}
 			<EntityTable
 				class="h-full"

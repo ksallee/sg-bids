@@ -7,8 +7,8 @@
  * details, the vendors.
  *
  * The issue needs the name, the base currency and the day answers are due (`header.REQUIRED`), one
- * row at least, every bid holding a row, one row not omitted, and one vendor, each with a name and an
- * email. A due day in the past is a warning while the draft is worked on and an error at issue.
+ * row at least, every bid holding a row, a code on every row (a row typed by hand starts with none),
+ * one row not omitted, and one vendor, each with a name and an email. A due day in the past is a warning while the draft is worked on and an error at issue.
  */
 
 import { checkHeader, type FieldProblem, type HeaderForm, type Stage } from './header';
@@ -20,7 +20,7 @@ import { isBlank, rowProblems, type VendorRow } from './vendor-rows';
  * What a problem points at: a header field, the rows (`items`), one bid (`bid:<key>`), the vendors,
  * or one field of one vendor (`vendor:<id>:name`).
  */
-export type Target = keyof HeaderForm | 'items' | 'vendors' | `bid:${string}` | `vendor:${string}:name` | `vendor:${string}:email`;
+export type Target = keyof HeaderForm | 'items' | 'vendors' | `bid:${string}` | `row:shot:${string}` | `row:asset:${string}` | `vendor:${string}:name` | `vendor:${string}:email`;
 
 export interface Problem {
 	readonly id: string;
@@ -69,6 +69,19 @@ function problemsAt(facts: DraftFacts, stage: Stage): Problem[] {
 		for (const bid of facts.bids) {
 			if ((stats.get(bid.key)?.rows ?? 0) > 0) continue;
 			out.push({ id: `bid:${bid.key}`, target: `bid:${bid.key}`, label: bid.name, tone: 'error', missing: true, short: 'no rows', message: `${bid.name} holds no rows. Add rows to it, or delete it.` });
+		}
+		// A row typed by hand and left without a code: the list takes the person to it.
+		const names = new Map(facts.bids.map((b) => [b.key, b.name]));
+		for (const [kind, list] of [
+			['shot', facts.rows.shots.map((r) => ({ id: r.id, code: r.code, package: r.package }))],
+			['asset', facts.rows.assets.map((r) => ({ id: r.id, code: r.name, package: r.package }))]
+		] as const) {
+			for (const row of list) {
+				if ((row.code ?? '').trim() !== '') continue;
+				const where = names.get(row.package ?? '');
+				const target = `row:${kind}:${row.id}` as const;
+				out.push({ id: target, target, label: kind === 'shot' ? 'Shots' : 'Assets', tone: 'error', missing: true, short: 'no code', message: `${kind === 'shot' ? 'A shot' : 'An asset'} row${where ? ` in ${where}` : ''} has no code. Type one, or remove the row.` });
+			}
 		}
 		if (all.every((r) => r.omitted)) {
 			out.push({ id: 'items', target: 'items', label: ROWS_LABEL, tone: 'error', missing: false, short: 'every one is omitted', message: 'Every row is omitted. Bring one back.' });
