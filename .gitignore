@@ -24,3 +24,6 @@ BRIEF.md
 # Local screenshots
 shots/
 .playwright-cli/
+
+# Agent worktrees. Ignored so Tailwind does not scan them either.
+.claude/worktrees/
