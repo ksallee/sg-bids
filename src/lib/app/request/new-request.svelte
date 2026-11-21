@@ -1,6 +1,6 @@
 <!--
 	A new request: a small dialog asks for its name and its project, both required, then the request's
-	page opens with one empty bid, Bid 1. The project starts as the one last worked in. The name is the
+	page opens with one empty bid, named after the request with 01. The project starts as the one last worked in. The name is the
 	request's one name: its code is made from it and stays out of sight.
 -->
 <script lang="ts">

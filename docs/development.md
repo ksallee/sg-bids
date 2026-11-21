@@ -166,7 +166,7 @@ only, by hand, with the Supabase CLI or the SQL editor.
 ### Production endpoints
 
 The browser reaches the data layer through `src/routes/api/production/<action>`: `list`, `get` (a
-draft as its bids make it), `create` (a name and the details: a draft with one bid, Bid 1, its code
+draft as its bids make it), `create` (a name and the details: a draft with one bid, named after it with 01, its code
 made from the name), `save` (a draft's page in one write: details, bids with their rows, vendors;
 what is left out stays), `duplicate` (a request copied into a new draft, with its rows or without),
 `issue` (answers the links of the draft's vendors, once), `new-round` (the next round as a draft,
@@ -385,7 +385,7 @@ Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
 of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. Point `.env.local` (or
 the environment) at a throwaway database, not one a running app reads. It writes only to the one
 project named, by exact name: it makes a request from the New request dialog, puts 4 of the project's
-Shots and 2 breakdown Shots in Bid 1 (renamed Seq A), types a row by hand into it with a count of
+Shots and 2 breakdown Shots in the first bid (renamed Seq A), types a row by hand into it with a count of
 120, hides and shows the side panel, adds a bid (Creature) with a breakdown Shot and
 Asset, moves a Shot between the two, types two vendors in their rows (B on Creature alone), presses
 Issue with the due day blank and checks the list names it and marks the field, sets it and issues,

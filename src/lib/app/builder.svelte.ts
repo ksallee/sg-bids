@@ -32,7 +32,7 @@ import { codesToFind, matchRows, withLinks, type Match } from '$lib/pure/match';
 import type { ItemLink } from '$lib/pure/wire';
 import { handAsset, handShot, removeItems, tiersFor } from '$lib/pure/request';
 import type { Id, RequestAsset, RequestShot, Target } from '$lib/pure/model';
-import { addBid, bidKey, bidStats, deleteBid, draftFrom, inBid, moveRows, renameBid, type BidStats, type DraftBid } from '$lib/pure/request-draft';
+import { addBid, bidKey, bidStats, deleteBid, draftFrom, followRequestName, inBid, moveRows, renameBid, type BidStats, type DraftBid } from '$lib/pure/request-draft';
 import { blankVendor, fromInvited, isBlank, withoutBid, type VendorRow } from '$lib/pure/vendor-rows';
 import { readiness, type Readiness, type Target as Place } from '$lib/pure/readiness';
 import { today } from '$lib/app/today';
@@ -191,16 +191,18 @@ export class Builder {
 		this.save();
 	}
 
+	/** Rename the request. Bids still on their default name follow it. */
 	setName(name: string): void {
+		this.bids = followRequestName(this.bids, this.form.title, name);
 		this.setForm({ ...this.form, title: name });
 	}
 
 	/* bids ------------------------------------------------------------------ */
 
-	/** One more bid, named `Bid N`, and new rows go to it. Answers its key. */
+	/** One more bid, named after the request with the next number, and new rows go to it. Answers its key. */
 	addBid(): Id {
 		const key = bidKey(uuid());
-		this.bids = addBid(this.bids, key);
+		this.bids = addBid(this.bids, key, this.form.title);
 		this.current = key;
 		this.save();
 		return key;

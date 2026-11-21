@@ -24,7 +24,7 @@ import type { AwardScenario, BidRequest, Id, InvitedVendor, RequestAsset, Reques
 import { ANSWER_ONE, packageProblems, resolvePackages } from '$lib/pure/packages';
 import { countOf, countProblems } from '$lib/pure/count';
 import { composeDraft } from '$lib/pure/request-bids';
-import { bidKey, type SavedBid } from '$lib/pure/request-draft';
+import { bidKey, defaultBidName, type SavedBid } from '$lib/pure/request-draft';
 import { targetKey } from '$lib/pure/model';
 import { comparePercent, sumPercents } from '$lib/pure/percent';
 import { rangeProblems, submitProblems } from '$lib/pure/bid-limits';
@@ -66,7 +66,7 @@ const INVITATION_COLUMNS = 'id, request_id, site_host, project_id, vendor_name, 
 
 /**
  * Rows for a new draft, as a request made before this page held them: each package becomes a bid
- * with its rows; with no package, one bid, Bid 1, holds them all. The seed and the tests use it.
+ * with its rows; with no package, one bid, named after the request, holds them all. The seed and the tests use it.
  */
 export interface DraftItems {
 	readonly shots: readonly RequestShot[];
@@ -230,11 +230,11 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	}
 
 	/** The bids a draft is made with from rows held as a request before this page held them. */
-	function bidsFromItems(items: DraftItems | undefined): SavedBid[] {
+	function bidsFromItems(items: DraftItems | undefined, requestName = ''): SavedBid[] {
 		const shots = items?.shots ?? [];
 		const assets = items?.assets ?? [];
 		const packages = items?.packages ?? [];
-		if (packages.length === 0) return [{ key: bidKey(crypto.randomUUID()), name: 'Bid 1', shots, assets }];
+		if (packages.length === 0) return [{ key: bidKey(crypto.randomUUID()), name: defaultBidName(requestName, 1), shots, assets }];
 		const known = new Set(packages.map((p) => p.id));
 		const first = packages[0].id;
 		const of = (pkg: Id | undefined) => (pkg && known.has(pkg) ? pkg : first);
@@ -300,7 +300,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 
 	/**
 	 * A new draft with its bids: `bids` as given, or made from `items` (rows as a request held them
-	 * before this page), or one empty bid, Bid 1. Its vendors as given.
+	 * before this page), or one empty bid named after the request, 01. Its vendors as given.
 	 */
 	async function createDraftRequest(
 		principal: ProductionPrincipal,
@@ -311,7 +311,7 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 				.select()
 				.single()
 		);
-		await saveDraft(principal, row.id, { bids: input.bids ?? bidsFromItems(input.items), vendors: input.vendors ?? [] });
+		await saveDraft(principal, row.id, { bids: input.bids ?? bidsFromItems(input.items, typeof input.header.title === 'string' ? input.header.title : ''), vendors: input.vendors ?? [] });
 		return getRequest(principal, row.id);
 	}
 

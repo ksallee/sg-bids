@@ -2,7 +2,7 @@
 	The request's bids, one chip each, above the table: the name, what it holds, and a menu. A press
 	picks the bid new rows go to; a double press, or Rename in the menu, renames it in place. The menu
 	adds rows to that bid (from Flow PT, from a breakdown) or deletes it. Add bid makes the next one,
-	named Bid 2, Bid 3, picked and ready to rename. A bid with no rows says so, and is marked when the
+	named after the request with the next number, picked and ready to rename. A bid with no rows says so, and is marked when the
 	issue asks for it (`f-bid-<key>`). Rules in `$lib/pure/request-draft`.
 -->
 <script lang="ts">

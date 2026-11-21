@@ -406,7 +406,6 @@
 	}
 
 	/** The bids with no row of this kind, under the table. */
-	const emptyBids = $derived(builder.bids.filter((b) => !allItems.some((i) => i.package === b.key)));
 
 	const goneCount = $derived(allItems.filter((item) => builder.gone.has(item.id)).length);
 
@@ -433,16 +432,6 @@
 </script>
 
 {#snippet liveMark(column: RequestColumn)}
-	{#if column.live}
-		<span class="bg-info/70 pointer-events-none absolute inset-x-0 top-0 h-0.5" aria-hidden="true"></span>
-		<span class="text-info flex shrink-0 items-center pr-2" role="img" aria-label="Live in Flow PT" title={`Live in Flow PT. On a ${noun} picked from Flow PT, a change here changes the ${type} in Flow PT.`}>
-			<Radio class="size-3.5" aria-hidden="true" />
-		</span>
-	{:else}
-		<span class="text-muted-foreground/70 flex shrink-0 items-center pr-2" role="img" aria-label="In this request only" title="In this request only. Flow PT is not changed.">
-			<FileText class="size-3.5" aria-hidden="true" />
-		</span>
-	{/if}
 	{#if column.key === 'description' && advice}
 		<button type="button" class="text-warning focus-visible:ring-ring/50 -ml-1 mr-1.5 flex shrink-0 items-center rounded-sm outline-none focus-visible:ring-2" title={advice} aria-label={`Suggestion: ${advice}`} onclick={onFields} data-slot="description-advice-mark">
 			<TriangleAlert class="size-3.5" aria-hidden="true" />
@@ -561,8 +550,8 @@
 				</Popover.Trigger>
 				<Popover.Content class="w-80 text-sm" align="end">
 					<ul class="flex flex-col gap-2.5">
-						<li class="flex gap-2"><Radio class="text-info mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><span class="font-medium">Live in Flow PT.</span> A change in this column changes the {type} in Flow PT.</span></li>
-						<li class="flex gap-2"><FileText class="text-muted-foreground mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><span class="font-medium">In this request only.</span> Flow PT is not changed.</span></li>
+						<li><span class="font-medium">Live in Flow PT:</span> {requestColumns.filter((c) => c.live).map((c) => c.label).join(', ') || 'no column'}. On a {noun} picked from Flow PT, a change there changes the {type} in Flow PT.</li>
+						<li><span class="font-medium">In this request only:</span> {requestColumns.filter((c) => !c.live).map((c) => c.label).join(', ') || 'no column'}. Flow PT is not changed.</li>
 						<li class="text-muted-foreground">The mark by a code says where the row comes from: Flow PT or a breakdown.</li>
 						<li class="text-muted-foreground">Select rows, then edit a cell to change them all.</li>
 					</ul>
@@ -628,15 +617,6 @@
 			</EntityTable>
 		{/key}
 	</div>
-	{#if emptyBids.length > 0}
-		<div class="border-border flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-6 py-2 text-sm" data-slot="empty-bids">
-			{#each emptyBids as b (b.key)}
-				<span class="text-muted-foreground"><span class="text-foreground font-medium">{b.name}</span> holds no {noun}s yet.</span>
-				<Button size="sm" variant="ghost" onclick={() => onAdd(b.key)} data-slot="empty-bid-add">Add from Flow PT</Button>
-				<Button size="sm" variant="ghost" onclick={() => onBreakdown(b.key)}>Add from a breakdown</Button>
-			{/each}
-		</div>
-	{/if}
 {/if}
 
 <Dialog.Root open={confirming !== null} onOpenChange={(open) => !open && confirming?.answer(false)}>

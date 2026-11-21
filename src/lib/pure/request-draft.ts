@@ -2,8 +2,8 @@
  * A draft request's bids and rows, as its one page edits them. Pure, no I/O.
  *
  * A request holds one bid at least. Each bid has a key that never changes and a name, unique in the
- * request in any case, 120 characters at most; a new one is `Bid 1`, `Bid 2`: the first number no
- * bid holds. Every row sits in exactly one bid, named by its `package`: the key is the request's
+ * request in any case, 120 characters at most; a new one is the request's name and a number, `Spring pitch 01`,
+ * `Spring pitch 02` (`Bid 01` while the request has no name): the first number no bid holds. Every row sits in exactly one bid, named by its `package`: the key is the request's
  * package for that bid. Deleting a bid takes its rows with it or moves them to another bid.
  */
 
@@ -29,15 +29,43 @@ export function bidKey(seed: string): Id {
 	return `bid:${seed}`;
 }
 
-/** `Bid` and the first number from 1 no bid of the request holds, in any case. */
-export function nextBidName(bids: readonly DraftBid[]): string {
+/** A bid's name by default: the request's name, or `Bid` while it has none, and the number on two digits. */
+export function defaultBidName(requestName: string, n: number): string {
+	const suffix = ` ${String(n).padStart(2, '0')}`;
+	const base = requestName.trim() || 'Bid';
+	return base.slice(0, MAX_BID_NAME - suffix.length).trimEnd() + suffix;
+}
+
+/** The default name with the first number from 1 no bid of the request holds, in any case. */
+export function nextBidName(bids: readonly DraftBid[], requestName = ''): string {
 	const taken = new Set(bids.map((b) => b.name.trim().toLowerCase()));
-	for (let n = 1; ; n++) if (!taken.has(`bid ${n}`)) return `Bid ${n}`;
+	for (let n = 1; ; n++) {
+		const name = defaultBidName(requestName, n);
+		if (!taken.has(name.toLowerCase())) return name;
+	}
 }
 
 /** One more bid, last, named `nextBidName`. */
-export function addBid(bids: readonly DraftBid[], key: Id): DraftBid[] {
-	return [...bids, { key, name: nextBidName(bids) }];
+export function addBid(bids: readonly DraftBid[], key: Id, requestName = ''): DraftBid[] {
+	return [...bids, { key, name: nextBidName(bids, requestName) }];
+}
+
+/**
+ * The bids after the request is renamed: a bid still holding its default name takes the new one,
+ * with its number. A bid named by hand stays, and so does one whose new name another bid holds.
+ */
+export function followRequestName(bids: readonly DraftBid[], was: string, now: string): DraftBid[] {
+	if (was.trim() === now.trim()) return [...bids];
+	const out = [...bids];
+	for (let i = 0; i < out.length; i++) {
+		for (let n = 1; n <= 99; n++) {
+			if (out[i].name !== defaultBidName(was, n)) continue;
+			const name = defaultBidName(now, n);
+			if (!out.some((b, j) => j !== i && b.name.trim().toLowerCase() === name.toLowerCase())) out[i] = { ...out[i], name };
+			break;
+		}
+	}
+	return out;
 }
 
 /** Why a name does not fit a bid of the request, or null. `key`: the bid it is for. */
@@ -129,11 +157,11 @@ export function deleteBid(bids: readonly DraftBid[], rows: DraftRows, key: Id, r
 
 /**
  * A stored draft as the page edits it: its packages are its bids, in order. A draft with none starts
- * with one, `Bid 1`, under `fallbackKey`. A row in no known bid goes to the first.
+ * with one, `Bid 01`, under `fallbackKey`. A row in no known bid goes to the first.
  */
 export function draftFrom(request: Pick<BidRequest, 'shots' | 'assets' | 'packages'>, fallbackKey: Id): { bids: DraftBid[]; rows: DraftRows } {
 	const bids: DraftBid[] = (request.packages ?? []).map((p) => ({ key: p.id, name: p.name }));
-	if (bids.length === 0) bids.push({ key: fallbackKey, name: 'Bid 1' });
+	if (bids.length === 0) bids.push({ key: fallbackKey, name: defaultBidName('', 1) });
 	const known = new Set(bids.map((b) => b.key));
 	const first = bids[0].key;
 	const place = <T extends { package?: Id }>(r: T): T => (r.package && known.has(r.package) ? r : { ...r, package: first });
@@ -172,13 +200,13 @@ export interface CopiedVendor {
 /**
  * A new draft made from a request, draft or issued: its bids by name, under new keys, with their rows
  * when `rows`, and its vendors under new ids, each invited to the same bids. A request from before
- * bids makes one bid, Bid 1.
+ * bids makes one bid, Bid 01.
  */
 export function copyRequest(
 	request: Pick<BidRequest, 'shots' | 'assets' | 'packages' | 'vendors'>,
 	options: { readonly rows: boolean; readonly key: () => string; readonly id: () => Id }
 ): { bids: SavedBid[]; vendors: CopiedVendor[] } {
-	const packages = request.packages && request.packages.length > 0 ? request.packages : [{ id: '', name: 'Bid 1' }];
+	const packages = request.packages && request.packages.length > 0 ? request.packages : [{ id: '', name: defaultBidName('', 1) }];
 	const keys = new Map(packages.map((p) => [p.id, bidKey(options.key())]));
 	const first = packages[0].id;
 	const of = (pkg: Id | undefined) => (pkg !== undefined && keys.has(pkg) ? pkg : first);
