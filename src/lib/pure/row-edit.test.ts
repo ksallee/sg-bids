@@ -99,6 +99,36 @@ describe('planEdits', () => {
 		]);
 	});
 
+	it('takes a count and a code on a row in this request only, and refuses a count that does not read or a Flow PT row', () => {
+		const plan = planEdits(
+			[
+				{ itemId: 'shot-bd-1', key: 'count', value: '120' },
+				{ itemId: 'shot-bd-1', key: 'code', value: ' SIMPLE ' },
+				{ itemId: 'shot-1', key: 'count', value: 3 },
+				{ itemId: 'shot-bd-1', key: 'count', value: '0' },
+				{ itemId: 'shot-bd-1', key: 'count', value: '2.5' }
+			],
+			items,
+			columns,
+			none
+		);
+		expect(plan.local).toEqual([
+			{ itemId: 'shot-bd-1', key: 'count', value: 120, before: 1 },
+			{ itemId: 'shot-bd-1', key: 'code', value: 'SIMPLE', before: 'SH030' }
+		]);
+		expect(plan.refused.map((r) => [r.itemId, r.reason])).toEqual([
+			['shot-1', 'This row is one Shot in Flow PT. Its count is 1.'],
+			['shot-bd-1', 'A count is 1 at least.'],
+			['shot-bd-1', 'A count is a whole number.']
+		]);
+	});
+
+	it('reads a count of 1 as blank and a blank count as 1, so it writes nothing on a row of 1', () => {
+		expect(planEdits([{ itemId: 'shot-bd-1', key: 'count', value: '' }], items, columns, none)).toEqual({ fpt: [], local: [], refused: [] });
+		expect(itemValue(shot('x', { source: 'breakdown', count: 40 }), 'count')).toBe(40);
+		expect(itemValue(items[0], 'count')).toBeNull();
+	});
+
 	it('writes nothing for a value the cell already holds', () => {
 		const plan = planEdits([{ itemId: 'shot-1', key: 'difficulty', value: 'A' }], items, columns, none);
 		expect(plan).toEqual({ fpt: [], local: [], refused: [] });
@@ -116,6 +146,16 @@ describe('applyLocal', () => {
 		expect(next[0].notes).toBe('Matte');
 		expect(next[1].omitted).toBe(true);
 		expect(next[3]).toBe(items[3]);
+	});
+
+	it('sets a count, and a count of 1 leaves the field off; a code goes on a shot code or an asset name', () => {
+		const counted = applyLocal(items, [{ itemId: 'shot-bd-1', key: 'count', value: 120, before: 1 }]);
+		expect(counted[2].count).toBe(120);
+		expect('count' in applyLocal(counted, [{ itemId: 'shot-bd-1', key: 'count', value: 1, before: 120 }])[2]).toBe(false);
+		expect(applyLocal(items, [{ itemId: 'shot-bd-1', key: 'code', value: 'SIMPLE', before: 'SH030' }])[2].code).toBe('SIMPLE');
+		expect(applyLocal(items, [{ itemId: 'shot-bd-1', key: 'code', value: null, before: 'SH030' }])[2].code).toBe('');
+		const assets = [{ id: 'asset-bd-1', name: '', source: 'breakdown' as const }];
+		expect(applyLocal(assets, [{ itemId: 'asset-bd-1', key: 'code', value: 'Props', before: null }])[0]).toEqual({ id: 'asset-bd-1', name: 'Props', source: 'breakdown' });
 	});
 });
 

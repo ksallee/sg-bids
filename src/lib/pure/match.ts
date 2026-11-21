@@ -5,9 +5,11 @@
  * Flow PT's text filters ignore case (field_types/text), so one `code in [...]` read brings both
  * kinds of candidate, and the case is checked here. A code is not unique in Flow PT (entity_types/
  * Shot): two rows that fit equally are named, never picked between. A Flow PT row already in the
- * request, or given to an earlier row here, is not given twice.
+ * request, or given to an earlier row here, is not given twice. A row that stands for several
+ * (`count.ts`) is one line of many shots: it is never matched to one.
  */
 
+import { isCounted } from './count';
 import type { ItemKind } from './field-map';
 import type { EntityRef, Id, RequestAsset, RequestShot } from './model';
 import type { ItemLink } from './wire';
@@ -27,9 +29,12 @@ export type Match =
 
 const labelOf = (row: Row) => ('code' in row ? row.code : row.name);
 
-/** The breakdown rows still waiting for their Flow PT row. */
+/**
+ * The breakdown rows still waiting for their Flow PT row. A counted row stands for many, and is
+ * matched to none; a row typed by hand with no code yet has nothing to match on.
+ */
 export function unmatched<T extends Row>(rows: readonly T[]): T[] {
-	return rows.filter((r) => r.source === 'breakdown' && !r.fpt);
+	return rows.filter((r) => r.source === 'breakdown' && !r.fpt && !isCounted(r) && labelOf(r).trim() !== '');
 }
 
 /** The codes to look up, once each. */
@@ -67,5 +72,5 @@ export function linkPlan(kind: ItemKind, matches: readonly Match[], picked: Read
 /** The rows with their links applied, for a draft. */
 export function withLinks<T extends Row>(rows: readonly T[], links: readonly ItemLink[]): T[] {
 	const by = new Map(links.map((l) => [l.key, l.fpt]));
-	return rows.map((r) => (by.has(r.id) && !r.fpt ? { ...r, fpt: by.get(r.id)! } : r));
+	return rows.map((r) => (by.has(r.id) && !r.fpt && !isCounted(r) ? { ...r, fpt: by.get(r.id)! } : r));
 }

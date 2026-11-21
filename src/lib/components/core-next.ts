@@ -1,7 +1,7 @@
 /**
- * What sg-widgets-core gains in sg-widgets PR #382 (issue #381) and PR #380, copied until sg-bids
- * moves to the core release that ships them: the bulk edit plan, the list source over rows the
- * host holds, `updateRows` on a source, and `fillWidths`. The code is core's, unchanged but for the
+ * What sg-widgets-core gains in sg-widgets PR #382 (issue #381), PR #380 and PR #384 (issue #383),
+ * copied until sg-bids moves to the core release that ships them: the bulk edit plan, the list
+ * source over rows the host holds, `updateRows` on a source, `fillWidths`, and `tableGrouping`. The code is core's, unchanged but for the
  * imports. Delete this file then, and import the names from 'sg-widgets-core'.
  */
 import { cellValue, rowKey, toWireGroup } from 'sg-widgets-core';
@@ -21,6 +21,17 @@ export function fillWidths(sizes: readonly number[], room: number): number[] {
 	const last = widths.length - 1;
 	if (extra > 0) widths[last] = (widths[last] ?? 0) + extra;
 	return widths;
+}
+
+/** core `collection-state.ts` (PR #384): what a table groups on, and the group path no column shows. */
+export interface TableGrouping {
+	grouping: string[];
+	groupOnly: string | null;
+}
+
+export function tableGrouping(groupBy: string | null | undefined, columnPaths: readonly string[]): TableGrouping {
+	if (!groupBy) return { grouping: [], groupOnly: null };
+	return { grouping: [groupBy], groupOnly: columnPaths.includes(groupBy) ? null : groupBy };
 }
 
 /* core `bulk-edit.ts` (PR #382) */

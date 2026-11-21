@@ -9,7 +9,8 @@
  * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store. Whether
  * the total is above zero is checked at submit (`bid-limits.submitProblems`). Whether the package
  * figures hold together, and stay within the vendor's packages, is `packages.packageProblems`'s,
- * in the store.
+ * in the store; whether a counted row's total is its unit price times its count is
+ * `count.countProblems`'s, there too.
  */
 
 import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PackagePrice, PaymentMilestone, RateCard, RebateSplit } from './model';
@@ -106,7 +107,8 @@ function line(value: unknown, where: string): BidDraft['lines'][number] {
 		elementsNeeded: optionalText(o.elementsNeeded, `${where}.elementsNeeded`),
 		startWeek: optionalText(o.startWeek, `${where}.startWeek`),
 		inPackage: o.inPackage === undefined || o.inPackage === false ? undefined : bool(o.inPackage, `${where}.inPackage`),
-		fromRate: o.fromRate === undefined || o.fromRate === false ? undefined : bool(o.fromRate, `${where}.fromRate`)
+		fromRate: o.fromRate === undefined || o.fromRate === false ? undefined : bool(o.fromRate, `${where}.fromRate`),
+		unit: o.unit === undefined ? undefined : amount(o.unit, `${where}.unit`)
 	});
 	return result;
 }

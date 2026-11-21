@@ -156,8 +156,9 @@
 		if (cell.kind === 'missing') return `${row.label}, ${vendor}: not bid`;
 		if (cell.kind === 'package') return `${row.label}, ${vendor}: in the package price${picked}`;
 		if (cell.kind === 'declined') return `${row.label}, ${vendor}: not bidding on this bid`;
-		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}, needs a rate${picked}`;
-		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
+		const each = cell.unit ? `, ${money(cell.unit.base ?? cell.unit.bid)} each times ${row.count}` : '';
+		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}${each}, needs a rate${picked}`;
+		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${each}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
 	}
 
 	type TotalKey = 'items' | 'costs' | 'discount' | 'tax' | 'grand' | 'rebate' | 'afterRebate';
@@ -395,6 +396,7 @@
 						<button type="button" class="flex min-w-0 flex-1 flex-col items-start text-left" tabindex="-1" onclick={() => onDetail(row)} title="Open the detail">
 							<span class="flex items-center gap-1.5">
 								<span class="font-mono text-xs font-medium">{row.label}</span>
+								{#if row.count > 1}<span class="rounded border px-1 text-[10px] font-medium tabular-nums" title={`This row stands for ${row.count.toLocaleString()}. Prices are for all of them.`} data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
 								{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-[10px]">omitted</span>{/if}
 							</span>
 							{#if row.description}<span class="text-muted-foreground w-full truncate text-xs">{row.description}</span>{/if}
@@ -440,7 +442,7 @@
 								{#if cell.amount.base}
 									<span class={cn('text-sm tabular-nums', cell.lowest && 'font-semibold')}>{money(cell.amount.base)}</span>
 									<span class="text-muted-foreground flex items-center gap-1.5 text-[11px] tabular-nums">
-										{#if cell.amount.bid.currency !== grid.baseCurrency}<span>{money(cell.amount.bid)}</span>{/if}
+										{#if cell.unit}<span data-slot="cell-unit" title={`${money(cell.unit.base ?? cell.unit.bid)} each, times ${row.count.toLocaleString()}`}>{money(cell.unit.base ?? cell.unit.bid)} × {row.count.toLocaleString()}</span>{:else if cell.amount.bid.currency !== grid.baseCurrency}<span>{money(cell.amount.bid)}</span>{/if}
 										{#if cell.lowest}
 											<span class="text-success inline-flex items-center gap-1 font-medium"><span class="bg-success size-1.5 rounded-full"></span>Lowest</span>
 										{:else if cell.spreadBp !== null}
@@ -457,6 +459,7 @@
 									{/if}
 								{:else}
 									<span class="text-muted-foreground text-sm tabular-nums">{money(cell.amount.bid)}</span>
+									{#if cell.unit}<span class="text-muted-foreground text-[11px] tabular-nums" data-slot="cell-unit">{money(cell.unit.bid)} × {row.count.toLocaleString()}</span>{/if}
 									<span class="text-warning-foreground dark:text-warning text-[11px]">needs a rate</span>
 								{/if}
 								{#if share !== undefined}

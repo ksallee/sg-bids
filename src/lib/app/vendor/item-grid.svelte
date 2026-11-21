@@ -12,6 +12,9 @@
 
 	"Exclude" is apart from a zero price: an excluded item is one you will not do.
 
+	A row with a count stands for that many shots or assets of a kind. Its price is per unit, from a
+	rate or typed, and its line is that times the count, shown under the price (`$lib/pure/count`).
+
 	Your rates, over the grid: a price per difficulty that appears in the rows, and one for rows with
 	none. A rate fills every row that follows it in the bids priced row by row; a price typed on a row
 	is the vendor's own, marked, and rates leave it alone until Use rate puts it back
@@ -420,7 +423,12 @@
 						<ChevronRight class={cn('size-4 transition-transform motion-reduce:transition-none', detailOpen && 'rotate-90')} aria-hidden="true" />
 						{#if hasDetail && !detailOpen}<span class="bg-primary absolute top-0.5 right-0.5 size-1.5 rounded-full" aria-hidden="true"></span>{/if}
 					</button>
-					<span class="truncate font-mono text-xs" role="cell" title={shot?.code ?? item?.name}>{shot?.code ?? item?.name}</span>
+					<span class="flex min-w-0 items-center gap-1.5" role="cell">
+						<span class="truncate font-mono text-xs" title={shot?.code ?? item?.name}>{shot?.code ?? item?.name}</span>
+						{#if (line.count ?? 1) > 1}
+							<span class="border-border bg-background shrink-0 rounded border px-1 text-[11px] leading-4 font-medium tabular-nums" title={`This row stands for ${line.count} ${shot ? 'shots' : 'assets'}. Price one.`} data-slot="row-count">×{line.count?.toLocaleString()}</span>
+						{/if}
+					</span>
 					<span
 						class={cn('hidden min-w-0 truncate sm:block', line.excluded && 'line-through decoration-current/40')}
 						role="cell"
@@ -429,7 +437,7 @@
 						{shot?.description ?? item?.description ?? ''}
 					</span>
 					<span class="text-muted-foreground hidden truncate text-xs xl:block" role="cell">{meta(key)}</span>
-					<span class="text-muted-foreground hidden text-right text-xs tabular-nums xl:block" role="cell">{shot?.frames ?? ''}</span>
+					<span class="text-muted-foreground hidden text-right text-xs tabular-nums xl:block" role="cell" title={(line.count ?? 1) > 1 && shot?.frames !== undefined ? `${shot.frames} frames each, ${(shot.frames * (line.count ?? 1)).toLocaleString()} in all` : undefined}>{shot?.frames ?? ''}{#if (line.count ?? 1) > 1 && shot?.frames !== undefined}<span class="block text-[11px] leading-tight">each</span>{/if}</span>
 					<span class="flex flex-col items-end" role="cell">
 						{#if declined}
 							<span class="text-muted-foreground py-1.5 text-xs" data-slot="not-bidding">Not bidding</span>
@@ -439,6 +447,7 @@
 							</span>
 						{:else if readOnly}
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
+							{#if (line.count ?? 1) > 1 && !line.excluded && prices.has(key)}<span class="text-muted-foreground text-xs tabular-nums" data-slot="line-extended">{line.price} each × {line.count?.toLocaleString()}</span>{/if}
 						{:else}
 							{@const source = lineSource(form, line)}
 							<span class="flex w-full items-center gap-1.5">
@@ -463,7 +472,7 @@
 									data-source={source}
 									inputmode="decimal"
 									autocomplete="off"
-									aria-label={`Price for ${shot?.code ?? item?.name}`}
+									aria-label={(line.count ?? 1) > 1 ? `Price for one of ${shot?.code ?? item?.name}, ${line.count} in the row` : `Price for ${shot?.code ?? item?.name}`}
 									aria-invalid={!!error}
 									disabled={line.excluded}
 									placeholder={line.excluded ? 'Excluded' : ''}
@@ -477,6 +486,11 @@
 									onpaste={(e) => onPricePaste(e, key)}
 								/>
 							</span>
+							{#if (line.count ?? 1) > 1 && !line.excluded}
+								<span class="text-muted-foreground pt-0.5 text-right text-xs tabular-nums" data-slot="line-extended">
+									each × {line.count?.toLocaleString()}{#if prices.has(key)}{' '}= <span class="text-foreground font-medium">{format(prices.get(key)!, locale)}</span>{/if}
+								</span>
+							{/if}
 							{#if error}<span class="text-destructive pt-0.5 text-right text-xs">{error}</span>{/if}
 						{/if}
 					</span>

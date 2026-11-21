@@ -79,12 +79,15 @@
 				</ul>
 				{#if g.missingFields > 0}
 					<div class="flex flex-col gap-1.5 rounded-md border p-3">
-						<p>{g.missingFields === 1 ? 'One field is' : `${g.missingFields} fields are`} missing. The app creates them, as you. It needs an Admin.</p>
+						<p>
+							{#if report.fields.filter((f) => f.state === 'missing' && !f.spec.stock).every((f) => f.spec.optional)}{g.missingFields === 1 ? 'One optional field is' : `${g.missingFields} optional fields are`} missing. The award works without it. The app creates it, as you. It needs an Admin.
+							{:else}{g.missingFields === 1 ? 'One field is' : `${g.missingFields} fields are`} missing. The app creates them, as you. It needs an Admin.{/if}
+						</p>
 						<ul class="text-muted-foreground flex flex-col gap-0.5 text-xs" data-slot="missing-fields">
 							{#each ['bid', 'line'] as const as entity (entity)}
 								{@const names = report.fields.filter((f) => f.entity === entity && f.state === 'missing' && !f.spec.stock)}
 								{#if names.length}
-									<li><span class="text-foreground font-medium">{entity === 'bid' ? 'Bid' : 'Bid Line'}:</span> {names.map((f) => `${f.spec.display} (${f.spec.name})`).join(', ')}</li>
+									<li><span class="text-foreground font-medium">{entity === 'bid' ? 'Bid' : 'Bid Line'}:</span> {names.map((f) => `${f.spec.display} (${f.spec.name})${f.spec.optional ? ', optional' : ''}`).join(', ')}</li>
 								{/if}
 							{/each}
 						</ul>

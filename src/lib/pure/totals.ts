@@ -43,6 +43,7 @@ export function checkBid(bid: VendorBid, base: string): void {
 		check(line.total, `line ${line.id}`);
 		check(line.compute, `the compute of line ${line.id}`);
 		check(line.markup, `the markup of line ${line.id}`);
+		check(line.unit, `the unit price of line ${line.id}`);
 		for (const department of line.departments ?? []) {
 			check(department.cost, `the ${department.department} cost of line ${line.id}`);
 		}

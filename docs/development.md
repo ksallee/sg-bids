@@ -385,17 +385,20 @@ Arguments pass through to vitest: `pnpm test:db tests/db/freeze.db.test.ts`.
 of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. Point `.env.local` (or
 the environment) at a throwaway database, not one a running app reads. It writes only to the one
 project named, by exact name: it makes a request from the New request dialog, puts 4 of the project's
-Shots and 2 breakdown Shots in Bid 1 (renamed Seq A), adds a bid (Creature) with a breakdown Shot and
+Shots and 2 breakdown Shots in Bid 1 (renamed Seq A), types a row by hand into it with a count of
+120, hides and shows the side panel, adds a bid (Creature) with a breakdown Shot and
 Asset, moves a Shot between the two, types two vendors in their rows (B on Creature alone), presses
 Issue with the due day blank and checks the list names it and marks the field, sets it and issues,
 checks Copy all and Email, answers as each vendor in its own browser context (A fills its rate card,
 overrides one row and declines Creature; B prices Creature as one figure in GBP), sets the rate,
-chooses a scenario, publishes, reads Flow PT back (the Bids, the Bid Lines, their sums, the Groups),
+chooses a scenario, publishes, reads Flow PT back (the Bids, the Bid Lines, their sums, the counted
+row's Bid Line with its amount and count, the Groups),
 undoes from the request page and reads Flow PT back again, then duplicates the request without its
 rows. Then it deletes what the drive made in Flow PT and in the database, also on a failure part way.
-It takes port 5182, or uses the app already there. Screenshots go to `shots/e2e-live/` (gitignored);
-`E2E_SCREENS=1` also shoots the main screens at 1280, 1440, 1920 (light and dark) and 2560 into
-`shots/one-page/`. It prints ids and counts, never a key or the site's address.
+It starts its own app on a free port it picks, and never uses an app it did not start, so two
+worktrees never share one. Screenshots go to `shots/e2e-live/` (gitignored); `E2E_SCREENS=1` also
+shoots the main screens at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`, or
+`shots/<E2E_SCREENS_DIR>/`. It prints ids and counts, never a key or the site's address.
 
 ## Security headers
 

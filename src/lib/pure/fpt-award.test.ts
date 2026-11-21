@@ -280,7 +280,9 @@ describe('planAward, the preview', () => {
 			awardedBase: money(99000, 'USD'),
 			excluded: false,
 			package: null,
-			inPackage: false
+			inPackage: false,
+			count: 1,
+			unit: null
 		});
 		expect(plan.preview.bids[1]).toMatchObject({ vendor: 'Vendor B', currency: 'EUR', rate: rate('EUR', 'USD', '1.1', '2026-11-15'), group: 39 });
 		expect(plan.preview.removed).toEqual({ bids: [], lines: [], groups: [], items: [] });

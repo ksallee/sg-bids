@@ -106,7 +106,8 @@ The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readines
 | episode, sequence, scene, page | where it sits | 2+ |
 | type, difficulty | kind of work and how hard | 2+ |
 | cutCount | cut count | 2+ |
-| frames | frame count | 2+ |
+| frames | frame count, per unit on a counted row | 2+ |
+| count | how many shots of its kind the row stands for, on a row with no Flow PT Shot. Absent: 1 | sg-bids |
 | omitted | the shot is out | 2+ |
 | assetIds | linked assets | 2+ |
 | thumbnail | thumbnail | 2+ |
@@ -125,6 +126,7 @@ The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readines
 | description | what it is | 2+ |
 | type, difficulty | kind of asset and how hard | 2+ |
 | timesUsed | how many shots use it | 2+ |
+| count | how many assets of its kind the row stands for, on a row with no Flow PT Asset. Absent: 1 | sg-bids |
 | omitted | the asset is out | sg-bids |
 | notes | production's note to the vendors | sg-bids |
 
@@ -143,6 +145,32 @@ one.
   the awarded rows, or to publish their Bid Lines with no item. What a publish creates is in the
   award record (`written.items`), and Undo award deletes exactly that, unless a created row has
   since gained links.
+
+### Rows by count
+
+Early bids go by count: 120 simple comps, 40 medium, 10 hard. One row stands for many. The rules
+are in `src/lib/pure/count.ts`, with property tests.
+
+- Add row, in the request's table, puts an empty row last in the bid picked, with the cursor in its
+  code. Tab writes a cell and opens the next. Enter on the last row of a bid adds another. It is a
+  breakdown row: `source: breakdown`, no `fpt`, the same mark. A row with no code stops the issue,
+  and the list takes the person to it. The database refuses it too (`sg_issue_request`).
+- A row with no Flow PT row has a count: a whole number from 1 to 100,000, 1 by default, typed in
+  its cell or in bulk. A row linked to a Flow PT Shot or Asset is one: its count is 1, and its cell
+  says why. A counted row is never matched to a Flow PT row (`sg_link_request_items` refuses it).
+- Frames are per unit. A counted row's frames in all are its frames times its count, and the page
+  shows both. A bid's and the request's counts add up the counts: `170 shots in 3 rows` where the
+  counts make more than the rows.
+- In storage, `unit_count` on `production_bid_items` and `request_items`, 1 by default, so every
+  row from before reads as 1. It is frozen with the request. A row linked to Flow PT holds 1
+  (`*_unit_count_fpt`).
+- A vendor prices a counted row per unit. The rate card fills the unit price. The line's total is
+  the unit price times the count, in whole minor units, and the line keeps its unit price (`unit`,
+  in its detail). The store refuses a total that is not exactly that. Every total, the comparison,
+  the award and Flow PT read the line's total, as before. A row of count 1 is a row as before.
+- A counted row is awarded whole to one vendor, or split by the shares as any row. At the award it
+  creates no Shot or Asset, even with create on: it lands as one Bid Line with no item, its amount
+  the line total, its count in its name and in the Bid Line's Count field when the site has it.
 
 ### The bids of a request
 
@@ -238,6 +266,7 @@ NIM converts at the bid date. vfx_bidding_assist keeps amounts in both currencie
 | elementsNeeded | elements the vendor needs | 2+ |
 | startWeek | start week | 2+ |
 | excluded | the vendor will not do it | 2+ |
+| unit | on a counted row, the price of one. The total is it times the count | sg-bids |
 
 An excluded line is a different thing from a zero price, and from a shot the vendor did not bid.
 The comparison shows all three apart.
@@ -420,7 +449,12 @@ answer, one comparison.
   as before, with the grand total and the rebate on it. It gains the General costs Bid only when the
   vendor gave whole-bid figures; then its one Bid carries the lines' sum. With no whole-bid figure the
   plan is exactly what it was, so an award published before packages, and its undo, still match.
-- The bid's name is in the Bid's name. No field is added to the site.
+- The bid's name is in the Bid's name.
+- A counted row's Bid Line is named with its count, `SIMPLE x120 Vendor A`, carries the line total
+  as its amount, and no item. Bid Line has one optional field, Count (`sg_count`, a number): when the
+  site has it, every Bid Line carries its count, 1 for a Shot or Asset of Flow PT. A site without it
+  is still ready; the publish page offers to create it and says the count is in the name alone.
+  Sums per Bid stay the line totals, so they still equal the bid's total exactly.
 - Undo award deletes every Bid and Bid Line the award created, General costs included, as before.
 
 ## Change order

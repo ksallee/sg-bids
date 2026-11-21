@@ -78,10 +78,11 @@
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
 					<span class="font-mono">{row.label}</span>
+					{#if row.count > 1}<span class="rounded border px-1 text-xs font-normal tabular-nums" data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
 					{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-xs font-normal">omitted</span>{/if}
 				</Dialog.Title>
 				<Dialog.Description class="flex flex-wrap gap-x-3">
-					{#each [row.target.kind === 'shot' ? row.sequence : 'Asset', item?.description, item && 'frames' in item && item.frames ? `${item.frames} frames` : '', item?.difficulty].filter(Boolean) as part, i (i)}
+					{#each [row.count > 1 ? `${row.count.toLocaleString()} ${row.target.kind === 'shot' ? 'shots' : 'assets'} in this row` : '', row.target.kind === 'shot' ? row.sequence : 'Asset', item?.description, item && 'frames' in item && item.frames ? (row.count > 1 ? `${item.frames} frames each, ${(item.frames * row.count).toLocaleString()} in all` : `${item.frames} frames`) : '', item?.difficulty].filter(Boolean) as part, i (i)}
 						<span>{part}</span>
 					{/each}
 				</Dialog.Description>
@@ -100,6 +101,7 @@
 										{cell.amount.base ? formatAmount(cell.amount.base, undefined, false) : formatAmount(cell.amount.bid, undefined, false)}
 									</span>
 									<span class="text-muted-foreground text-xs tabular-nums">
+										{#if cell.unit}<span data-slot="cell-unit">{formatAmount(cell.unit.base ?? cell.unit.bid, undefined, false)} each, times {row.count.toLocaleString()}. </span>{/if}
 										{#if !cell.amount.base}<span class="text-warning-foreground dark:text-warning">Needs a rate. </span>{:else if cell.amount.bid.currency !== grid.baseCurrency}{formatAmount(cell.amount.bid, undefined, false)} in {cell.amount.bid.currency}. {/if}
 										{#if cell.lowest}<span class="text-success font-medium">Lowest.</span>{:else if cell.spreadBp !== null}{formatSpread(cell.spreadBp)} over the lowest.{/if}
 									</span>

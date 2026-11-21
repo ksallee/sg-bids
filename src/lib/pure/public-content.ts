@@ -69,7 +69,7 @@ export const HOME = {
 			q: 'What is sg-bids?',
 			a: 'A web app for the bid round of a VFX show. Production makes a request from its Shots and Assets in Flow PT, vendors answer through a link, and production compares the answers and awards them to Flow PT.',
 			list: [
-				'A request on one page: one or several bids, each a named set of Shots, Assets or rows of a pasted breakdown, its vendors and its details. Duplicate it to start the next one.',
+				'A request on one page: one or several bids, each a named set of Shots, Assets, rows of a pasted breakdown or rows typed by hand, its vendors and its details. A row may stand for many shots: 120 simple comps on one row. Duplicate it to start the next one.',
 				'One link per vendor, made at the issue, with Copy and Email. The vendor needs no Flow PT account. Invite a vendor to every bid of a request or to some.',
 				'Answers row by row, from the vendor’s own rates, or one figure per bid, with costs, discount, tax and rebate splits given once, in versions.',
 				'A comparison in one currency, award scenarios, and CSV exports.',
@@ -120,7 +120,7 @@ export const HOW = {
 		items: [
 			{
 				title: 'Make a request',
-				line: 'New request asks for a name and a project, then everything is on one page. Its bids: add Shots and Assets from Flow PT, or paste a breakdown when they are not in Flow PT yet, each row in one bid; Add bid for another. Rows show the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit and breakdown rows stay in the request. Its vendors: type a name and an email in a row, name the vendor’s Flow PT Group if it has one (the award uses it), and the bids it answers. Its details: the day answers are due, the currency, turnover, delivery, the material.',
+				line: 'New request asks for a name and a project, then everything is on one page. Its bids: add Shots and Assets from Flow PT, paste a breakdown when they are not in Flow PT yet, or type rows by hand, each row in one bid; Add bid for another. A row of the request only has a count: 120 simple comps is one row. Rows show the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit and breakdown rows stay in the request. Its vendors: type a name and an email in a row, name the vendor’s Flow PT Group if it has one (the award uses it), and the bids it answers. Its details: the day answers are due, the currency, turnover, delivery, the material.',
 				app: 'The draft: its bids and rows, its vendors, its details. Saved as you go.',
 				fpt: { kind: 'write', text: 'Reads Shots, Assets, Groups and their fields. Writes a field of a Shot or Asset when you edit it in a draft, with Undo. Creates a field only when you ask, from the mapping.' }
 			},
@@ -132,7 +132,7 @@ export const HOW = {
 			},
 			{
 				title: 'Vendors answer',
-				line: 'A vendor opens its link and answers in its own currency. It needs no Flow PT account. Per bid it prices row by row, gives one figure for the whole bid, or does not bid. Its rates, a price per difficulty, fill the rows priced row by row; a price it types on a row is its own. Overhead, discount, tax and rebates are given once.',
+				line: 'A vendor opens its link and answers in its own currency. It needs no Flow PT account. Per bid it prices row by row, gives one figure for the whole bid, or does not bid. Its rates, a price per difficulty, fill the rows priced row by row; a price it types on a row is its own. A row with a count is priced per unit, and its line is the price times the count. Overhead, discount, tax and rebates are given once.',
 				app: 'Each answer, its lines, costs, rebates and versions.',
 				fpt: { kind: 'none', text: 'Nothing. Vendors never reach Flow PT through the app.' }
 			},
@@ -146,7 +146,7 @@ export const HOW = {
 				title: 'Publish the award',
 				line: 'Check the preview, then publish from your own Flow PT session. Undo it later if you need to.',
 				app: 'The award: who won what, when, by whom, and what was written.',
-				fpt: { kind: 'write', text: 'Writes Bids, Bid Lines, and Groups on the Shots and Assets won. Creates the Shots and Assets of a breakdown when you choose to.' }
+				fpt: { kind: 'write', text: 'Writes Bids, Bid Lines, and Groups on the Shots and Assets won. Creates the Shots and Assets of a breakdown when you choose to. A row with a count is one Bid Line with its count, and no Shot.' }
 			}
 		] satisfies readonly Step[]
 	},

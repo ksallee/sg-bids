@@ -138,9 +138,9 @@ describe('planAward, rows with no Flow PT row', () => {
 		expect(lines.map((l) => l.data.sg_item)).toEqual([{ type: 'Shot', id: 101 }, null, null, null]);
 		expect(plan.steps[1].writes.filter((w) => w.kind === 'addGroups')).toHaveLength(1);
 		expect(plan.preview.unlinked).toEqual([
-			{ item: 'zzsgbids_SH900', kind: 'shot' },
-			{ item: 'zzsgbids_SH910', kind: 'shot' },
-			{ item: 'zzsgbids_Banner', kind: 'asset' }
+			{ item: 'zzsgbids_SH900', kind: 'shot', count: 1 },
+			{ item: 'zzsgbids_SH910', kind: 'shot', count: 1 },
+			{ item: 'zzsgbids_Banner', kind: 'asset', count: 1 }
 		]);
 		expect(plan.warnings).toContain('3 Bid Lines are written with no Shot or Asset: zzsgbids_SH900, zzsgbids_SH910 and zzsgbids_Banner. No Group is added for them.');
 	});

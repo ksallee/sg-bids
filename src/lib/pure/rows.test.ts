@@ -112,6 +112,23 @@ describe('items', () => {
 		expect(back.assets[0]).toEqual(asset('bd-2', { source: 'breakdown' }));
 	});
 
+	it('writes a row count as its own column, 1 by default and for a Flow PT row, and reads it back', () => {
+		const rows = itemsToRows([shot('sh010', { fpt: { type: 'Shot', id: 1 } }), shot('bd-1', { source: 'breakdown', frames: 80, count: 120 })], [asset('bd-2', { source: 'breakdown', count: 12 }), asset('bd-3', { source: 'breakdown' })]);
+		expect(rows.map((r) => r.unit_count)).toEqual([1, 120, 12, 1]);
+		for (const row of rows) expect(row.fields).not.toHaveProperty('count');
+		const back = itemsFromRows(rows);
+		expect(back.shots[1]).toEqual(shot('bd-1', { source: 'breakdown', frames: 80, count: 120 }));
+		expect(back.shots[0]).not.toHaveProperty('count');
+		expect(back.assets[0].count).toBe(12);
+		expect(back.assets[1]).not.toHaveProperty('count');
+	});
+
+	it('reads a row stored before counts as 1', () => {
+		const [row] = itemsToRows([shot('bd-1', { source: 'breakdown' })], []);
+		const { unit_count: _, ...old } = row;
+		expect(itemsFromRows([old]).shots[0]).toEqual(shot('bd-1', { source: 'breakdown' }));
+	});
+
 	it('reads a breakdown row linked later with its Flow PT row', () => {
 		const [row] = itemsToRows([shot('bd-1', { source: 'breakdown' })], []);
 		const back = itemsFromRows([{ ...row, fpt_type: 'Shot', fpt_id: 77 }]);
@@ -257,6 +274,23 @@ describe('bid', () => {
 	it('refuses two lines on one target', () => {
 		const twice = bid({ currency: 'USD', lines: [line('a', onShot('sh010'), money(1, 'USD')), line('b', onShot('sh010'), money(2, 'USD'))] });
 		expect(() => bidToRows(twice, 'USD')).toThrow();
+	});
+});
+
+describe('a counted line', () => {
+	it('keeps its unit price in the detail and reads it back', () => {
+		const draft = bid({ currency: 'USD', lines: [line('l1', onShot('bd-1'), money(18_000_000, 'USD'), { unit: money(150_000, 'USD'), fromRate: true })] });
+		const { bid: columns, lines } = bidToRows(draft, 'USD');
+		expect(lines[0]).toMatchObject({ total_minor: 18_000_000, detail: { unit: { minor: 150_000, currency: 'USD' }, fromRate: true } });
+		const row = { ...tenant, id: 'b', invitation_id: 'v1', request_id: 'req1', version: 1, status: 'submitted', submitted_at: null, withdrawn_at: null, created_at: '', updated_at: '', ...columns } as BidRow;
+		const back = bidFromRows(row, [{ ...tenant, id: 'l1', bid_id: 'b', invitation_id: 'v1', request_id: 'req1', ...lines[0] }], { round: 1, baseCurrency: 'USD' });
+		expect(back.lines[0].unit).toEqual(money(150_000, 'USD'));
+		expect(back.lines[0].total).toEqual(money(18_000_000, 'USD'));
+	});
+
+	it('refuses a unit price in another currency', () => {
+		const draft = bid({ currency: 'USD', lines: [line('l1', onShot('bd-1'), money(200, 'USD'), { unit: money(100, 'EUR') })] });
+		expect(() => bidToRows(draft, 'USD')).toThrow('unit price');
 	});
 });
 

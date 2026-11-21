@@ -12,6 +12,7 @@
  */
 
 import type { EntityRow } from 'sg-widgets-core';
+import { countOf, parseCount } from './count';
 import { cellTarget, type ColumnKey, type RequestColumn } from './live-columns';
 import type { Id } from './model';
 
@@ -103,15 +104,19 @@ interface Item {
 	readonly episode?: string;
 	readonly sequence?: string;
 	readonly omitted?: boolean;
+	readonly count?: number;
 }
 
 /** What the bid shows in a cell, a blank as null. */
 export function itemValue(item: Item, key: ColumnKey): CellValue {
 	switch (key) {
 		case 'code':
-			return item.code ?? item.name ?? null;
+			return (item.code ?? item.name) || null;
 		case 'sequence':
 			return [item.episode, item.sequence].filter(Boolean).join(' / ') || null;
+		case 'count':
+			// A count of 1 reads blank, so an editor opens empty to type the count in.
+			return countOf(item) > 1 ? countOf(item) : null;
 		case 'frames':
 			return item.frames ?? null;
 		case 'omitted':
@@ -139,12 +144,12 @@ export function planEdits(changes: readonly CellChange[], items: readonly Item[]
 			refused.push({ itemId: item.id, key: change.key, reason: target.reason });
 			continue;
 		}
-		const parsed = parseCell(column, change.value);
+		const parsed = change.key === 'count' ? parseCount(change.value) : parseCell(column, change.value);
 		if ('error' in parsed) {
 			refused.push({ itemId: item.id, key: change.key, reason: parsed.error });
 			continue;
 		}
-		const before = itemValue(item, change.key);
+		const before = change.key === 'count' ? countOf(item) : itemValue(item, change.key);
 		if (parsed.value === before) continue;
 		if (target.kind === 'fpt') {
 			fpt.push({ itemId: item.id, key: change.key, type: target.type, id: target.id, field: target.field, value: parsed.value as string | number | null, before });
@@ -165,8 +170,19 @@ export function applyLocal<T extends Item>(items: readonly T[], writes: readonly
 		if (!mine) return item;
 		const next = { ...item } as Record<string, unknown>;
 		for (const w of mine) {
-			// The code and the Sequence are Flow PT's.
-			if (w.key === 'code' || w.key === 'sequence') continue;
+			// The Sequence is Flow PT's, or kept from the breakdown.
+			if (w.key === 'sequence') continue;
+			// A code reaches here only for a row in this request only: a shot's `code`, an asset's `name`.
+			if (w.key === 'code') {
+				next['code' in next ? 'code' : 'name'] = typeof w.value === 'string' ? w.value : '';
+				continue;
+			}
+			// A count of 1 is the row as it always was: no field.
+			if (w.key === 'count') {
+				if (w.value === 1 || w.value === null) delete next.count;
+				else next.count = w.value;
+				continue;
+			}
 			if (w.value === null) delete next[w.key];
 			else next[w.key] = w.value;
 		}

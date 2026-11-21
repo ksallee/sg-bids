@@ -3,10 +3,11 @@
  * The site facts come from the setup report (`fpt-setup.ts`, recipe 029); the writes from
  * `fpt-award.ts`.
  *
- * What blocks: no chosen scenario; Bid or Bid Line not enabled; a field missing or of the wrong
- * type; no vendor groups field on a type the scenario awards; a bid in another currency with no
+ * What blocks: no chosen scenario; Bid or Bid Line not enabled; a field missing (an optional one
+ * is offered, never required) or of the wrong type; no vendor groups field on a type the scenario awards; a bid in another currency with no
  * rate; a vendor with no Group and no choice made; awarded rows with no Flow PT row and no choice
- * made for their kind (create them, or publish their Bid Lines without an item). Each problem says
+ * made for their kind (create them, or publish their Bid Lines without an item). A counted row
+ * (`count.ts`) needs no choice: it always lands as a Bid Line with its count and no item. Each problem says
  * where on the page, or which page, fixes it.
  *
  * What asks first: the Vendor role can read Bid or Bid Line, or its rights could not be read. A
@@ -15,6 +16,7 @@
  */
 
 import type { FptSite, MissingChoice, MissingOptions } from './fpt-award';
+import { isCounted } from './count';
 import { ENTITY_NAMES } from './fpt-fields';
 import type { Access, SetupReport } from './fpt-setup';
 import { targetKey, type AwardScenario, type BidRequest, type EntityRef, type Id, type VendorBid } from './model';
@@ -103,7 +105,8 @@ export function siteOf(report: SetupReport, projectId: number): FptSite | null {
 	const vendorField: Partial<Record<'Shot' | 'Asset', string>> = {};
 	if (report.vendorField.Shot.field) vendorField.Shot = report.vendorField.Shot.field;
 	if (report.vendorField.Asset.field) vendorField.Asset = report.vendorField.Asset.field;
-	return { projectId, bidType: bid.type, lineType: line.type, vendorField, statuses: report.statuses.codes };
+	const lineCount = report.fields.some((f) => f.entity === 'line' && f.spec.key === 'count' && f.state === 'present');
+	return { projectId, bidType: bid.type, lineType: line.type, vendorField, statuses: report.statuses.codes, lineCount };
 }
 
 function readable(a: Access): boolean {
@@ -186,9 +189,9 @@ export function gate(input: GateInput): Gate {
 	}
 
 	// An awarded row with no Flow PT row: created, published without one, or matched first. One choice per kind.
-	const rows = new Map<string, { label: string; fpt?: EntityRef }>();
-	for (const s of request.shots) rows.set(targetKey({ kind: 'shot', id: s.id }), { label: s.code, fpt: s.fpt });
-	for (const a of request.assets) rows.set(targetKey({ kind: 'asset', id: a.id }), { label: a.name, fpt: a.fpt });
+	const rows = new Map<string, { label: string; fpt?: EntityRef; counted: boolean }>();
+	for (const s of request.shots) rows.set(targetKey({ kind: 'shot', id: s.id }), { label: s.code, fpt: s.fpt, counted: isCounted(s) });
+	for (const a of request.assets) rows.set(targetKey({ kind: 'asset', id: a.id }), { label: a.name, fpt: a.fpt, counted: isCounted(a) });
 	const awardedTargets = [
 		...(scenario?.picks ?? []).map((p) => p.target),
 		...(input.allLines ? bids.flatMap((b) => b.lines.map((l) => l.target)) : [])
@@ -202,6 +205,8 @@ export function gate(input: GateInput): Gate {
 		if (seen.has(key)) continue;
 		seen.add(key);
 		const row = rows.get(key);
+		// A counted row stands for many: it lands as a Bid Line with its count, never as a Shot or Asset.
+		if (row?.counted) continue;
 		if (row && !row.fpt) labels[target.kind].push(row.label);
 		if (row?.fpt || choices[target.kind] === 'create') kinds.add(target.kind);
 	}
@@ -235,12 +240,14 @@ export function gate(input: GateInput): Gate {
 		}
 		const missing = report.fields.filter((f) => f.state === 'missing' && !f.spec.stock);
 		missingFields = missing.length;
-		if (missingFields > 0) {
+		// An optional field missing is offered to create, and blocks nothing.
+		const required = missing.filter((f) => !f.spec.optional);
+		if (required.length > 0) {
 			const on = (['bid', 'line'] as const)
-				.map((key) => ({ key, names: missing.filter((f) => f.entity === key).map((f) => f.spec.display) }))
+				.map((key) => ({ key, names: required.filter((f) => f.entity === key).map((f) => f.spec.display) }))
 				.filter((p) => p.names.length > 0)
 				.map((p) => `${ENTITY_NAMES[p.key]}: ${named(p.names)}`);
-			block(`${missingFields === 1 ? 'One field is' : `${missingFields} fields are`} missing on ${on.join('; and on ')}. Create them here.`, 'gate-site');
+			block(`${required.length === 1 ? 'One field is' : `${required.length} fields are`} missing on ${on.join('; and on ')}. Create them here.`, 'gate-site');
 		}
 		for (const f of report.fields) {
 			const where = `${ENTITY_NAMES[f.entity]}.${f.spec.name}`;

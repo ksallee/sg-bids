@@ -4,6 +4,7 @@
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
+import { countOf, framesOf } from './count';
 import { DIFFICULTY_TIERS } from './field-map';
 import type { BidRequest, Id, RequestAsset, RequestHeader, RequestShot } from './model';
 
@@ -27,17 +28,33 @@ export interface VendorView {
 	readonly assets: readonly RequestAsset[];
 }
 
+/** A shot row typed by hand: in this request only, no code yet, in the bid named. */
+export function handShot(id: Id, bid: Id): RequestShot {
+	return { id, code: '', source: 'breakdown', omitted: false, assetIds: [], package: bid };
+}
+
+/** An asset row typed by hand: in this request only, no name yet, in the bid named. */
+export function handAsset(id: Id, bid: Id): RequestAsset {
+	return { id, name: '', source: 'breakdown', package: bid };
+}
+
 /** The request as a vendor gets it: omitted items left out. */
 export function vendorView(request: BidRequest): VendorView {
 	return { header: request.header, shots: request.shots.filter((s) => !s.omitted), assets: request.assets.filter((a) => !a.omitted) };
 }
 
 export interface Summary {
+	/** Shots in: a counted row counts as many as it stands for (`count.ts`). */
 	readonly shots: number;
+	/** Rows of shots in. */
+	readonly shotRows: number;
 	readonly shotsOmitted: number;
+	/** Assets in, counted rows as many as they stand for. */
 	readonly assets: number;
+	/** Rows of assets in. */
+	readonly assetRows: number;
 	readonly assetsOmitted: number;
-	/** Frames of the shots in, those with a count. */
+	/** Frames of the shots in, those with frames: per unit, times the count. */
 	readonly frames: number;
 	readonly shotsWithoutFrames: number;
 	readonly sequences: number;
@@ -45,12 +62,15 @@ export interface Summary {
 
 export function summarize(request: BidRequest): Summary {
 	const shots = request.shots.filter((s) => !s.omitted);
+	const assets = request.assets.filter((a) => !a.omitted);
 	return {
-		shots: shots.length,
+		shots: shots.reduce((total, s) => total + countOf(s), 0),
+		shotRows: shots.length,
 		shotsOmitted: request.shots.length - shots.length,
-		assets: request.assets.filter((a) => !a.omitted).length,
+		assets: assets.reduce((total, a) => total + countOf(a), 0),
+		assetRows: assets.length,
 		assetsOmitted: request.assets.filter((a) => a.omitted).length,
-		frames: shots.reduce((total, s) => total + (s.frames ?? 0), 0),
+		frames: shots.reduce((total, s) => total + (framesOf(s) ?? 0), 0),
 		shotsWithoutFrames: shots.filter((s) => s.frames === undefined).length,
 		sequences: new Set(shots.map((s) => s.sequence).filter(Boolean)).size
 	};

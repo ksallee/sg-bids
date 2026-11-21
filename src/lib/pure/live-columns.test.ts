@@ -15,7 +15,7 @@ const mappingB = { description: 'sg_brief', frames: 'sg_frame_count', sequence: 
 describe('requestColumns', () => {
 	it('lists a Shot request’s columns in order, live where a field feeds them', () => {
 		const columns = requestColumns('shot', mappingB, shotB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
 		expect(columns.filter((c) => c.live).map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty']);
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_complexity', dataType: 'list', validValues: ['A', 'B', 'C', 'D'], lock: null });
 		expect(columnByKey(columns, 'frames')).toMatchObject({ field: 'sg_frame_count', dataType: 'number' });
@@ -27,6 +27,7 @@ describe('requestColumns', () => {
 		expect(columnByKey(columns, 'type')).toMatchObject({ field: null, live: false, dataType: 'text' });
 		expect(columnByKey(columns, 'notes')).toMatchObject({ field: null, live: false });
 		expect(columnByKey(columns, 'omitted')).toMatchObject({ field: null, live: false, dataType: 'checkbox' });
+		expect(columnByKey(columns, 'count')).toMatchObject({ field: null, live: false, dataType: 'number', label: 'Count' });
 	});
 
 	it('leaves a mapped name the schema does not hold in the request', () => {
@@ -50,7 +51,7 @@ describe('requestColumns', () => {
 
 	it('lists an Asset request’s columns', () => {
 		const columns = requestColumns('asset', { description: 'sg_brief', type: 'sg_asset_type', difficulty: 'sg_difficulty' }, assetB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'type', 'description', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'type', 'description', 'difficulty', 'omitted', 'notes']);
 		expect(columnByKey(columns, 'type')).toMatchObject({ dataType: 'list', validValues: ['Character', 'Prop'] });
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_difficulty', dataType: 'text' });
 		expect(columnByKey(requestColumns('asset', { description: null, type: null, difficulty: null }, assetA), 'code').label).toBe('Asset');
@@ -81,10 +82,21 @@ describe('cellTarget', () => {
 		expect(cellTarget(columnByKey(columns, 'difficulty'), picked, true)).toEqual({ kind: 'locked', reason: 'This Shot is gone from Flow PT, or you cannot read it.' });
 	});
 
-	it('locks the code and the Sequence, on a breakdown row too', () => {
+	it('locks the code of a Flow PT row and of a linked one, and the Sequence of a breakdown row', () => {
 		expect(cellTarget(columnByKey(columns, 'code'), picked, false).kind).toBe('locked');
-		expect(cellTarget(columnByKey(columns, 'code'), typed, false)).toEqual({ kind: 'locked', reason: 'A breakdown row keeps the code it came with.' });
+		expect(cellTarget(columnByKey(columns, 'code'), linked, false)).toEqual({ kind: 'locked', reason: 'A breakdown row linked to Flow PT keeps the code it was matched with.' });
 		expect(cellTarget(columnByKey(columns, 'sequence'), typed, false)).toEqual({ kind: 'locked', reason: 'A breakdown row keeps the Sequence it came with.' });
+	});
+
+	it('takes a code typed on a row in this request only: a row added by hand starts with none', () => {
+		expect(cellTarget(columnByKey(columns, 'code'), typed, false)).toEqual({ kind: 'request' });
+	});
+
+	it('takes a count on a row in this request only, and locks it on a row linked to Flow PT, with the reason', () => {
+		const count = columnByKey(columns, 'count');
+		expect(cellTarget(count, typed, false)).toEqual({ kind: 'request' });
+		expect(cellTarget(count, picked, false)).toEqual({ kind: 'locked', reason: 'This row is one Shot in Flow PT. Its count is 1.' });
+		expect(cellTarget(count, linked, false)).toEqual({ kind: 'locked', reason: 'This row is one Shot in Flow PT. Its count is 1.' });
 	});
 
 	it('names an Asset in the reason', () => {

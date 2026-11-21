@@ -19,6 +19,19 @@ describe('unmatched', () => {
 	});
 });
 
+describe('a counted row', () => {
+	it('is never matched to one Flow PT row: it waits for none, and a link to it is left', () => {
+		const counted = shot('shot-bd-9', { code: 'SH010', source: 'breakdown', count: 120 });
+		expect(unmatched([counted])).toEqual([]);
+		expect(codesToFind([counted])).toEqual([]);
+		expect(withLinks([counted], [{ kind: 'shot', key: 'shot-bd-9', fpt: { type: 'Shot', id: 1 } }])).toEqual([counted]);
+	});
+
+	it('leaves out a row typed by hand with no code yet', () => {
+		expect(unmatched([shot('shot-bd-10', { code: ' ', source: 'breakdown' })])).toEqual([]);
+	});
+});
+
 describe('matchRows', () => {
 	const candidates = [
 		{ id: 101, code: 'SH010' },

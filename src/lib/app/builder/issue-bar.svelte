@@ -18,6 +18,7 @@
 	import { issueLine } from '$lib/pure/issue-words';
 	import type { Target } from '$lib/pure/readiness';
 	import { focusControl } from './focus';
+	import { sidePanel } from '$lib/app/side-panel.svelte';
 	import type { Builder } from '$lib/app/builder.svelte';
 
 	let {
@@ -53,6 +54,14 @@
 		listOpen = false;
 		revealed = new Set([...revealed, target]);
 		if (target.startsWith('bid:')) builder.current = target.slice(4);
+		// A row: the table takes its cursor there, the code cell open to type in.
+		const row = /^row:(shot|asset):(.+)$/.exec(target);
+		if (row) {
+			builder.focusRow(row[1] as 'shot' | 'asset', row[2]);
+			return;
+		}
+		// The details and the vendors are in the side panel: it opens to show the field.
+		if (target !== 'title' && target !== 'items' && !target.startsWith('bid:')) sidePanel.open = true;
 		await focusControl(target);
 	}
 

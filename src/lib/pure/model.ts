@@ -138,6 +138,11 @@ export interface RequestShot {
 	readonly techRequirements?: Readonly<Record<string, string>>;
 	/** The package the shot sits in. Absent: the default (`packages.ts`). */
 	readonly package?: Id;
+	/**
+	 * How many shots of its kind the row stands for, for a row with no Flow PT Shot (`count.ts`).
+	 * Absent: 1. Its frames are per unit.
+	 */
+	readonly count?: number;
 }
 
 export interface RequestAsset {
@@ -156,6 +161,8 @@ export interface RequestAsset {
 	readonly notes?: string;
 	/** The package the asset sits in. Absent: the default (`packages.ts`). */
 	readonly package?: Id;
+	/** How many assets of its kind the row stands for, for a row with no Flow PT Asset. Absent: 1. */
+	readonly count?: number;
 }
 
 export interface InvitedVendor {
@@ -261,6 +268,11 @@ export interface BidLine {
 	readonly inPackage?: boolean;
 	/** Its total came from the vendor's rate card. Absent: the vendor typed it. */
 	readonly fromRate?: boolean;
+	/**
+	 * The price of one, on a row that stands for several (`count.ts`): the total is exactly this
+	 * times the row's count. Absent on a row of count 1.
+	 */
+	readonly unit?: Money;
 }
 
 export interface DepartmentCost {

@@ -41,6 +41,11 @@
  * from before packages keeps its one Bid per vendor, keyed as it always was, and gains the general
  * Bid only when the vendor gave whole-bid figures.
  *
+ * A row that stands for several (`count.ts`) is never created, whatever the choice: it lands as a
+ * Bid Line with no item, its amount the line total (unit price times count), its count in the
+ * Bid Line's optional Count field when the site has it, and in its name always (`SIMPLE x120`).
+ * Sums per Bid are the line totals, so they still equal the bid's total exactly.
+ *
  * Rows from a breakdown have no Flow PT row. For each kind production chooses:
  *
  * - `create`: the Shot or Asset is created first, from the row (code, description, and the mapped
@@ -63,6 +68,7 @@
 import { BID, BID_FIELDS, LINE, LINE_FIELDS, sameCurrency, toFptCurrency, type FptAmount } from './fpt-fields';
 import type { AppStatus, ItemType } from './fpt-setup';
 import { applyScenario } from './compare';
+import { countOf } from './count';
 import { targetKey, type AwardScenario, type BidLine, type BidRequest, type Day, type EntityRef, type Id, type InvitedVendor, type Target, type VendorBid } from './model';
 import { fromDecimal, minorDigits, money, sum, toDecimal, type Money, type Rate } from './money';
 import { percentOf } from './percent';
@@ -79,6 +85,8 @@ export interface FptSite {
 	readonly vendorField: Readonly<Partial<Record<ItemType, string>>>;
 	/** The site status for each app status. An unmapped one leaves the status unwritten. */
 	readonly statuses: Readonly<Partial<Record<AppStatus, string>>>;
+	/** The site has Bid Line's optional Count field: every line written carries its count. */
+	readonly lineCount?: boolean;
 }
 
 /** What the site already holds, read before planning. */
@@ -239,6 +247,10 @@ export interface LinePreview {
 	readonly package: string | null;
 	/** In a package priced as one figure: the line carries no amount, the package's Bid does. */
 	readonly inPackage: boolean;
+	/** How many the row stands for (`count.ts`); `amount` is for all of them. */
+	readonly count: number;
+	/** On a counted row, the price of one. Null otherwise. */
+	readonly unit: Money | null;
 }
 
 export interface GroupPreview {
@@ -298,8 +310,11 @@ export interface AwardPlan {
 		readonly created: readonly CreatedPreview[];
 		/** Sequences the run creates. */
 		readonly sequences: readonly { readonly key: string; readonly code: string }[];
-		/** Awarded rows published with no Flow PT row: their Bid Lines carry no item. */
-		readonly unlinked: readonly { readonly item: string; readonly kind: Target['kind'] }[];
+		/**
+		 * Awarded rows published with no Flow PT row: their Bid Lines carry no item. A counted row is
+		 * always one, with its count above 1.
+		 */
+		readonly unlinked: readonly { readonly item: string; readonly kind: Target['kind']; readonly count: number }[];
 	};
 	/** Rows that cannot be created as they are. Nothing is published while one is named. */
 	readonly collisions: readonly Collision[];
@@ -422,14 +437,21 @@ interface RequestRowInfo {
 	readonly target: Target;
 	readonly label: string;
 	readonly fpt?: EntityRef;
+	/** How many the row stands for. Above 1, it is never created: it lands as a Bid Line alone. */
+	readonly count: number;
 	readonly row: BidRequest['shots'][number] | BidRequest['assets'][number];
 }
 
 function rowsOf(request: BidRequest): Map<string, RequestRowInfo> {
 	const out = new Map<string, RequestRowInfo>();
-	for (const s of request.shots) out.set(targetKey({ kind: 'shot', id: s.id }), { target: { kind: 'shot', id: s.id }, label: s.code, fpt: s.fpt, row: s });
-	for (const a of request.assets) out.set(targetKey({ kind: 'asset', id: a.id }), { target: { kind: 'asset', id: a.id }, label: a.name, fpt: a.fpt, row: a });
+	for (const s of request.shots) out.set(targetKey({ kind: 'shot', id: s.id }), { target: { kind: 'shot', id: s.id }, label: s.code, fpt: s.fpt, count: countOf(s), row: s });
+	for (const a of request.assets) out.set(targetKey({ kind: 'asset', id: a.id }), { target: { kind: 'asset', id: a.id }, label: a.name, fpt: a.fpt, count: countOf(a), row: a });
 	return out;
+}
+
+/** How many the row stands for, 1 for a row the request lacks. */
+function rowCount(rows: ReadonlyMap<string, RequestRowInfo>, target: Target): number {
+	return rows.get(targetKey(target))?.count ?? 1;
 }
 
 function isPendingRow(value: unknown): value is PendingRow {
@@ -503,6 +525,8 @@ function resolveRows(input: AwardInput, awarded: readonly string[], warnings: st
 	for (const key of awarded) {
 		const info = all.get(key);
 		if (!info || info.fpt) continue;
+		// A counted row stands for many shots: no Shot or Asset is made for it, whatever the choice.
+		if (info.count > 1) continue;
 		const made = previous.get(key);
 		if (made && (made.type === 'Shot' || made.type === 'Asset')) {
 			items.set(key, { label: info.label, target: key, ref: { type: made.type, id: made.id } });
@@ -642,7 +666,7 @@ export function toLookUp(input: Omit<AwardInput, 'existing'>): { Shot: string[];
 	]);
 	for (const key of keys) {
 		const info = rows.get(key);
-		if (!info || info.fpt || made.has(key) || choice[info.target.kind] !== 'create') continue;
+		if (!info || info.fpt || info.count > 1 || made.has(key) || choice[info.target.kind] !== 'create') continue;
 		out[ITEM_OF[info.target.kind] as 'Shot' | 'Asset'].push(info.label.trim());
 		const sequence = info.target.kind === 'shot' ? (info.row as BidRequest['shots'][number]).sequence?.trim() : undefined;
 		if (sequence && !out.sequences.includes(sequence)) out.sequences.push(sequence);
@@ -666,6 +690,13 @@ export function planAward(input: AwardInput): AwardPlan {
 	];
 	const missing = resolveRows(input, awarded, warnings);
 	const all = missing.items;
+	const rows = rowsOf(request);
+	const counted = awarded.filter((key) => (rows.get(key)?.count ?? 1) > 1).length;
+	if (counted > 0 && !site.lineCount) {
+		warnings.push(
+			`The site has no Count field on Bid Line. ${counted === 1 ? 'The counted row carries its count' : `The ${counted} counted rows carry their count`} in the Bid Line name alone. Create the field to write it.`
+		);
+	}
 	const packages = resolvePackages(request);
 
 	// Shares per bid and target, from the scenario.
@@ -764,8 +795,10 @@ export function planAward(input: AwardInput): AwardPlan {
 				// A row in a package price links its Shot or Asset and carries no amount: the figure is on the package's Bid.
 				const priced = !line.excluded && !line.inPackage;
 				const lineBase = priced ? toBase(line.total, bid, base) : null;
+				const count = rowCount(rows, line.target);
 				const ldata: Record<string, FieldValue> = {
-					[LINE.name]: `${item.label} ${vendor.name}`,
+					// A counted row says its count in its name, so a site without the Count field still shows it.
+					[LINE.name]: `${item.label}${count > 1 ? ` x${count}` : ''} ${vendor.name}`,
 					[LINE.key]: lkey,
 					[LINE.bid]: bidRef,
 					[LINE.item]: item.ref === null ? null : isPendingRow(item.ref) ? item.ref : { type: item.ref.type, id: item.ref.id },
@@ -777,6 +810,7 @@ export function planAward(input: AwardInput): AwardPlan {
 					[LINE.awarded]: percent !== null,
 					[LINE.excluded]: line.excluded
 				};
+				if (site.lineCount) ldata[LINE.count] = count;
 				const lid = lineRows.get(lkey);
 				if (lid === undefined) lineWrites.push({ kind: 'create', entity: 'line', key: lkey, data: { ...ldata, project } });
 				else lineWrites.push({ kind: 'update', entity: 'line', key: lkey, id: lid, data: ldata });
@@ -794,7 +828,9 @@ export function planAward(input: AwardInput): AwardPlan {
 					awardedBase: percent !== null && lineBase ? percentOf(lineBase, percent) : null,
 					excluded: line.excluded,
 					package: unit.packageName,
-					inPackage: line.inPackage === true
+					inPackage: line.inPackage === true,
+					count,
+					unit: count > 1 && priced && line.unit ? line.unit : null
 				});
 			}
 			previews.push({
@@ -820,13 +856,13 @@ export function planAward(input: AwardInput): AwardPlan {
 	const groupPreviews: GroupPreview[] = [];
 	const wantedGroups = new Set<string>();
 	const bidsById = new Map(bids.map((b) => [b.id, b]));
-	const unlinked: { item: string; kind: Target['kind'] }[] = [];
+	const unlinked: { item: string; kind: Target['kind']; count: number }[] = [];
 	for (const pick of scenario.picks) {
 		const item = itemOf(all, pick.target);
 		const type = ITEM_OF[pick.target.kind];
 		const ref = item.ref;
 		if (ref === null) {
-			unlinked.push({ item: item.label, kind: pick.target.kind });
+			unlinked.push({ item: item.label, kind: pick.target.kind, count: rowCount(rows, pick.target) });
 			continue;
 		}
 		const field = site.vendorField[type];

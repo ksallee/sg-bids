@@ -60,6 +60,18 @@ describe('parseDraftSave', () => {
 		expect(one([{ ...row, source: 'fpt' }]).ok).toBe(false);
 	});
 
+	it('takes a count on a row with no Flow PT row, drops a count of 1, and refuses any other', () => {
+		const row = { id: 'shot-bd-1', code: 'SIMPLE', source: 'breakdown', omitted: false, assetIds: [], frames: 80 };
+		const one = (rows: unknown[], assets: unknown[] = []) => parseDraftSave(draft({ bids: [{ key: 'bid:a', name: 'Bid 1', items: { shots: rows, assets } }], vendors: [] }));
+		const out = one([{ ...row, count: 120 }], [{ id: 'asset-bd-1', name: 'props', source: 'breakdown', count: 12 }]);
+		expect(out.ok && out.value.bids![0].shots[0].count).toBe(120);
+		expect(out.ok && out.value.bids![0].assets[0].count).toBe(12);
+		const plain = one([{ ...row, count: 1 }]);
+		expect(plain.ok && 'count' in plain.value.bids![0].shots[0]).toBe(false);
+		for (const bad of [0, 2.5, '120', 100_001, -1]) expect(one([{ ...row, count: bad }]).ok).toBe(false);
+		expect(one([{ ...shot, count: 3 }]).ok).toBe(false);
+	});
+
 	it('takes a save of the header alone, or of the vendors alone', () => {
 		expect(parseDraftSave({ id: ID, header })).toEqual({ ok: true, value: { id: ID, header } });
 		expect(parseDraftSave({ id: ID, vendors: [] })).toEqual({ ok: true, value: { id: ID, vendors: [] } });

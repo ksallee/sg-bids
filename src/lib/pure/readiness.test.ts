@@ -61,6 +61,22 @@ describe('readiness of a draft request', () => {
 		]);
 	});
 
+	it('names a row typed by hand with no code, by its bid, pointing at the row', () => {
+		const r = readiness(
+			facts({
+				rows: {
+					shots: [{ ...shot('shot-1'), package: 'bid:a' }, { ...shot('shot-bd-1', { source: 'breakdown', count: 120 }), code: ' ', package: 'bid:a' }],
+					assets: [{ ...asset('asset-1'), name: '', package: 'bid:b' }]
+				}
+			})
+		);
+		expect(r.toIssue.map((p) => [p.target, p.label, p.short, p.message])).toEqual([
+			['row:shot:shot-bd-1', 'Shots', 'no code', 'A shot row in Bid 1 has no code. Type one, or remove the row.'],
+			['row:asset:asset-1', 'Assets', 'no code', 'An asset row in Hero has no code. Type one, or remove the row.']
+		]);
+		expect(controlId('row:shot:shot-bd-1')).toBe('f-row-shot-shot-bd-1');
+	});
+
 	it('refuses a request whose every row is omitted', () => {
 		const r = readiness(facts({ bids: [bids[0]], rows: { shots: [{ ...shot('shot-1'), package: 'bid:a', omitted: true }], assets: [] } }));
 		expect(r.toIssue.map((p) => [p.target, p.message])).toEqual([['items', 'Every row is omitted. Bring one back.']]);

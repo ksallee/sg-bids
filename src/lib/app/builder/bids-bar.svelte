@@ -16,6 +16,7 @@
 	import type { Id } from '$lib/pure/model';
 	import { controlId } from '$lib/pure/readiness';
 	import { MAX_BID_NAME } from '$lib/pure/request-draft';
+	import { unitsLine } from '$lib/pure/count';
 	import type { Builder } from '$lib/app/builder.svelte';
 
 	let {
@@ -70,9 +71,10 @@
 		const s = builder.stats.get(key);
 		if (!s || s.rows === 0) return 'No rows yet';
 		const parts: string[] = [];
-		if (s.shots > 0) parts.push(`${number.format(s.shots)} ${s.shots === 1 ? 'shot' : 'shots'}`);
+		const format = (n: number) => number.format(n);
+		if (s.shots > 0) parts.push(unitsLine(s.shots, s.shotRows, 'shot', format));
 		if (s.frames > 0) parts.push(`${number.format(s.frames)} fr`);
-		if (s.assets > 0) parts.push(`${number.format(s.assets)} ${s.assets === 1 ? 'asset' : 'assets'}`);
+		if (s.assets > 0) parts.push(unitsLine(s.assets, s.assetRows, 'asset', format));
 		if (parts.length === 0) parts.push(`${s.omitted} omitted`);
 		return parts.join(' · ');
 	}

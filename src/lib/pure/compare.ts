@@ -8,6 +8,9 @@
  * with its date (`applyRate`). Until a bid has one, its prices and totals have no base figure:
  * `base` is null, and the screen says "needs a rate". An unknown is never a zero.
  *
+ * A row that stands for several (`count.ts`) compares its line totals, the unit price times the
+ * count, and shows the unit price beside each.
+ *
  * The lowest known base price in a row is marked; ties are all marked. A price's spread is how far
  * it sits over the row's lowest, in basis points (1% is 100), rounded half away from zero. Over a
  * lowest of zero the spread is infinite.
@@ -28,6 +31,7 @@
 
 import type { AwardScenario, BidLine, BidRequest, Id, Percent, Target, VendorBid } from './model';
 import { targetKey } from './model';
+import { countOf } from './count';
 import { add, divideRounded, money, sum, type Money, type Rate } from './money';
 import { declinedOf, packagePrices, packageProblems, resolvePackages, type Resolved } from './packages';
 import { comparePercent, percentOf, sumPercents } from './percent';
@@ -49,6 +53,8 @@ export type Cell =
 			readonly lowest: boolean;
 			/** Over the row's lowest, in basis points. Null when either base price is unknown. */
 			readonly spreadBp: number | null;
+			/** On a counted row: the price of one. `amount` is it times the row's count. */
+			readonly unit?: Converted;
 	  }
 	| { readonly kind: 'excluded'; readonly lineId: Id }
 	/** In the package price: the vendor priced the row's package as one figure. */
@@ -113,6 +119,8 @@ export interface Row {
 	readonly omitted: boolean;
 	/** The package the row sits in. */
 	readonly package: Id;
+	/** How many the row stands for (`count.ts`). Its prices are for all of them. */
+	readonly count: number;
 	/** The row's place in the request, for the default order. */
 	readonly index: number;
 	/** One per column, in the columns' order. */
@@ -158,6 +166,7 @@ interface Entry {
 	readonly target: Target;
 	readonly label: string;
 	readonly omitted: boolean;
+	readonly count: number;
 	readonly description?: string;
 	readonly episode?: string;
 	readonly sequence?: string;
@@ -169,11 +178,12 @@ function targets(request: BidRequest): Entry[] {
 			target: { kind: 'shot', id: s.id } as const,
 			label: s.code,
 			omitted: s.omitted,
+			count: countOf(s),
 			description: s.description,
 			episode: s.episode,
 			sequence: s.sequence
 		})),
-		...request.assets.map((a) => ({ target: { kind: 'asset', id: a.id } as const, label: a.name, omitted: a.omitted === true, description: a.description }))
+		...request.assets.map((a) => ({ target: { kind: 'asset', id: a.id } as const, label: a.name, omitted: a.omitted === true, count: countOf(a), description: a.description }))
 	];
 }
 
@@ -306,8 +316,11 @@ export function compareBids(request: BidRequest, bids: readonly VendorBid[]): Gr
 			if (!line) return { kind: 'missing' };
 			if (line.excluded) return { kind: 'excluded', lineId: line.id };
 			if (line.inPackage) return { kind: 'package', lineId: line.id, package: resolved.of.get(key)! };
-			const converted = needsRate(bid, base) ? null : toBase(line.total, bid, base);
-			return { kind: 'price', lineId: line.id, amount: { bid: line.total, base: converted }, lowest: false, spreadBp: null };
+			const unknown = needsRate(bid, base);
+			const converted = unknown ? null : toBase(line.total, bid, base);
+			// The unit in the base currency is shown, never summed: every sum reads the line's total.
+			const unit = entry.count > 1 && line.unit ? { unit: { bid: line.unit, base: unknown ? null : toBase(line.unit, bid, base) } } : {};
+			return { kind: 'price', lineId: line.id, amount: { bid: line.total, base: converted }, lowest: false, spreadBp: null, ...unit };
 		});
 		const known = priced.flatMap((c) => (c.kind === 'price' && c.amount.base ? [c.amount.base.minor] : []));
 		const lowest = known.length > 0 ? Math.min(...known) : null;
@@ -327,6 +340,7 @@ export function compareBids(request: BidRequest, bids: readonly VendorBid[]): Gr
 			...(entry.sequence !== undefined ? { sequence: entry.sequence } : {}),
 			omitted: entry.omitted,
 			package: resolved.of.get(key)!,
+			count: entry.count,
 			index,
 			cells,
 			lowest,

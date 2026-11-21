@@ -94,7 +94,7 @@ describe('gate', () => {
 		expect(g.ready).toBe(true);
 		expect(g.needsConfirm).toBe(false);
 		expect(g.exposure).toEqual({ state: 'safe' });
-		expect(g.site).toEqual({ projectId: 1180, bidType: 'CustomEntity14', lineType: 'CustomEntity15', vendorField: { Shot: 'sg_vendor_groups', Asset: 'sg_vendor_groups' }, statuses: { submitted: 'rev', awarded: 'awd', not_awarded: 'omt' } });
+		expect(g.site).toEqual({ projectId: 1180, bidType: 'CustomEntity14', lineType: 'CustomEntity15', vendorField: { Shot: 'sg_vendor_groups', Asset: 'sg_vendor_groups' }, statuses: { submitted: 'rev', awarded: 'awd', not_awarded: 'omt' }, lineCount: true });
 		expect(g.vendors).toEqual([
 			{ vendorId: 'va', name: 'Vendor A', invited: { type: 'Group', id: 38 }, source: 'invitation', group: 38, awarded: true },
 			{ vendorId: 'vb', name: 'Vendor B', invited: null, source: 'picked', group: 39, awarded: true }
@@ -154,9 +154,11 @@ describe('gate', () => {
 	it('counts the fields it can create, and says what an admin must do', () => {
 		const partial = site({ fields: { ...site().fields, CustomEntity15: { code: { dataType: 'text' } } } });
 		const g = gate(input({ report: setupReport(partial) }));
+		// Every field but the stock name may be created; the optional Count is offered and blocks nothing.
 		expect(g.missingFields).toBe(LINE_FIELDS.length - 1);
 		expect(g.blockers).toHaveLength(1);
-		expect(g.blockers[0]).toMatch(new RegExp(`^${LINE_FIELDS.length - 1} fields are missing on Bid Line: `));
+		expect(g.blockers[0]).toMatch(new RegExp(`^${LINE_FIELDS.length - 2} fields are missing on Bid Line: `));
+		expect(g.blockers[0]).not.toMatch(/Count/);
 		const noLine = site({ entityTypes: site().entityTypes.filter((t) => t.name !== 'CustomEntity15') });
 		const g2 = gate(input({ report: setupReport(noLine) }));
 		expect(g2.site).toBeNull();

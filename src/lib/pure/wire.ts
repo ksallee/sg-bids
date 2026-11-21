@@ -7,6 +7,7 @@
  * tenant comes from the verified session (`src/lib/server/production.ts`).
  */
 
+import { isCount as isRowCount } from './count';
 import { isCurrency } from './currencies';
 import { isDay } from './header';
 import type { EntityRef, Id, InvitedVendor, RequestAsset, RequestHeader, RequestShot } from './model';
@@ -86,6 +87,12 @@ function inPackage(value: unknown): { package?: Id } | null {
 	return isKey(value) ? { package: value } : null;
 }
 
+/** Absent, or a count above 1 on a row with no Flow PT row (`count.ts`). 1 leaves it off. Null for anything else. */
+function counted(value: unknown, fpt: EntityRef | undefined): { count?: number } | null {
+	if (value === undefined || value === 1) return {};
+	return isRowCount(value) && fpt === undefined ? { count: value } : null;
+}
+
 function parseShot(value: unknown): RequestShot | null {
 	if (!isObject(value) || !isText(value.id) || value.id === '' || !isText(value.code)) return null;
 	const text = texts(value, SHOT_TEXT);
@@ -93,8 +100,10 @@ function parseShot(value: unknown): RequestShot | null {
 	const from = source(value.source);
 	const pkg = inPackage(value.package);
 	if (!text || fpt === null || from === null || pkg === null || typeof value.omitted !== 'boolean') return null;
+	const count = counted(value.count, fpt);
+	if (count === null) return null;
 	if (!Array.isArray(value.assetIds) || !value.assetIds.every(isText)) return null;
-	const out: Json = { id: value.id, code: value.code, ...from, ...text, omitted: value.omitted, assetIds: [...value.assetIds], ...pkg };
+	const out: Json = { id: value.id, code: value.code, ...from, ...text, omitted: value.omitted, assetIds: [...value.assetIds], ...pkg, ...count };
 	if (fpt) out.fpt = fpt;
 	for (const name of ['frames', 'cutCount'] as const) {
 		if (value[name] === undefined) continue;
@@ -112,7 +121,9 @@ function parseAsset(value: unknown): RequestAsset | null {
 	const pkg = inPackage(value.package);
 	if (!text || fpt === null || from === null || pkg === null) return null;
 	if (value.omitted !== undefined && typeof value.omitted !== 'boolean') return null;
-	const out: Json = { id: value.id, name: value.name, ...from, ...text, ...pkg };
+	const count = counted(value.count, fpt);
+	if (count === null) return null;
+	const out: Json = { id: value.id, name: value.name, ...from, ...text, ...pkg, ...count };
 	if (fpt) out.fpt = fpt;
 	if (value.omitted !== undefined) out.omitted = value.omitted;
 	return out as unknown as RequestAsset;

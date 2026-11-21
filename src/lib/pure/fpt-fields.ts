@@ -15,6 +15,8 @@
  *   integer, and holds no currency code (field_types/currency). The code goes in a text field beside
  *   it. Three- and four-digit currencies lose digits: the write is rounded here, so the loss is known.
  * - A `url` field takes `{url, name}` and mints an Attachment per write (field_types/url).
+ * - A `number` is a signed 32 bit whole number; a decimal is refused (field_types/number). A line's
+ *   count (`count.ts`, at most 100,000) fits.
  */
 
 import { divideRounded, minorDigits, type Money } from './money';
@@ -42,6 +44,11 @@ export interface FieldSpec {
 	readonly validTypes?: readonly LinkTarget[];
 	/** Every custom entity has it already; never created. */
 	readonly stock?: boolean;
+	/**
+	 * The app works without it: a site that lacks it is ready, and the award leaves it unwritten.
+	 * Created with the others when asked.
+	 */
+	readonly optional?: boolean;
 	readonly description: string;
 }
 
@@ -93,7 +100,9 @@ export const LINE_FIELDS: readonly FieldSpec[] = [
 	custom('share', 'Share Percent', 'float', `${NOTE} The vendor's share of a split item, 0 to 100.`),
 	custom('awardedBase', 'Awarded Base', 'currency', `${NOTE} The awarded part in the base currency: the price times the share.`),
 	custom('awarded', 'Awarded', 'checkbox', `${NOTE} The item is awarded to this vendor.`),
-	custom('excluded', 'Excluded', 'checkbox', `${NOTE} The vendor will not do this item.`)
+	custom('excluded', 'Excluded', 'checkbox', `${NOTE} The vendor will not do this item.`),
+	// Optional: a site set up before counted rows has no such field and stays ready (`count.ts`).
+	{ ...custom('count', 'Count', 'number', `${NOTE} How many shots or assets the line stands for. 1 for a Shot or Asset of Flow PT.`), optional: true }
 ];
 
 export const FIELDS: Readonly<Record<EntityKey, readonly FieldSpec[]>> = { bid: BID_FIELDS, line: LINE_FIELDS };

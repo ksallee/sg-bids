@@ -44,6 +44,16 @@ describe('readDraft', () => {
 		expect(result.draft.rebate[0].base).toEqual({ kind: 'contract', percent: '65' });
 	});
 
+	it('reads a counted line with its unit price, and refuses a unit that is not an amount', () => {
+		const input = good();
+		const lines = input.lines as Record<string, unknown>[];
+		lines[0] = { target: { kind: 'shot', id: 'bd-1' }, total: usd(18_000_000), unit: usd(150_000), excluded: false, fromRate: true };
+		const result = readDraft(input);
+		expect(result.ok && result.draft.lines[0]).toEqual({ target: { kind: 'shot', id: 'bd-1' }, total: usd(18_000_000), unit: usd(150_000), excluded: false, fromRate: true });
+		lines[0] = { ...lines[0], unit: { minor: 1.5, currency: 'USD' } };
+		expect(readDraft(input).ok).toBe(false);
+	});
+
 	it('drops keys it does not know, ids included: the server owns them', () => {
 		const input = good();
 		input.id = 'other-bid';

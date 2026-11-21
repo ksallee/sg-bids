@@ -22,6 +22,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { scope, stamp, type Action, type Principal, type ProductionPrincipal, type Table, type VendorPrincipal } from '$lib/pure/access';
 import type { AwardScenario, BidRequest, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot, ScenarioPick, VendorBid } from '$lib/pure/model';
 import { ANSWER_ONE, packageProblems, resolvePackages } from '$lib/pure/packages';
+import { countOf, countProblems } from '$lib/pure/count';
 import { composeDraft } from '$lib/pure/request-bids';
 import { bidKey, type SavedBid } from '$lib/pure/request-draft';
 import { targetKey } from '$lib/pure/model';
@@ -604,13 +605,14 @@ export function createStore(db: SupabaseClient, options: StoreOptions = {}) {
 	 */
 	function packageRefusals(
 		visible: BidRequest,
-		bid: Pick<VendorBid, 'packages' | 'declined'> & { readonly lines: readonly Pick<VendorBid['lines'][number], 'target' | 'inPackage' | 'excluded'>[] },
+		bid: Pick<VendorBid, 'packages' | 'declined'> & { readonly lines: readonly Pick<VendorBid['lines'][number], 'target' | 'inPackage' | 'excluded' | 'total' | 'unit'>[] },
 		submitting = false
 	): string[] {
 		const seen = new Set([...visible.shots.map((s) => `shot:${s.id}`), ...visible.assets.map((a) => `asset:${a.id}`)]);
 		if (bid.lines.some((l) => !seen.has(`${l.target.kind}:${l.target.id}`))) return ['A line names a row outside your bids. Reload the page.'];
 		const resolved = resolvePackages(visible);
-		const problems = packageProblems(resolved, visible, bid, new Set(resolved.packages.map((p) => p.id)));
+		const counts = [...visible.shots.map((s) => ({ key: `shot:${s.id}`, label: s.code, count: countOf(s) })), ...visible.assets.map((a) => ({ key: `asset:${a.id}`, label: a.name, count: countOf(a) }))];
+		const problems = [...packageProblems(resolved, visible, bid, new Set(resolved.packages.map((p) => p.id))), ...countProblems(counts, bid.lines)];
 		// A draft may decline every package for a while; a submit bids on one at least.
 		return submitting ? problems : problems.filter((p) => p !== ANSWER_ONE);
 	}
