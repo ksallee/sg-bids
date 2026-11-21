@@ -10,6 +10,10 @@
 	includes or takes the selected rows out. Every edit offers Undo; a write Flow PT refused, or one
 	that answered and changed nothing (028), is listed with Retry. Rules in `$lib/pure/live-columns`,
 	`$lib/pure/row-edit` and `$lib/pure/edit-words`.
+
+	Each code carries where its row comes from, in the columns' marks: live from Flow PT, or from a
+	breakdown and in this request only. A source filter shows when the request holds both
+	(`$lib/pure/row-source`).
 -->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
@@ -32,6 +36,8 @@
 	import { cellTarget, columnByKey, descriptionAdvice, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
 	import { itemValue, type CellChange, type Change, type Refusal } from '$lib/pure/row-edit';
 	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
+	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
+	import Segmented from '$lib/app/segmented.svelte';
 	import type { RequestAsset, RequestShot } from '$lib/pure/model';
 	import type { Builder, EditOutcome } from '$lib/app/builder.svelte';
 
@@ -90,11 +96,14 @@
 	}
 
 	let query = $state('');
+	let from = $state<SourceFilter>('all');
+	const mixed = $derived(hasBothSources(items));
+	const sourced = $derived(mixed ? bySource(items, from) : items);
 	const words = $derived(query.trim().toLowerCase().split(/\s+/).filter(Boolean));
 	const shown = $derived(
 		words.length === 0
-			? items
-			: items.filter((item) => {
+			? sourced
+			: sourced.filter((item) => {
 					const text = `${itemValue(item, 'code') ?? ''} ${itemValue(item, kind === 'shot' ? 'sequence' : 'type') ?? ''}`.toLowerCase();
 					return words.every((w) => text.includes(w));
 				})
@@ -277,6 +286,12 @@
 	});
 
 	const omitted = $derived(items.filter((item) => item.omitted).length);
+
+	const SOURCE_WORDS = $derived<Record<RowSource, { label: string; title: string }>>({
+		fpt: { label: 'From Flow PT', title: `From Flow PT. A change in a live column changes the ${type} in Flow PT.` },
+		breakdown: { label: 'From a breakdown', title: 'From a breakdown. Its cells are in this request only.' },
+		linked: { label: 'From a breakdown, linked to Flow PT', title: `From a breakdown, linked to its ${type} in Flow PT. Its cells are in this request only.` }
+	});
 </script>
 
 {#snippet liveMark(column: RequestColumn)}
@@ -297,19 +312,20 @@
 	{/if}
 {/snippet}
 
+{#snippet sourceMark(source: RowSource)}
+	<span class={cn('flex shrink-0 items-center', source === 'fpt' ? 'text-info' : 'text-muted-foreground/70')} role="img" aria-label={SOURCE_WORDS[source].label} title={SOURCE_WORDS[source].title} data-slot="row-source" data-source={source}>
+		{#if source === 'fpt'}<Radio class="size-3.5" aria-hidden="true" />{:else}<FileText class="size-3.5" aria-hidden="true" />{/if}
+	</span>
+{/snippet}
+
 {#snippet cell({ row, column, value }: EntityTableCellContext)}
 	{@const item = byItem.get(String(row.attributes.__item))}
 	{#if column.path === pathOf('code') && item}
 		<span class="flex min-w-0 items-center gap-2">
+			{@render sourceMark(rowSource(item))}
 			<span class={cn('truncate font-mono text-xs font-medium', item.omitted && 'text-muted-foreground line-through')} title={String(value ?? '')}>{value}</span>
 			{#if builder.gone.has(item.id)}
 				<span class="border-destructive/60 text-destructive shrink-0 rounded-full border px-1.5 text-[11px] leading-4" title={`This ${type} is gone from Flow PT, or you cannot read it. It keeps its last values.`} data-slot="row-gone">Not in Flow PT</span>
-			{:else if item.source === 'breakdown'}
-				<span
-					class={cn('shrink-0 rounded-full border px-1.5 text-[11px] leading-4', item.fpt ? 'border-border text-muted-foreground' : 'border-warning/60 text-foreground')}
-					title={item.fpt ? 'From the breakdown, linked to Flow PT. Its cells are in this request only.' : 'From the breakdown. Its cells are in this request only.'}
-					data-slot="row-source">{item.fpt ? 'Breakdown, linked' : 'Breakdown'}</span
-				>
 			{/if}
 			{#if fresh.has(item.id)}<span class="bg-info/15 text-foreground shrink-0 rounded-full px-1.5 text-[11px] leading-4" data-slot="row-fresh">Added</span>{/if}
 		</span>
@@ -350,9 +366,22 @@
 				<Input class="h-8 pl-8" type="search" placeholder={`Find a ${noun} in the request`} bind:value={query} aria-label={`Find a ${noun} in the request`} />
 			</div>
 		{/if}
+		{#if mixed}
+			<Segmented
+				label="Where the rows come from"
+				value={from}
+				options={[
+					{ value: 'all', label: 'All' },
+					{ value: 'fpt', label: 'Flow PT' },
+					{ value: 'breakdown', label: 'Breakdown' }
+				]}
+				onChange={(v) => (from = v as SourceFilter)}
+			/>
+		{/if}
 		<p class="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs" data-slot="live-legend">
 			<span class="flex items-center gap-1.5"><Radio class="text-info size-3.5" aria-hidden="true" /><span><span class="text-foreground">Live in Flow PT.</span> A change here changes the {type} in Flow PT.</span></span>
 			<span class="flex items-center gap-1.5"><FileText class="size-3.5" aria-hidden="true" />In this request only.</span>
+			<span>By a code, the mark says where the row comes from.</span>
 			{#if builder.live.state === 'reading'}<span aria-live="polite">Reading Flow PT…</span>{/if}
 		</p>
 		<p class="text-muted-foreground ml-auto flex items-center gap-4 text-xs">

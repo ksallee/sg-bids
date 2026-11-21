@@ -2,13 +2,13 @@
 	The main work: the Shots and the Assets of the request, filling the rest of the page. One bar: a
 	tab per kind with its count, two buttons that add (from Flow PT, from a breakdown), then what the
 	vendor gets and what is left before the issue. The table under it is the request's own rows,
-	edited in place and in bulk, live to Flow PT where a field feeds the column (`request-table`). Add from Flow PT opens the picker over this whole area (`fpt-picker.svelte`);
-	Done comes back here with the rows just added marked and in view. Add from a breakdown opens its
-	dialog. The section carries `f-items`, the id the readiness list points at for "nothing picked".
+	edited in place and in bulk, live to Flow PT where a field feeds the column (`request-table`). It
+	is the only table: Add from Flow PT opens a dialog with a plain list (`fpt-add-dialog.svelte`), and
+	the rows it adds come back here marked and in view. Add from a breakdown opens its dialog. The section carries `f-items`, the id the readiness list points at for "nothing picked".
 -->
 <script lang="ts">
 	import { tick, untrack } from 'svelte';
-	import FptPicker from './fpt-picker.svelte';
+	import FptAddDialog from './fpt-add-dialog.svelte';
 	import RequestTable from './request-table.svelte';
 	import SummaryBar from './summary-bar.svelte';
 	import BreakdownDialog from './breakdown-dialog.svelte';
@@ -30,7 +30,7 @@
 	}: {
 		builder: Builder;
 		kind?: ItemKind;
-		/** The kind the Flow PT picker is open for, or null for the request's list. */
+		/** The kind the Add from Flow PT dialog is open for, or null when it is closed. */
 		adding?: ItemKind | null;
 		onFields: () => void;
 		onFocus: (target: Target) => void;
@@ -40,10 +40,9 @@
 	const count = (k: ItemKind) => (k === 'shot' ? builder.state.shots.length : builder.state.assets.length);
 	let breakdownOpen = $state(false);
 
-	/** The rows there were when the picker opened, and the rows it added, marked once it closes. */
+	/** The rows there were when the dialog opened, and the rows it added, marked once it closes. */
 	let before = $state<ReadonlySet<string>>(new Set());
 	let fresh = $state<ReadonlySet<string>>(new Set());
-	const added = $derived(adding ? ids(adding).filter((id) => !before.has(id)).length : 0);
 
 	// Opened from here or from the page (the readiness list's "nothing picked"): count from now.
 	$effect.pre(() => {
@@ -77,9 +76,6 @@
 </script>
 
 <section id={controlId('items')} class="flex min-h-0 min-w-0 flex-1 flex-col outline-none" aria-label="Shots and assets" tabindex="-1" data-slot="items-panel">
-	{#if adding}
-		<FptPicker {builder} kind={adding} {added} ondone={() => void done()} />
-	{:else}
 		<div class="border-border flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-6">
 			<div class="-mb-px flex items-end gap-5 self-stretch" role="tablist" aria-label="Kind">
 				{#each [['shot', 'Shots'], ['asset', 'Assets']] as [k, label] (k)}
@@ -115,6 +111,6 @@
 				<RequestTable {builder} {kind} {fresh} onAdd={openPicker} onBreakdown={() => (breakdownOpen = true)} {onFields} />
 			{/key}
 		</div>
-	{/if}
+	{#if adding}<FptAddDialog {builder} kind={adding} onclose={() => void done()} />{/if}
 	<BreakdownDialog {builder} {kind} bind:open={breakdownOpen} />
 </section>

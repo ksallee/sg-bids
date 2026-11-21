@@ -5,7 +5,7 @@ import { normalizeFields } from 'sg-widgets-core';
 import { SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
 import { EPISODE_FROM_SEQUENCE, detectMapping } from './field-map';
 import { sequenceIndex } from './freeze';
-import { EMPTY_FILTER, addPicked, refrozen, filterContext, isFiltered, mergePicked, pickColumns, pickFilters, selectionRefs, sequenceOptions, typeOptions, type FilterContext } from './pick';
+import { EMPTY_FILTER, addPicked, refrozen, filterContext, isFiltered, pickFilters, sequenceOptions, typeOptions, type FilterContext } from './pick';
 
 const project = { type: 'Project', id: 85 };
 const sequences = sequenceIndex(
@@ -130,39 +130,6 @@ describe('isFiltered', () => {
 	});
 });
 
-describe('mergePicked', () => {
-	const freeze = (row: { id: number; attributes: Record<string, unknown> }) => shot(`shot-${row.id}`, { fpt: { type: 'Shot', id: row.id }, code: String(row.attributes.code) });
-
-	it('keeps the edited copy of an item still picked, adds the new, drops the unpicked', () => {
-		const kept = shot('shot-1001', { fpt: { type: 'Shot', id: 1001 }, description: 'edited' });
-		const gone = shot('shot-7', { fpt: { type: 'Shot', id: 7 } });
-		const result = mergePicked([kept, gone], [1001, 1002], [SHOT_1001, SHOT_1002], freeze);
-		expect(result.items.map((i) => i.id)).toEqual(['shot-1001', 'shot-1002']);
-		expect(result.items[0].description).toBe('edited');
-		expect(result.missing).toEqual([]);
-	});
-
-	it('keeps every breakdown row where it is, whatever the table selects, and never adds its Flow PT row twice', () => {
-		const pasted = shot('shot-bd-1', { code: 'SH900', source: 'breakdown' });
-		const matched = shot('shot-bd-2', { code: 'SH1001', source: 'breakdown', fpt: { type: 'Shot', id: 1001 } });
-		const picked = shot('shot-7', { fpt: { type: 'Shot', id: 7 } });
-		const result = mergePicked([pasted, picked, matched], [1001, 1002], [SHOT_1001, SHOT_1002], freeze);
-		expect(result.items.map((i) => i.id)).toEqual(['shot-bd-1', 'shot-bd-2', 'shot-1002']);
-		expect(mergePicked([pasted, matched], [], [], freeze).items.map((i) => i.id)).toEqual(['shot-bd-1', 'shot-bd-2']);
-	});
-
-	it('names the picks it has no row for', () => {
-		expect(mergePicked([], [1001, 42], [SHOT_1001], freeze).missing).toEqual([42]);
-	});
-
-	it('gives the freeze each new item its position in the picks, from 1', () => {
-		const at: number[] = [];
-		const kept = shot('shot-1001', { fpt: { type: 'Shot', id: 1001 } });
-		mergePicked([kept], [1001, 1002], [SHOT_1001, SHOT_1002], (row, position) => (at.push(position), freeze(row)));
-		expect(at).toEqual([2]);
-	});
-});
-
 describe('refrozen', () => {
 	it('copies the Flow PT rows again in place and leaves the breakdown rows as typed', () => {
 		const freeze = (row: { id: number }) => shot(`shot-${row.id}`, { fpt: { type: 'Shot', id: row.id }, description: 'fresh' });
@@ -194,38 +161,6 @@ describe('addPicked', () => {
 	});
 });
 
-describe('pickColumns', () => {
-	const shotA = normalizeFields(SHOT_FIELDS_A);
-	const shotB = normalizeFields(SHOT_FIELDS_B);
-
-	it('shows the thumbnail, code, sequence, status and the mapped fields the stock site has', () => {
-		const mapping = detectMapping('shot', shotA, { episodes: true, sequenceEpisodeField: 'episode' });
-		expect(pickColumns('shot', mapping, shotA).map((c) => c.path)).toEqual(['image', 'code', 'sg_sequence', 'sg_status_list', 'sg_cut_duration', 'description']);
-	});
-
-	it("adds the shot's own episode, type and difficulty when mapped", () => {
-		const mapping = detectMapping('shot', shotB, { episodes: true, sequenceEpisodeField: 'episode' });
-		expect(pickColumns('shot', mapping, shotB).map((c) => c.path)).toEqual([
-			'code',
-			'sg_sequence',
-			'sg_episode',
-			'sg_status_list',
-			'sg_shot_type',
-			'sg_complexity',
-			'sg_frame_count',
-			'sg_brief'
-		]);
-	});
-
-	it('never lets a cell be edited', () => {
-		expect(pickColumns('asset', { description: 'description' }, shotA).every((c) => c.editable === false)).toBe(true);
-	});
-
-	it('shows each field once when two slots name it', () => {
-		expect(pickColumns('asset', { description: 'code', type: 'code' }, shotA).map((c) => c.path)).toEqual(['image', 'code', 'sg_status_list']);
-	});
-});
-
 describe('sequenceOptions', () => {
 	it('lists the Sequences and the Episodes they link, by name', () => {
 		expect(sequenceOptions(sequences)).toEqual({
@@ -248,11 +183,5 @@ describe('typeOptions', () => {
 		expect(typeOptions(normalizeFields(SHOT_FIELDS_B).sg_shot_type).map((o) => o.code)).toEqual(['2D', '3D', 'FX']);
 		expect(typeOptions(normalizeFields(SHOT_FIELDS_A).description)).toEqual([]);
 		expect(typeOptions(undefined)).toEqual([]);
-	});
-});
-
-describe('selectionRefs', () => {
-	it('gives the table the picked rows as refs', () => {
-		expect(selectionRefs([shot('shot-1001', { fpt: { type: 'Shot', id: 1001 }, code: 'sh010' }), shot('x')])).toEqual([{ type: 'Shot', id: 1001, name: 'sh010' }]);
 	});
 });
