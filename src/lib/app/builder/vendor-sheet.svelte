@@ -1,7 +1,8 @@
 <!--
 	A bid request as a vendor gets it: the header set as the sheet's head, the assumptions, then the
-	shots and assets that are in. Omitted items are left off. Used by the review step and by the
-	request's page. View and counts from `$lib/pure/request`.
+	shots and assets that are in, each with the bid it sits in when the request has several. Omitted
+	items are left off. Used by the send flow's review and by the request's page. View and counts
+	from `$lib/pure/request`.
 -->
 <script lang="ts">
 	import { currencyLabel } from '$lib/pure/currencies';
@@ -14,12 +15,15 @@
 	const view = $derived(vendorView(request));
 	const counts = $derived(summarize(request));
 	const h = $derived(view.header);
+	/** The bid a row sits in, by its package, when the request has more than one. */
+	const bidNames = $derived(new Map((request.packages ?? []).map((p) => [p.id, p.name])));
+	const several = $derived(bidNames.size > 1);
 	const number = new Intl.NumberFormat();
 	const dayFormat = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
 	const day = (value?: string) => (value ? dayFormat.format(new Date(`${value}T00:00:00Z`)) : null);
 	const facts = $derived(
 		[
-			['Bids due', day(h.dueDate)],
+			['Answers due', day(h.dueDate)],
 			['Base currency', currencyLabel(h.baseCurrency)],
 			['Turnover', day(h.turnoverDate)],
 			['Delivery', day(h.deliveryDate)],
@@ -82,6 +86,7 @@
 						<thead>
 							<tr class="text-muted-foreground border-border border-b text-left text-xs">
 								<th class="py-2 pr-3 font-medium">Shot</th>
+								{#if several}<th class="px-3 py-2 font-medium">Bid</th>{/if}
 								<th class="px-3 py-2 font-medium">Where</th>
 								<th class="px-3 py-2 text-right font-medium">Frames</th>
 								<th class="px-3 py-2 font-medium">Difficulty</th>
@@ -92,6 +97,7 @@
 							{#each view.shots as s (s.id)}
 								<tr class="border-border border-b align-top last:border-0">
 									<td class="py-2 pr-3 font-mono text-xs font-medium">{s.code}</td>
+									{#if several}<td class="px-3 py-2 text-xs">{s.package ? (bidNames.get(s.package) ?? '') : ''}</td>{/if}
 									<td class="text-muted-foreground px-3 py-2 text-xs">{[s.episode, s.sequence].filter(Boolean).join(' / ')}</td>
 									<td class="px-3 py-2 text-right tabular-nums">{s.frames ?? ''}</td>
 									<td class="px-3 py-2">{s.difficulty ?? ''}</td>
@@ -118,6 +124,7 @@
 						<thead>
 							<tr class="text-muted-foreground border-border border-b text-left text-xs">
 								<th class="py-2 pr-3 font-medium">Asset</th>
+								{#if several}<th class="px-3 py-2 font-medium">Bid</th>{/if}
 								<th class="px-3 py-2 font-medium">Type</th>
 								<th class="px-3 py-2 text-right font-medium">Used in</th>
 								<th class="px-3 py-2 font-medium">Difficulty</th>
@@ -128,6 +135,7 @@
 							{#each view.assets as a (a.id)}
 								<tr class="border-border border-b align-top last:border-0">
 									<td class="py-2 pr-3 font-mono text-xs font-medium">{a.name}</td>
+									{#if several}<td class="px-3 py-2 text-xs">{a.package ? (bidNames.get(a.package) ?? '') : ''}</td>{/if}
 									<td class="px-3 py-2">{a.type ?? ''}</td>
 									<td class="px-3 py-2 text-right tabular-nums">{a.timesUsed ?? 0}</td>
 									<td class="px-3 py-2">{a.difficulty ?? ''}</td>

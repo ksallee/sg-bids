@@ -9,9 +9,10 @@
  */
 
 import { api, bidsApi, type BidOverview, type Invited, type LoadedRequest } from '$lib/api';
-import { workingProject } from '$lib/current-project';
+import { setCurrentProject, unnamed, workingProject } from '$lib/current-project';
 import { drafts } from '$lib/drafts';
-import { prepareLive } from '$lib/live';
+import { liveContext, prepareLive } from '$lib/live';
+import { projectName } from '$lib/io/reads';
 import { emptyHeaderForm, headerForm, suggestCode, toHeader, type HeaderForm, type ProjectPick } from '$lib/pure/header';
 import type { BidRequest, Id } from '$lib/pure/model';
 import { resolvePackages } from '$lib/pure/packages';
@@ -74,6 +75,13 @@ export class SendFlow {
 		const project = workingProject(live.siteUrl, new URL(location.href));
 		if (!project) throw new Error('Open the request from the Bids or the Requests page.');
 		this.project = project;
+		if (unnamed(project)) {
+			const name = await projectName(liveContext().client, project.id).catch(() => null);
+			if (name) {
+				this.project = { id: project.id, name };
+				setCurrentProject(live.siteUrl, this.project);
+			}
+		}
 		void this.loadProjectBids();
 		if (input.id) {
 			await this.refresh(input.id);
@@ -83,7 +91,7 @@ export class SendFlow {
 		if (input.bids.length === 0) throw new Error('Tick the bids to send on the Bids page first.');
 		const rows = await api.list(project.id).catch(() => []);
 		this.others = rows.map((r) => ({ id: r.id, code: r.code, round: r.round }));
-		this.form = { ...emptyHeaderForm(), code: suggestCode(project.name, this.others.map((o) => o.code)) };
+		this.form = { ...emptyHeaderForm(), code: suggestCode((this.project ?? project).name, this.others.map((o) => o.code)) };
 		const ready = savable(this.builderState([{ id: 'x', code: 'x', omitted: false, assetIds: [] }]), this.form.code);
 		if (!ready.ok) throw new Error(ready.reason);
 		const stored = await drafts.save(project.id, { id: null, code: ready.code, header: ready.header, bids: input.bids });

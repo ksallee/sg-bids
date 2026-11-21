@@ -35,7 +35,7 @@ describe('headerSummary', () => {
 			{ key: 'code', text: 'BBB-01', mono: true },
 			{ key: 'round', text: 'Round 1' },
 			{ key: 'baseCurrency', text: 'USD', mono: true },
-			{ key: 'dueDate', text: 'Bids due on 2026-12-04' }
+			{ key: 'dueDate', text: 'Answers due on 2026-12-04' }
 		]);
 	});
 

@@ -13,7 +13,7 @@
 import type { EntityRow, FieldSchema } from 'sg-widgets-core';
 import { liveAuth, liveContext, liveState, liveWriter, prepareLive } from '$lib/live';
 import type { LoadedBid } from '$lib/api';
-import { setCurrentProject, workingProject } from '$lib/current-project';
+import { setCurrentProject, unnamed, workingProject } from '$lib/current-project';
 import { bidStore, cushion } from '$lib/drafts';
 import { isLocalId, localId } from '$lib/pure/persist';
 import { bidSavable, hasBidContent, type BidEditorState } from '$lib/pure/production-bid';
@@ -25,7 +25,7 @@ import { loadMapping, storeMapping } from '$lib/app/mapping-store';
 import { fptApi } from '$lib/io/fpt-api';
 import { createField, createMany, readCreateRight } from '$lib/io/fpt-field-create';
 import { preflight, readRows, writeFields } from '$lib/io/fpt-write';
-import { loadSequences, loadShape, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
+import { loadSequences, loadShape, projectName, rowsByCodes, rowsByIds, type ProjectShape } from '$lib/io/reads';
 import type { CreateAnswer, CreateRight, PlannedCreate } from '$lib/pure/field-create';
 import { cleanMapping, detectMapping, mappingStatus, readFields, type ItemKind, type Mapping, type MappingStatus } from '$lib/pure/field-map';
 import { freezeAsset, freezeShot, sequenceIndex, type SequenceIndex } from '$lib/pure/freeze';
@@ -129,8 +129,17 @@ export class Builder {
 			}
 		}
 		this.restored = true;
+		if (this.state.project && unnamed(this.state.project)) await this.nameProject(live.siteUrl, this.state.project);
 		if (this.state.project) await this.loadProject(this.state.project);
 		if (bidId) await this.readLive();
+	}
+
+	/** A project an address named by its id alone: its name, read from Flow PT and kept. */
+	private async nameProject(siteUrl: string, project: ProjectPick): Promise<void> {
+		const name = await projectName(liveContext().client, project.id).catch(() => null);
+		if (!name || this.state.project?.id !== project.id) return;
+		this.state = { ...this.state, project: { id: project.id, name } };
+		setCurrentProject(siteUrl, { id: project.id, name });
 	}
 
 	/** The bid as stored, in place of what the editor holds. */

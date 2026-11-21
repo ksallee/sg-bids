@@ -75,3 +75,10 @@ export function loadSequences(client: SgClient, projectId: number, episodeField:
 	const fields = episodeField ? ['code', episodeField] : ['code'];
 	return searchAll(client, 'Sequence', { logical_operator: 'and', conditions: [['project', 'is', { type: 'Project', id: projectId }]] }, fields, 'code');
 }
+
+/** A project's name, or null when the person cannot read it. One read (018). */
+export async function projectName(client: SgClient, projectId: number): Promise<string | null> {
+	const [row] = await rowsByIds(client, 'Project', [projectId], ['name']);
+	const name = row?.attributes?.name;
+	return typeof name === 'string' && name.trim() !== '' ? name : null;
+}

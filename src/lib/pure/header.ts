@@ -82,7 +82,7 @@ export const LABELS: Readonly<Record<keyof HeaderForm, string>> = {
 	code: 'Code',
 	round: 'Round',
 	baseCurrency: 'Base currency',
-	dueDate: 'Bids due',
+	dueDate: 'Answers due',
 	turnoverDate: 'Turnover',
 	deliveryDate: 'Delivery',
 	deliveryFormat: 'Delivery format',
@@ -120,7 +120,7 @@ export interface FieldProblem {
 }
 
 const DAY_WORDS: Readonly<Record<'dueDate' | 'turnoverDate' | 'deliveryDate', string>> = {
-	dueDate: 'bids due day',
+	dueDate: 'answers due day',
 	turnoverDate: 'turnover day',
 	deliveryDate: 'delivery day'
 };
@@ -147,7 +147,7 @@ export function checkHeader(form: HeaderForm, today: Day, stage: Stage): FieldPr
 		found.set('dueDate', {
 			tone: stage === 'issue' ? 'error' : 'warning',
 			short: 'the day has passed',
-			message: stage === 'issue' ? 'The bids due day has passed. Move it to issue.' : 'The bids due day has passed. Move it before you issue.'
+			message: stage === 'issue' ? 'The answers due day has passed. Move it to issue.' : 'The answers due day has passed. Move it before you issue.'
 		});
 	}
 	const turnover = form.turnoverDate.trim();

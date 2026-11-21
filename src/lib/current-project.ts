@@ -31,6 +31,11 @@ export function workingProject(siteUrl: string, url: URL): ProjectPick | null {
 	return next;
 }
 
+/** A project named only by its id, from an address: its name is still to read. */
+export function unnamed(project: ProjectPick): boolean {
+	return project.name === `Project ${project.id}`;
+}
+
 export function setCurrentProject(siteUrl: string, project: ProjectPick | null): void {
 	try {
 		if (project) localStorage.setItem(key(siteUrl), JSON.stringify({ id: project.id, name: project.name }));

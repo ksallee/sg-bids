@@ -63,7 +63,7 @@ describe('checkHeader', () => {
 
 	it('names each date that is not a real day', () => {
 		const p = at(form({ dueDate: '2026-02-30', turnoverDate: '12/01/2026', deliveryDate: 'soon' }));
-		expect(p.dueDate.message).toBe('Write the bids due day as YYYY-MM-DD.');
+		expect(p.dueDate.message).toBe('Write the answers due day as YYYY-MM-DD.');
 		expect(p.turnoverDate.message).toBe('Write the turnover day as YYYY-MM-DD.');
 		expect(p.deliveryDate.message).toBe('Write the delivery day as YYYY-MM-DD.');
 	});
@@ -71,11 +71,11 @@ describe('checkHeader', () => {
 	it('warns on a due date in the past while drafting, refuses it at issue, takes today', () => {
 		expect(at(form({ dueDate: '2026-11-19' })).dueDate).toEqual({
 			field: 'dueDate',
-			label: 'Bids due',
+			label: 'Answers due',
 			tone: 'warning',
 			missing: false,
 			short: 'the day has passed',
-			message: 'The bids due day has passed. Move it before you issue.'
+			message: 'The answers due day has passed. Move it before you issue.'
 		});
 		expect(at(form({ dueDate: '2026-11-19' }), 'issue').dueDate.tone).toBe('error');
 		expect(at(form({ dueDate: TODAY }), 'issue').dueDate).toBeUndefined();

@@ -49,7 +49,7 @@ describe('readiness', () => {
 	it('warns on a past due date while drafting and blocks the issue on it', () => {
 		const r = readiness({ state: state({ form: { ...form, dueDate: '2026-11-01' } }), today: TODAY });
 		expect(r.problems).toEqual([
-			{ id: 'dueDate', target: 'dueDate', label: 'Bids due', tone: 'warning', missing: false, short: 'the day has passed', message: 'The bids due day has passed. Move it before you issue.' }
+			{ id: 'dueDate', target: 'dueDate', label: 'Answers due', tone: 'warning', missing: false, short: 'the day has passed', message: 'The answers due day has passed. Move it before you issue.' }
 		]);
 		expect(r.toIssue.map((p) => [p.target, p.tone])).toEqual([['dueDate', 'error']]);
 		expect(r.canIssue).toBe(false);
@@ -87,7 +87,7 @@ describe('readiness', () => {
 	it('adds a line for any other problem, a warning in its tone', () => {
 		const r = readiness({ state: state({ form: { ...form, dueDate: '2026-11-01', turnoverDate: 'soon' } }), today: TODAY });
 		expect(r.checklist.slice(5)).toEqual([
-			{ key: 'dueDate', label: 'Bids due', state: 'warning', detail: 'the day has passed', target: 'dueDate' },
+			{ key: 'dueDate', label: 'Answers due', state: 'warning', detail: 'the day has passed', target: 'dueDate' },
 			{ key: 'turnoverDate', label: 'Turnover', state: 'error', detail: 'not a day', target: 'turnoverDate' }
 		]);
 	});

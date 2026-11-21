@@ -156,7 +156,7 @@
 					<th class={TH}>Project</th>
 					<th class={TH}>Status</th>
 					<th class={cn(TH, 'text-right')}>Round</th>
-					<th class={TH}>Bids due</th>
+					<th class={TH}>Answers due</th>
 					<th class={cn(TH, 'text-right')}>Invited</th>
 					<th class={cn(TH, 'text-right')}>Answers in</th>
 					<th class={cn(TH, 'pr-6')}><span class="sr-only">Actions</span></th>
