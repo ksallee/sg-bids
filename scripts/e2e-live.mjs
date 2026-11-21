@@ -812,7 +812,10 @@ const stages = {
 		// Round 2 keeps Omit. A double click opens the cell's editor, and a press on its control writes it.
 		const cut = state.seqShots[0].code;
 		const cell = page.locator('[data-slot=request-table] tr[data-row-key]', { hasText: cut }).locator('td[data-column=c_omitted]');
-		await cell.dblclick();
+		// The switch in the cell is disabled, and Chrome drops pointer events on a disabled control, so a
+		// double click on the switch itself opens nothing: the double click goes beside it.
+		const box = await cell.boundingBox();
+		await cell.dblclick({ position: { x: box.width - 8, y: box.height / 2 } });
 		await cell.locator('[data-slot=entity-table-editor] button').first().click();
 		await saved();
 		const [row2] = await sql`select round from public.bid_requests where id = ${state.round2Id}`;
