@@ -15,7 +15,7 @@ const mappingB = { description: 'sg_brief', frames: 'sg_frame_count', sequence: 
 describe('requestColumns', () => {
 	it('lists a Shot request’s columns in order, live where a field feeds them', () => {
 		const columns = requestColumns('shot', mappingB, shotB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'sequence', 'package', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
 		expect(columns.filter((c) => c.live).map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty']);
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_complexity', dataType: 'list', validValues: ['A', 'B', 'C', 'D'], lock: null });
 		expect(columnByKey(columns, 'frames')).toMatchObject({ field: 'sg_frame_count', dataType: 'number' });
@@ -50,7 +50,7 @@ describe('requestColumns', () => {
 
 	it('lists an Asset request’s columns', () => {
 		const columns = requestColumns('asset', { description: 'sg_brief', type: 'sg_asset_type', difficulty: 'sg_difficulty' }, assetB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'package', 'type', 'description', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'type', 'description', 'difficulty', 'omitted', 'notes']);
 		expect(columnByKey(columns, 'type')).toMatchObject({ dataType: 'list', validValues: ['Character', 'Prop'] });
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_difficulty', dataType: 'text' });
 		expect(columnByKey(requestColumns('asset', { description: null, type: null, difficulty: null }, assetA), 'code').label).toBe('Asset');
@@ -107,15 +107,7 @@ describe('descriptionAdvice', () => {
 	});
 });
 
-describe('the Package column', () => {
-	it('is the request own list of package names, editable on every row, Flow PT untouched', () => {
-		const columns = requestColumns('shot', mappingA, shotA, {}, ['SQ1', 'Creature']);
-		const column = columnByKey(columns, 'package');
-		expect(column).toMatchObject({ live: false, field: null, lock: null, dataType: 'list', validValues: ['SQ1', 'Creature'] });
-		expect(cellTarget(column, shot('shot-1', { fpt: { type: 'Shot', id: 1 } }), false)).toEqual({ kind: 'request' });
-		expect(cellTarget(column, shot('shot-2', { source: 'breakdown' }), false)).toEqual({ kind: 'request' });
-	});
-
+describe('the widths', () => {
 	it('gives the code room for a long code', () => {
 		expect(columnByKey(requestColumns('shot', mappingA, shotA), 'code').width).toBeGreaterThanOrEqual(300);
 	});

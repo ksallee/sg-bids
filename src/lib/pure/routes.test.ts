@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { connectHref, projectParam, requestHref, safeNext } from './routes';
+import { connectHref, movedRequestPath, projectParam, requestHref, safeNext } from './routes';
 
 describe('safeNext', () => {
 	it('keeps a path of this app, with its query', () => {
 		expect(safeNext('/bids')).toBe('/bids');
+		expect(safeNext('/requests')).toBe('/requests');
+		expect(safeNext('/requests/new?id=abc&step=vendors')).toBe('/requests/new?id=abc&step=vendors');
 		expect(safeNext('/bids/new?id=abc&view=review')).toBe('/bids/new?id=abc&view=review');
 		expect(safeNext('/bids/0de1a1c9-5c87-415a-ba7e-8b15f91ccbd4/compare?project=70')).toBe('/bids/0de1a1c9-5c87-415a-ba7e-8b15f91ccbd4/compare?project=70');
 		expect(safeNext('/dev/fpt')).toBe('/dev/fpt');
@@ -64,8 +66,24 @@ describe('projectParam', () => {
 
 describe('requestHref', () => {
 	it('opens a draft in the builder and anything else on its page, with its project', () => {
-		expect(requestHref({ id: 'r1', status: 'draft', projectId: 70 })).toBe('/bids/new?id=r1&project=70');
-		expect(requestHref({ id: 'r2', status: 'issued', projectId: 91 })).toBe('/bids/r2?project=91');
-		expect(requestHref({ id: 'r3', status: 'awarded', projectId: 91 })).toBe('/bids/r3?project=91');
+		expect(requestHref({ id: 'r1', status: 'draft', projectId: 70 })).toBe('/requests/new?id=r1&project=70');
+		expect(requestHref({ id: 'r2', status: 'issued', projectId: 91 })).toBe('/requests/r2?project=91');
+		expect(requestHref({ id: 'r3', status: 'awarded', projectId: 91 })).toBe('/requests/r3?project=91');
+	});
+});
+
+describe('movedRequestPath', () => {
+	it('sends the old addresses of a request to its new ones, with the query', () => {
+		expect(movedRequestPath('/bids/r1/compare', '?project=70')).toBe('/requests/r1/compare?project=70');
+		expect(movedRequestPath('/bids/r1/publish', '')).toBe('/requests/r1/publish');
+		expect(movedRequestPath('/bids/new', '?id=r1&project=70')).toBe('/requests/new?id=r1&project=70');
+		expect(movedRequestPath('/bids/r1', '?project=70', true)).toBe('/requests/r1?project=70');
+	});
+
+	it('leaves the bids pages where they are', () => {
+		expect(movedRequestPath('/bids', '')).toBeNull();
+		expect(movedRequestPath('/bids/new', '')).toBeNull();
+		expect(movedRequestPath('/bids/new', '?project=70')).toBeNull();
+		expect(movedRequestPath('/bids/b1', '?project=70')).toBeNull();
 	});
 });

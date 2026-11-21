@@ -97,7 +97,7 @@
 			<div class="bg-primary h-full rounded-full transition-[width] motion-reduce:transition-none" style:width={`${done}%`}></div>
 		</div>
 		<p class="text-muted-foreground text-xs">
-			{result.counts.priced + result.counts.packaged} of {all} priced{#if result.counts.packaged > 0}, {result.counts.packaged} in a package price{/if}{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
+			{result.counts.priced + result.counts.packaged} of {all} priced{#if result.counts.packaged > 0}, {result.counts.packaged} in a bid's figure{/if}{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
 		</p>
 	</div>
 
@@ -138,13 +138,13 @@
 		{:else if stage === 'submitted'}
 			<p class="text-sm"><span class="font-medium">Submitted</span>{stamp ? ` ${stamp}` : ''}. Production can see it.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Revise</Button>
-			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw} data-slot="withdraw">Withdraw the bid</Button>
+			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw} data-slot="withdraw">Withdraw your answer</Button>
 			<p class="text-muted-foreground text-xs">Revise opens a copy to change. Production sees this one until you submit the next. Withdraw if you no longer stand by it.</p>
 		{:else if stage === 'withdrawn'}
 			<p class="text-sm"><span class="font-medium">Withdrawn</span>{stamp ? ` ${stamp}` : ''}. Production sees it as withdrawn.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Start a new version</Button>
 		{:else}
-			<p class="text-sm">This request is closed. The bid can no longer change.</p>
+			<p class="text-sm">This request is closed. Your answer can no longer change.</p>
 		{/if}
 	</div>
 </div>

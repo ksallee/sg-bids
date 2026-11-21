@@ -1,5 +1,6 @@
 /**
- * The data the app rests on: a bid request, the vendors' bids, the award and the change orders.
+ * The data the app rests on: production's bids, a bid request made from them, the vendors' answers,
+ * the award and the change orders.
  * There is no industry standard. The fields follow the existing bid tools; `docs/data-model.md`
  * lists each one with the tools it appears in.
  *
@@ -44,6 +45,21 @@ export function targetKey(target: Target): string {
 	return `${target.kind}:${target.id}`;
 }
 
+// Production's bid: a named set of rows, built and edited on its own, sent in one or several requests.
+
+/**
+ * A bid production builds in a project: its Shots, Assets and breakdown rows, with the request-only
+ * columns (omit, note to vendors) and the live Flow PT ones. Always editable. A request references it
+ * while a draft and copies its rows at the issue (`request-bids.ts`). In the code it is a production
+ * bid; a vendor's answer is a `VendorBid`.
+ */
+export interface ProductionBid {
+	readonly id: Id;
+	readonly name: string;
+	readonly shots: readonly RequestShot[];
+	readonly assets: readonly RequestAsset[];
+}
+
 // The bid request: what production sends.
 
 export interface BidRequest {
@@ -53,17 +69,20 @@ export interface BidRequest {
 	readonly assets: readonly RequestAsset[];
 	readonly vendors: readonly InvitedVendor[];
 	/**
-	 * Named groups of rows. Every row sits in one, named by its `package`. Absent or empty: a request
-	 * from before packages, read as one package holding every row (`packages.ts`).
+	 * The request's bids, as packages: named groups of rows. Every row sits in one, named by its
+	 * `package`. Absent or empty: a request from before packages, read as one holding every row
+	 * (`packages.ts`). In the app a package is a bid of the request; the code keeps the word.
 	 */
 	readonly packages?: readonly RequestPackage[];
 }
 
-/** A named group of rows a vendor is invited to, and may price as one figure. */
+/** A bid of a request: a named group of rows a vendor is invited to, and may price as one figure. */
 export interface RequestPackage {
-	/** Stable: `seq:SEQ010`, `shots`, `assets`, or `pkg:<random>` for one production adds. */
+	/** Stable: `bid:<id>` for a bid sent from the Bids page, or a key from before (`seq:SEQ010`, `pkg:<random>`). */
 	readonly id: Id;
 	readonly name: string;
+	/** The production bid it comes from, while that bid exists. Production's alone: never sent to a vendor. */
+	readonly bid?: Id;
 }
 
 export interface RequestHeader {

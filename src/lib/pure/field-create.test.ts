@@ -159,7 +159,7 @@ describe('answerWords', () => {
 		expect(answerWords({ state: 'retired', name: 'sg_difficulty' }, 'Shot')).toBe(
 			'A retired field holds the name sg_difficulty. Pick another name, or empty the field trash in Flow PT: open the admin menu, then Trash, then Fields.'
 		);
-		expect(answerWords({ state: 'refused' }, 'Shot')).toBe('Flow PT refused: you may not create fields. Ask an admin, or set it per item in the request.');
+		expect(answerWords({ state: 'refused' }, 'Shot')).toBe('Flow PT refused: you may not create fields. Ask an admin, or set it per item in the bid.');
 		expect(answerWords({ state: 'failed', status: 500, title: 'Boom' }, 'Shot')).toBe('Flow PT answered 500: Boom. A 500 can be a refusal of the right to create fields.');
 		expect(answerWords({ state: 'failed', status: 400, title: 'Bad' }, 'Shot')).toBe('Flow PT answered 400: Bad.');
 	});

@@ -133,7 +133,7 @@
 							</tbody>
 						</table>
 					</div>
-					<p class="text-muted-foreground text-xs">A Bid's total is its package's figure or its lines' sum. A rate is the one locked on the compare page. Each package is a Bid of its own. A package priced as one figure carries the figure on its Bid, and its Bid Lines carry no amount. Non-shot costs, discount, tax and the rebate go on one General costs Bid, so a vendor's Bids sum to its total.</p>
+					<p class="text-muted-foreground text-xs">A Bid's total is its figure or its lines' sum. A rate is the one locked on the compare page. Each bid of the request a vendor answered is a Bid of its own. A bid priced as one figure carries the figure on its Bid, and its Bid Lines carry no amount. Non-shot costs, discount, tax and the rebate go on one General costs Bid, so a vendor's Bids sum to its total.</p>
 				{:else if step.label === 'Bid Lines and vendor Groups'}
 					<div class="overflow-x-auto">
 						<table class="w-full min-w-[640px] text-sm" data-slot="preview-lines">
@@ -141,7 +141,7 @@
 								<tr class="text-muted-foreground border-b text-left text-xs">
 									<th class="py-1.5 pr-3 font-medium">Shot or Asset</th>
 									<th class="px-3 py-1.5 font-medium">Vendor</th>
-									<th class="px-3 py-1.5 font-medium">Package</th>
+									<th class="px-3 py-1.5 font-medium">Bid of the request</th>
 									<th class="px-3 py-1.5 text-right font-medium">Price</th>
 									<th class="px-3 py-1.5 text-right font-medium">In base</th>
 									<th class="px-3 py-1.5 text-right font-medium">Share</th>
@@ -155,8 +155,8 @@
 											<td class="py-1.5 pr-3">{#if j === 0}<span class="font-medium">{it.item}</span>{#if it.split}<span class="text-muted-foreground ml-2 text-xs">split</span>{/if}{/if}</td>
 											<td class="px-3 py-1.5">{l.vendor}</td>
 											<td class="text-muted-foreground px-3 py-1.5">{l.package ?? ''}</td>
-											<td class="px-3 py-1.5 text-right" title={l.inPackage ? 'The package price is on its Bid' : undefined}>
-												{l.excluded ? 'Excluded' : l.inPackage ? 'In package price' : amount(l.amount)}
+											<td class="px-3 py-1.5 text-right" title={l.inPackage ? 'The figure is on its Bid' : undefined}>
+												{l.excluded ? 'Excluded' : l.inPackage ? "In the bid's figure" : amount(l.amount)}
 											</td>
 											<td class="px-3 py-1.5 text-right">{amount(l.amountBase)}</td>
 											<td class="px-3 py-1.5 text-right">{l.share === null ? '' : `${l.share}%`}</td>

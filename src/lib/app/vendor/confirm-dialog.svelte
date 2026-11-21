@@ -53,7 +53,7 @@
 		<div class="flex flex-col gap-3 text-sm">{@render children()}</div>
 		{#if error}<p class="text-destructive text-sm" role="alert">{error}</p>{/if}
 		<div class="flex flex-wrap justify-end gap-2">
-			<Button variant="outline" onclick={oncancel} disabled={busy}>Back to the bid</Button>
+			<Button variant="outline" onclick={oncancel} disabled={busy}>Back to your answer</Button>
 			<Button variant={tone === 'destructive' ? 'destructive' : 'default'} onclick={onconfirm} disabled={busy || disabled}>{busy ? 'Working' : confirm}</Button>
 		</div>
 	</div>

@@ -1,10 +1,9 @@
 <!--
-	The request's header form, open while a field needs a fix or the person edits it: title, code,
-	round, base currency and the bids due day on one row from xl, then turnover and delivery, and the
-	assumptions, which fold away with a line of what is set. Once filled it folds to one line in the
-	page header (`header-summary`). A field's problem shows once it was left, holds a value, or the
-	page asks for it (`revealed`), so a new draft does not open in red. Checks in `$lib/pure/header`
-	and `$lib/pure/readiness`.
+	The request's common header, what every bid of it shares: title, code, round, base currency and
+	the due day on one row from xl, then turnover and delivery, the material, and the assumptions,
+	which fold away with a line of what is set. A field's problem shows once it was left, holds a
+	value, or the page asks for it (`revealed`), so a new draft does not open in red. Checks in
+	`$lib/pure/header` and `$lib/pure/readiness`.
 -->
 <script lang="ts">
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -19,17 +18,24 @@
 	import { LABELS, OPTIONAL_GROUPS, REQUIRED, splitAssumptions, type HeaderForm } from '$lib/pure/header';
 	import { controlId, type Problem } from '$lib/pure/readiness';
 	import { cn } from '$lib/utils.js';
-	import type { Builder } from '$lib/app/builder.svelte';
 
 	type Fold = keyof typeof OPTIONAL_GROUPS;
 
 	let {
-		builder,
+		form,
+		problems: given,
+		suggestedCode,
+		onChange,
 		folds = $bindable({ delivery: false, assumptions: false }),
 		revealed,
 		onDone
 	}: {
-		builder: Builder;
+		form: HeaderForm;
+		/** What is wrong now (`readiness`). */
+		problems: readonly Problem[];
+		/** The code a blank one is made as. */
+		suggestedCode: string;
+		onChange: (form: HeaderForm) => void;
 		folds?: Record<Fold, boolean>;
 		/** Fields whose problem shows whatever their state: those a summary link pointed at, or every one before the review. */
 		revealed: ReadonlySet<string>;
@@ -37,13 +43,12 @@
 		onDone?: () => void;
 	} = $props();
 
-	const form = $derived(builder.state.form);
-	const problems = $derived(new Map(builder.readiness.problems.map((p) => [p.target, p])));
+	const problems = $derived(new Map(given.map((p) => [p.target, p])));
 	let touched = $state<Partial<Record<keyof HeaderForm, boolean>>>({});
 	const currencyOptions = CURRENCIES.map((c) => ({ code: c.code, label: c.name }));
 
 	function set<K extends keyof HeaderForm>(key: K, value: HeaderForm[K]): void {
-		builder.setForm({ ...builder.state.form, [key]: value });
+		onChange({ ...form, [key]: value });
 	}
 
 	function shown(key: keyof HeaderForm): Problem | undefined {
@@ -67,7 +72,7 @@
 		return { text: set.length === 0 ? 'Nothing set' : `${set.join(', ')} set`, tone: 'muted' };
 	}
 
-	const codeHint = $derived(form.code.trim() !== '' && form.code.trim() === builder.suggestedCode ? 'Made from the project. Vendors quote it back.' : 'Vendors quote it back.');
+	const codeHint = $derived(form.code.trim() !== '' && form.code.trim() === suggestedCode ? 'Made from the project. Vendors quote it back.' : 'Vendors quote it back.');
 </script>
 
 {#snippet text(key: keyof HeaderForm, hint?: string, type = 'text', placeholder = '')}
@@ -124,7 +129,7 @@
 
 <section class="flex flex-col gap-4" aria-labelledby="request-heading" data-slot="header-panel">
 	<div class="flex items-center gap-3">
-		<h2 id="request-heading" class="text-sm font-semibold">Request details</h2>
+		<h2 id="request-heading" class="text-sm font-semibold">What every bid shares</h2>
 		<RequiredLegend />
 		{#if onDone}<Button size="sm" variant="outline" class="ml-auto" onclick={onDone} data-slot="details-done">Done</Button>{/if}
 	</div>
@@ -167,7 +172,7 @@
 			{@render foldHead('assumptions', 'Assumptions')}
 			{#if folds.assumptions}
 				<div id="fold-assumptions" class="pt-2 pb-3">
-					<FormField id={controlId('assumptions')} label={LABELS.assumptions} hint="One per line. Every vendor bids on these.">
+					<FormField id={controlId('assumptions')} label={LABELS.assumptions} hint="One per line. Every vendor answers on these.">
 						{#snippet children({ id, describedBy })}
 							<Textarea
 								{id}

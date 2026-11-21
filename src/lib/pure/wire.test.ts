@@ -12,8 +12,8 @@ describe('parseSave', () => {
 		if (!out.ok) return;
 		expect(out.value.id).toBeNull();
 		expect(out.value.header).toEqual(header);
-		expect(out.value.items.shots).toEqual([shot]);
-		expect(out.value.items.assets).toEqual([asset]);
+		expect(out.value.items!.shots).toEqual([shot]);
+		expect(out.value.items!.assets).toEqual([asset]);
 	});
 
 	it('keeps only the header and item fields the model has', () => {
@@ -26,17 +26,17 @@ describe('parseSave', () => {
 		if (!out.ok) return;
 		expect('vendorName' in out.value.header).toBe(false);
 		expect('projectRef' in out.value.header).toBe(false);
-		expect('thumbnail' in out.value.items.shots[0]).toBe(false);
-		expect('vendor' in out.value.items.shots[0]).toBe(false);
-		expect('group' in out.value.items.assets[0]).toBe(false);
+		expect('thumbnail' in out.value.items!.shots[0]).toBe(false);
+		expect('vendor' in out.value.items!.shots[0]).toBe(false);
+		expect('group' in out.value.items!.assets[0]).toBe(false);
 	});
 
 	it('takes a breakdown row, with no Flow PT row, and no other source', () => {
 		const row = { id: 'shot-bd-1', code: 'sh900', source: 'breakdown', omitted: false, assetIds: [], frames: 48 };
 		const one = { id: 'asset-bd-2', name: 'prop', source: 'breakdown' };
 		const out = parseSave({ code: 'X', header, items: { shots: [row], assets: [one] } });
-		expect(out.ok && out.value.items.shots).toEqual([row]);
-		expect(out.ok && out.value.items.assets).toEqual([one]);
+		expect(out.ok && out.value.items!.shots).toEqual([row]);
+		expect(out.ok && out.value.items!.assets).toEqual([one]);
 		expect(parseSave({ code: 'X', header, items: { shots: [{ ...row, source: 'fpt' }], assets: [] } }).ok).toBe(false);
 		expect(parseSave({ code: 'X', header, items: { shots: [], assets: [{ ...one, source: 7 }] } }).ok).toBe(false);
 	});
@@ -123,7 +123,7 @@ describe('packages on the wire', () => {
 	it('takes the packages with the rows that sit in them', () => {
 		const out = parseSave({ code: 'X', header, items: { shots: [{ ...shot, package: 'seq:SQ1' }], assets: [{ ...asset, package: 'assets' }] }, packages });
 		expect(out.ok && out.value.packages).toEqual(packages);
-		expect(out.ok && out.value.items.shots[0].package).toBe('seq:SQ1');
+		expect(out.ok && out.value.items!.shots[0].package).toBe('seq:SQ1');
 	});
 
 	it('takes a save with no packages as before', () => {

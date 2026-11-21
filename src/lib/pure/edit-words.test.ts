@@ -13,7 +13,7 @@ const picked = (n: number) => Array.from({ length: n }, (_, i) => shot(`shot-${i
 const typed = (n: number) => Array.from({ length: n }, (_, i) => shot(`shot-bd-${i}`, { source: 'breakdown' }));
 
 describe('splitTargets', () => {
-	it('counts the rows an edit sends to Flow PT, keeps in the request, and leaves', () => {
+	it('counts the rows an edit sends to Flow PT, keeps in the bid, and leaves', () => {
 		const items = [...picked(3), ...typed(2)];
 		expect(splitTargets(difficulty, items, new Set(['shot-1']))).toEqual({ fpt: 2, request: 2, locked: ['This Shot is gone from Flow PT, or you cannot read it.'] });
 		expect(splitTargets(notes, items, new Set())).toEqual({ fpt: 0, request: 5, locked: [] });
@@ -25,14 +25,14 @@ describe('bulkConfirm', () => {
 		expect(bulkConfirm('shot', 'Difficulty', { fpt: 40, request: 0, locked: [] })).toEqual({ title: 'Change Difficulty on 40 rows?', lines: ['This changes Difficulty on 40 Shots in Flow PT.'] });
 	});
 
-	it('says what stays in the request', () => {
-		expect(bulkConfirm('shot', 'Note to vendors', { fpt: 0, request: 40, locked: [] }).lines).toEqual(['This changes Note to vendors on 40 rows in this request.']);
+	it('says what stays in the bid', () => {
+		expect(bulkConfirm('shot', 'Note to vendors', { fpt: 0, request: 40, locked: [] }).lines).toEqual(['This changes Note to vendors on 40 rows in this bid.']);
 	});
 
 	it('says both counts for a mixed selection, and the rows it leaves', () => {
 		const words = bulkConfirm('shot', 'Difficulty', { fpt: 38, request: 1, locked: ['Gone.', 'Gone.'] });
 		expect(words.title).toBe('Change Difficulty on 39 rows?');
-		expect(words.lines).toEqual(['This changes Difficulty on 38 Shots in Flow PT and on 1 row in this request.', '2 selected rows stay as they are. Gone.']);
+		expect(words.lines).toEqual(['This changes Difficulty on 38 Shots in Flow PT and on 1 row in this bid.', '2 selected rows stay as they are. Gone.']);
 	});
 
 	it('speaks of one Asset', () => {
@@ -50,11 +50,11 @@ const codeOf = (id: string) => codes.get(id) ?? id;
 describe('editLine', () => {
 	it('names the one row an edit changed, and where', () => {
 		expect(editLine('shot', 'Difficulty', [change('shot-1', true)], codeOf)).toBe('Difficulty of SH010 changed in Flow PT.');
-		expect(editLine('shot', 'Note to vendors', [change('shot-1', false)], codeOf)).toBe('Note to vendors of SH010 changed in this request.');
+		expect(editLine('shot', 'Note to vendors', [change('shot-1', false)], codeOf)).toBe('Note to vendors of SH010 changed in this bid.');
 	});
 
 	it('counts the rows of a bulk edit', () => {
-		expect(editLine('shot', 'Difficulty', [change('shot-1', true), change('shot-2', true), change('x', false)], codeOf)).toBe('Difficulty changed on 2 Shots in Flow PT and on 1 row in this request.');
+		expect(editLine('shot', 'Difficulty', [change('shot-1', true), change('shot-2', true), change('x', false)], codeOf)).toBe('Difficulty changed on 2 Shots in Flow PT and on 1 row in this bid.');
 	});
 });
 

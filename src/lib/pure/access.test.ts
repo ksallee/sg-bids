@@ -38,9 +38,15 @@ describe('production', () => {
 		}
 	});
 
-	it('deletes a request only in its tenant, and never an invitation alone', () => {
+	it('deletes a request only in its tenant, and an invitation only in its tenant', () => {
 		expect(scope(production, 'bid_requests', 'delete').eq).toEqual(tenant);
-		expect(allowed(production, 'invitations', 'delete')).toBe(false);
+		expect(scope(production, 'invitations', 'delete').eq).toEqual(tenant);
+	});
+
+	it('reads and writes its own bids and their rows, in its tenant', () => {
+		for (const table of ['production_bids', 'production_bid_items'] as const) {
+			for (const action of ['read', 'insert', 'update', 'delete'] as const) expect(scope(production, table, action).eq).toEqual(tenant);
+		}
 	});
 
 	it('refuses a principal with no tenant', () => {
@@ -76,7 +82,7 @@ describe('vendor', () => {
 	});
 
 	it('never reaches scenarios, awards or rates', () => {
-		const hidden: Table[] = ['award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'];
+		const hidden: Table[] = ['production_bids', 'production_bid_items', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'];
 		for (const table of hidden) {
 			for (const action of ['read', 'insert', 'update', 'delete'] as const) {
 				expect(allowed(vendor, table, action)).toBe(false);
@@ -127,8 +133,13 @@ describe('production across its readable projects', () => {
 		expect(siteScope(site, 'bids')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91], status: ['submitted', 'withdrawn'] } });
 	});
 
-	it('reads nothing else: no lines, no scenarios, no awards, no rates', () => {
-		for (const table of ['request_items', 'bid_lines', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'] as Table[]) {
+	it('reads production bids and the requests they are in, in its projects only', () => {
+		expect(siteScope(site, 'production_bids')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
+		expect(siteScope(site, 'request_packages')).toEqual({ eq: { site_host: 'studio.example.com' }, in: { project_id: [70, 91] } });
+	});
+
+	it('reads nothing else: no rows, no lines, no scenarios, no awards, no rates', () => {
+		for (const table of ['request_items', 'production_bid_items', 'bid_lines', 'award_scenarios', 'award_scenario_items', 'awards', 'award_publications', 'bid_rates'] as Table[]) {
 			expect(() => siteScope(site, table)).toThrow();
 		}
 	});

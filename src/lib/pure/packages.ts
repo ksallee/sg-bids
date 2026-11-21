@@ -1,13 +1,12 @@
 /**
- * Packages: named groups of a request's rows. Every row sits in exactly one. A vendor is invited to
- * every package or to some, and prices each package row by row or as one figure. Pure, no I/O.
+ * Packages: the bids of a request, named groups of its rows. Every row sits in exactly one. In the
+ * app a package is a bid of the request (`request-bids.ts`): the code keeps the word, the words a
+ * person reads say bid. A vendor is invited to every bid or to some, and prices each row by row or as
+ * one figure. Pure, no I/O.
  *
- * - Defaults come from sequences: a shot goes to its sequence's package (`seq:<sequence>`), a shot
- *   with none to Other shots (`shots`), an asset to Assets (`assets`). Production renames, adds,
- *   deletes and moves rows between packages.
- * - Deleting a package sends each of its rows back to its sequence's package when there is one,
- *   else to the catch-all of its kind (Other shots, Assets), made when missing. A row with neither
- *   left keeps the package from going.
+ * - A request made from bids has one package per bid. A request stored with rows of its own (before
+ *   bids) took defaults from sequences: a shot to its sequence's package (`seq:<sequence>`), a shot
+ *   with none to Other shots (`shots`), an asset to Assets (`assets`) (`withDefaults`).
  * - A request stored before packages has none: it reads as one package, All shots and assets.
  * - A package priced as one figure covers its rows not omitted. Each of them carries a line marked
  *   `inPackage` with a zero total, so an award, a scenario and a Flow PT Bid Line still name the row.
@@ -32,6 +31,7 @@ export const ASSETS: RequestPackage = { id: 'assets', name: 'Assets' };
 
 export const MAX_PACKAGE_NAME = 120;
 const MAX_KEY = 200;
+
 
 export function sequencePackageId(sequence: string): Id {
 	return `seq:${sequence.trim()}`.slice(0, MAX_KEY);
@@ -126,86 +126,6 @@ export function resolvePackages(request: Rows): Resolved {
 		if (!entry.omitted) live.get(id)!.push(entry.target);
 	}
 	return { packages, implicit, of, rows, live };
-}
-
-// Production's edits.
-
-export type Edit<S extends RequestShot, A extends RequestAsset> = { readonly ok: true; readonly rows: PackageRows<S, A> } | { readonly ok: false; readonly message: string };
-
-/** What is wrong with a package name, or null. `except`: the package being renamed. */
-export function nameProblem(name: string, packages: readonly RequestPackage[], except?: Id): string | null {
-	const trimmed = name.trim();
-	if (trimmed === '') return 'Name the package.';
-	if (trimmed.length > MAX_PACKAGE_NAME) return `A package name is ${MAX_PACKAGE_NAME} characters at most.`;
-	const other = packages.find((p) => p.id !== except && fold(p.name) === fold(trimmed));
-	return other ? `Another package is named ${other.name}.` : null;
-}
-
-/** A new empty package. `id` is the caller's: `pkg:<random>`. */
-export function addPackage<S extends RequestShot, A extends RequestAsset>(rows: PackageRows<S, A>, name: string, id: Id): Edit<S, A> {
-	const problem = nameProblem(name, rows.packages);
-	if (problem) return { ok: false, message: problem };
-	if (rows.packages.some((p) => p.id === id)) return { ok: false, message: 'That package is there already.' };
-	return { ok: true, rows: { ...rows, packages: [...rows.packages, { id, name: name.trim() }] } };
-}
-
-/** A copy of the package, named `<name> copy`, right after it, with no rows. A package holds no other setting. */
-export function duplicatePackage<S extends RequestShot, A extends RequestAsset>(rows: PackageRows<S, A>, id: Id, copyId: Id): Edit<S, A> {
-	const index = rows.packages.findIndex((p) => p.id === id);
-	if (index < 0) return { ok: false, message: 'No such package.' };
-	if (rows.packages.some((p) => p.id === copyId)) return { ok: false, message: 'That package is there already.' };
-	const name = freeName(`${rows.packages[index].name} copy`.slice(0, MAX_PACKAGE_NAME), rows.packages);
-	const packages = [...rows.packages];
-	packages.splice(index + 1, 0, { id: copyId, name });
-	return { ok: true, rows: { ...rows, packages } };
-}
-
-export function renamePackage<S extends RequestShot, A extends RequestAsset>(rows: PackageRows<S, A>, id: Id, name: string): Edit<S, A> {
-	if (!rows.packages.some((p) => p.id === id)) return { ok: false, message: 'No such package.' };
-	const problem = nameProblem(name, rows.packages, id);
-	if (problem) return { ok: false, message: problem };
-	return { ok: true, rows: { ...rows, packages: rows.packages.map((p) => (p.id === id ? { ...p, name: name.trim() } : p)) } };
-}
-
-/** The rows named go to the package. */
-export function moveRows<S extends RequestShot, A extends RequestAsset>(rows: PackageRows<S, A>, targets: readonly Target[], id: Id): Edit<S, A> {
-	if (!rows.packages.some((p) => p.id === id)) return { ok: false, message: 'No such package.' };
-	const keys = new Set(targets.map(targetKey));
-	return {
-		ok: true,
-		rows: {
-			...rows,
-			shots: rows.shots.map((s) => (keys.has(targetKey({ kind: 'shot', id: s.id })) ? { ...s, package: id } : s)),
-			assets: rows.assets.map((a) => (keys.has(targetKey({ kind: 'asset', id: a.id })) ? { ...a, package: id } : a))
-		}
-	};
-}
-
-/** The package goes. Each of its rows goes back to its sequence's package, else to the catch-all of its kind. */
-export function deletePackage<S extends RequestShot, A extends RequestAsset>(rows: PackageRows<S, A>, id: Id): Edit<S, A> {
-	const gone = rows.packages.find((p) => p.id === id);
-	if (!gone) return { ok: false, message: 'No such package.' };
-	const packages = rows.packages.filter((p) => p.id !== id);
-	const known = new Set(packages.map((p) => p.id));
-	let stuck = false;
-	const home = (kind: Kind, sequence: string | undefined): Id => {
-		const mine = defaultPackage(kind, sequence);
-		if (mine.id !== id && known.has(mine.id)) return mine.id;
-		const catchAll = kind === 'shot' ? OTHER_SHOTS : ASSETS;
-		if (catchAll.id === id) {
-			stuck = true;
-			return id;
-		}
-		if (!known.has(catchAll.id)) {
-			packages.push({ id: catchAll.id, name: freeName(catchAll.name, packages) });
-			known.add(catchAll.id);
-		}
-		return catchAll.id;
-	};
-	const shots = rows.shots.map((s) => (s.package === id ? { ...s, package: home('shot', s.sequence) } : s));
-	const assets = rows.assets.map((a) => (a.package === id ? { ...a, package: home('asset', undefined) } : a));
-	if (stuck) return { ok: false, message: `${gone.name} holds rows with nowhere else to go. Move them to another package first.` };
-	return { ok: true, rows: { shots, assets, packages } };
 }
 
 export interface PackageStats {
@@ -322,17 +242,17 @@ export function packageProblems(
 	const byKey = new Map(entries(request).map((e) => [targetKey(e.target), e]));
 	const declined = new Set<Id>();
 	for (const id of bid.declined ?? []) {
-		if (!names.has(id) || (allowed && !allowed.has(id))) problems.push('You are not bidding on a package that is not in the request.');
+		if (!names.has(id) || (allowed && !allowed.has(id))) problems.push('You are not bidding on a bid that is not in the request.');
 		else declined.add(id);
 	}
 	const priced = new Set<Id>();
 	for (const price of bid.packages ?? []) {
 		if (!names.has(price.package) || (allowed && !allowed.has(price.package))) {
-			problems.push('A package price names a package not in the request.');
+			problems.push('A figure names a bid not in the request.');
 			continue;
 		}
 		if (declined.has(price.package)) {
-			problems.push(`You are not bidding on ${names.get(price.package)}. It takes no price.`);
+			problems.push(`You are not bidding on ${names.get(price.package)}. It takes no figure.`);
 			continue;
 		}
 		if (priced.has(price.package)) {
@@ -351,8 +271,8 @@ export function packageProblems(
 			continue;
 		}
 		if (line.inPackage) {
-			if (entry.omitted) problems.push(`${entry.label} is omitted. It is not in a package price.`);
-			else if (!priced.has(pkg)) problems.push(`${entry.label} is in a package price, but ${names.get(pkg)} has no one figure.`);
+			if (entry.omitted) problems.push(`${entry.label} is omitted. It is not in a bid's figure.`);
+			else if (!priced.has(pkg)) problems.push(`${entry.label} is in a bid's figure, but ${names.get(pkg)} has no one figure.`);
 		} else if (priced.has(pkg)) problems.push(`${entry.label} is in ${names.get(pkg)}, priced as one figure. It takes no price of its own.`);
 	}
 	for (const pkg of priced) {
@@ -361,9 +281,12 @@ export function packageProblems(
 		}
 	}
 	const offered = allowed ? resolved.packages.filter((p) => allowed.has(p.id)) : resolved.packages;
-	if (offered.length > 0 && offered.every((p) => declined.has(p.id))) problems.push('Bid on one package at least.');
+	if (offered.length > 0 && offered.every((p) => declined.has(p.id))) problems.push(ANSWER_ONE);
 	return problems;
 }
+
+/** What a vendor that declines every bid it was invited to is told. */
+export const ANSWER_ONE = 'Answer one bid at least.';
 
 /** The packages the bid declines, as a set. */
 export function declinedOf(bid: Pick<VendorBid, 'declined'>): Set<Id> {

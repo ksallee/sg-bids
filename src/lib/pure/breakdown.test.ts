@@ -176,7 +176,7 @@ describe('planBreakdown', () => {
 		expect(p.issues[0].message).toBe('Description is picked for two columns. Pick it once.');
 	});
 
-	describe('a code already in the request or repeated in the paste', () => {
+	describe('a code already in the bid or repeated in the paste', () => {
 		const existing = { shots: [shot('shot-55', { code: 'SH010', fpt: { type: 'Shot', id: 55 }, description: 'From Flow PT', frames: 10, notes: 'keep' })], assets: [] };
 
 		it('skips them, named by row, when the choice is skip', () => {
@@ -185,7 +185,7 @@ describe('planBreakdown', () => {
 			expect(p.add.map((s) => s.code)).toEqual(['SH500']);
 			expect(p.replace).toEqual([]);
 			expect(p.duplicates).toEqual([
-				{ row: 2, code: 'SH010', matches: 'in the request' },
+				{ row: 2, code: 'SH010', matches: 'in the bid' },
 				{ row: 4, code: 'sh500', matches: 'row 3' }
 			]);
 		});
@@ -209,7 +209,7 @@ describe('planBreakdown', () => {
 		});
 	});
 
-	it('links the assets a shot names, adding those the request lacks, and names a count it cannot read', () => {
+	it('links the assets a shot names, adding those the bid lacks, and names a count it cannot read', () => {
 		nextShot = ids('shot-bd-');
 		nextAsset = ids('asset-bd-');
 		const existing = { shots: [], assets: [asset('asset-9', { name: 'Castle', fpt: { type: 'Asset', id: 9 } })] };
@@ -229,9 +229,9 @@ describe('planBreakdown', () => {
 		const p = plan(WITH_ASSETS, { addAssets: false });
 		expect(p.assetsToAdd).toEqual([]);
 		expect(p.add[0].assetIds).toEqual([]);
-		expect(p.issues.filter((i) => i.message.includes('not in the request')).map((i) => i.message)).toEqual([
-			'Row 2, ep01_sh010: Dragon and Castle are not in the request. Not linked.',
-			'Row 3, ep01_sh020: castle and Banner are not in the request. Not linked.'
+		expect(p.issues.filter((i) => i.message.includes('not in the bid')).map((i) => i.message)).toEqual([
+			'Row 2, ep01_sh010: Dragon and Castle are not in the bid. Not linked.',
+			'Row 3, ep01_sh020: castle and Banner are not in the bid. Not linked.'
 		]);
 	});
 

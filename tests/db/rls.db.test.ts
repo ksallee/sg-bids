@@ -8,7 +8,8 @@ import type { TransactionSql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ALL_TABLES } from '$lib/pure/access';
 import { createComparison } from '$lib/server/comparison';
-import { draft, draftIn, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
+import { createProductionBids } from '$lib/server/production-bids';
+import { draft, draftIn, header, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
 
 const sql = superuser();
 const PUBLIC_ROLES: Role[] = ['anon', 'authenticated'];
@@ -16,6 +17,8 @@ const PUBLIC_ROLES: Role[] = ['anon', 'authenticated'];
 /** A row's worth of plausible values per table, for the insert attempts. */
 type Table = (typeof ALL_TABLES)[number];
 const SAMPLE: Record<Table, Record<string, unknown>> = {
+	production_bids: { site_host: 'x.example.com', project_id: 1, name: 'B' },
+	production_bid_items: { bid_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, kind: 'shot', key: 'k', code: 'K' },
 	bid_requests: { site_host: 'x.example.com', project_id: 1, code: 'X', base_currency: 'USD' },
 	request_items: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, kind: 'shot', key: 'k', code: 'K' },
 	request_packages: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, key: 'p', name: 'P' },
@@ -59,6 +62,9 @@ beforeAll(async () => {
 	// A deleted request, so a withdrawn link is kept.
 	const gone = await issuedWithTwoVendors();
 	await gone.s.deleteRequest(gone.production, gone.request.id, 'BR-1');
+	// A production bid with a row, in a draft request.
+	const made = await createProductionBids(rest('service_role')).save(production, { id: null, name: 'SEQ010', shots: [{ id: 'sh900', code: 'SH900', omitted: false, assetIds: [] }], assets: [] });
+	await s.createDraftRequest(production, { code: 'BR-BIDS', header: header(), bids: [made.bid.id] });
 });
 
 afterAll(async () => {
@@ -205,7 +211,14 @@ describe.each(PUBLIC_ROLES)('through PostgREST as %s', (role) => {
 				p_costs_left_out: []
 			}),
 			client.rpc('sg_choose_scenario', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_scenario_id: null }),
-			client.rpc('sg_delete_request', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 })
+			client.rpc('sg_delete_request', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_save_production_bid', { p_bid_id: null, p_site_host: 'x.example.com', p_project_id: 1, p_name: 'x', p_items: [] }),
+			client.rpc('sg_clone_production_bid', { p_bid_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_delete_production_bid', { p_bid_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_move_bid_rows', { p_from: '00000000-0000-0000-0000-000000000000', p_to: '00000000-0000-0000-0000-000000000001', p_site_host: 'x', p_project_id: 1, p_rows: [], p_move: false }),
+			client.rpc('sg_set_request_bids', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_bid_ids: [] }),
+			client.rpc('sg_issue_request', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_links: [] }),
+			client.rpc('sg_bids_first_convert', {})
 		];
 		for (const call of await Promise.all(calls)) expect(call.error).not.toBeNull();
 		expect(await snapshot()).toEqual(before);

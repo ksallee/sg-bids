@@ -56,23 +56,23 @@ const placeList = `${places.slice(0, -1).join(', ')} and ${places.at(-1)}`;
 
 export const HOME = {
 	h1: 'VFX bidding for Flow Production Tracking.',
-	lead: 'sg-bids is a free, open source web app that runs VFX bid rounds for Flow Production Tracking (formerly ShotGrid). Production builds a bid request from its Shots and Assets, or from a breakdown before they exist, vendors answer through a link, and the award is written back to Flow PT.',
+	lead: 'sg-bids is a free, open source web app that runs VFX bid rounds for Flow Production Tracking (formerly ShotGrid). Production builds bids from its Shots and Assets, or from a breakdown before they exist, sends one or several in a request to competing vendors, vendors answer through a link, and the award is written back to Flow PT.',
 	steps: [
-		'Build a bid request from your Shots and Assets in Flow PT, or from a breakdown.',
-		'Vendors answer through a link. They need no Flow PT account.',
-		'Compare the bids shot by shot, in one currency.',
+		'Build bids from your Shots and Assets in Flow PT, or from a breakdown. Clone one to start the next.',
+		'Send one or several bids in a request. Each vendor gets a link and needs no Flow PT account.',
+		'Compare the answers shot by shot, in one currency.',
 		'Award, and the award is written to Flow PT.'
 	],
 	questions: [
 		{
 			id: 'what',
 			q: 'What is sg-bids?',
-			a: 'A web app for the bid round of a VFX show. Production sends a request built from Flow PT, vendors bid through a link, and production compares the bids and awards them to Flow PT.',
+			a: 'A web app for the bid round of a VFX show. Production builds bids from Flow PT and sends them in a request, vendors answer through a link, and production compares the answers and awards them to Flow PT.',
 			list: [
-				'Bid requests from your Shots and Assets, or from a pasted breakdown, frozen when issued. A change is a new round.',
-				'Packages: named groups of rows, one per sequence to start with. Invite a vendor to every package or to some.',
-				'One link per vendor. The vendor needs no Flow PT account.',
-				'Bids shot by shot or one figure per package, with costs, discount, tax and rebate splits, in versions.',
+				'Bids: named sets of Shots, Assets or rows of a pasted breakdown. Always editable, and cloned to start the next one.',
+				'Requests made from one or several bids, copied when issued. A bid can change and go out again without touching what went out.',
+				'One link per vendor. The vendor needs no Flow PT account. Invite a vendor to every bid of a request or to some.',
+				'Answers row by row or one figure per bid, with costs, discount, tax and rebate splits given once, in versions.',
 				'A comparison in one currency, award scenarios, and CSV exports.',
 				'The award written to Flow PT after a preview of every write, with an undo.'
 			]
@@ -99,7 +99,7 @@ export const HOME = {
 		{
 			id: 'demo',
 			q: 'Can I use this hosted copy for real bids?',
-			a: 'No. It is a demo, and bids hold shot lists and prices, so a studio runs its own copy.'
+			a: 'No. It is a demo, and bids and answers hold shot lists and prices, so a studio runs its own copy.'
 		}
 	] satisfies readonly Question[]
 } as const;
@@ -113,33 +113,33 @@ export interface Step {
 
 export const HOW = {
 	h1: 'How it works',
-	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is written from your own session: when you edit a row of a draft in a column fed by Flow PT, when you create a field from the mapping, and at the award.',
+	lead: 'sg-bids runs a VFX bid round for Flow Production Tracking (formerly ShotGrid) in five steps. Four of them live in the app. Flow PT is written from your own session: when you edit a row of a bid in a column fed by Flow PT, when you create a field from the mapping, and at the award.',
 	steps: {
 		id: 'steps',
 		q: 'What are the steps of a bid round?',
-		a: 'Build a request, invite vendors, let them bid, compare, and publish the award. Flow PT is read in the first two steps, and written when you edit a draft’s row in a column fed by Flow PT and at the award.',
+		a: 'Build bids, send them in a request, let vendors answer, compare, and publish the award. Flow PT is read in the first two steps, and written when you edit a bid’s row in a column fed by Flow PT and at the award.',
 		items: [
 			{
-				title: 'Build a request',
-				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. A draft shows the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit, the package and breakdown rows stay in the request. Each row sits in a package, its sequence’s to start with. Rename, add, duplicate or delete packages, and move rows between them. Issuing freezes what you see.',
-				app: 'The draft, and the frozen copy once it is issued.',
+				title: 'Build bids',
+				line: 'Pick Shots and Assets in Flow PT, or paste a breakdown when they are not in Flow PT yet. A bid shows the live values from Flow PT. Editing a row in a column fed by Flow PT changes Flow PT; the note to vendors, omit and breakdown rows stay in the bid. Clone a bid to start the next one, or move rows from one bid to another.',
+				app: 'Your bids, always editable.',
 				fpt: { kind: 'write', text: 'Reads Shots, Assets and their fields. Writes a field of a Shot or Asset when you edit it in a draft, with Undo. Creates a field only when you ask, from the mapping.' }
 			},
 			{
-				title: 'Invite vendors',
-				line: 'Each vendor gets a link. Name its Flow PT Group if it has one. The award uses it. Invite it to every package or to some: it sees the rows of its packages and nothing else.',
-				app: 'The invitations. Only a hash of each link.',
+				title: 'Send a request',
+				line: 'Tick one or several bids, then set what they share: title, due date, currency, terms and material. Add the vendors, each invited to every bid or to some: it sees the rows of its bids and nothing else. Name a vendor’s Flow PT Group if it has one: the award uses it. Issuing copies each bid as it is, and gives each vendor its link. A bid edited later changes nothing that went out.',
+				app: 'The request, its frozen copy of the bids, and the invitations. Only a hash of each link.',
 				fpt: { kind: 'read', text: 'Reads Groups, to pick one.' }
 			},
 			{
-				title: 'Vendors bid',
-				line: 'A vendor opens its link and bids in its own currency. It needs no Flow PT account. Per package it bids row by row, gives one figure for the whole package, or does not bid.',
-				app: 'Each bid, its lines, costs, rebates and versions.',
+				title: 'Vendors answer',
+				line: 'A vendor opens its link and answers in its own currency. It needs no Flow PT account. Per bid it prices row by row, gives one figure for the whole bid, or does not bid. Overhead, discount, tax and rebates are given once.',
+				app: 'Each answer, its lines, costs, rebates and versions.',
 				fpt: { kind: 'none', text: 'Nothing. Vendors never reach Flow PT through the app.' }
 			},
 			{
 				title: 'Compare',
-				line: 'See the bids shot by shot in one currency, and package by package. Set a rate per bid. Build award scenarios and mark one as chosen. A package priced as one figure goes to its vendor whole or not at all.',
+				line: 'See the answers shot by shot in one currency, and bid by bid. Set a rate per answer. Build award scenarios and mark one as chosen. A bid priced as one figure goes to its vendor whole or not at all.',
 				app: 'The rates and the scenarios.',
 				fpt: { kind: 'none', text: 'Nothing.' }
 			},
@@ -153,43 +153,43 @@ export const HOW = {
 	},
 	vendors: {
 		id: 'vendors',
-		q: 'How do vendors bid without a Flow PT account?',
-		a: 'Each vendor gets its own link to the app. It opens the link and bids there in its own currency, and never reaches Flow PT through the app.',
+		q: 'How do vendors answer without a Flow PT account?',
+		a: 'Each vendor gets its own link to the app. It opens the link and answers there in its own currency, and never reaches Flow PT through the app.',
 		list: [
 			'The link holds a random token. The app keeps only its hash.',
-			`A link lasts ${LINK_DAYS} days unless production sets another date. Production can revoke it, or send a new link that replaces it. The bid is kept.`,
-			'A vendor saves a draft, then submits it. It can withdraw a submitted bid or send a new version.',
+			`A link lasts ${LINK_DAYS} days unless production sets another date. Production can revoke it, or send a new link that replaces it. The answer is kept.`,
+			'A vendor saves a draft, then submits it. It can withdraw a submitted answer or send a new version.',
 			'A vendor can discard a draft. A new version it discards leaves the last submitted one in place.',
 			'Prices can be pasted from a spreadsheet: a column of prices, or rows of code and price.',
-				'A vendor invited to some packages sees their rows alone. Per package it prices each row, gives one figure for the package, or marks it Not bidding.'
+			'A vendor invited to some bids of a request sees their rows alone. Per bid it prices each row, gives one figure for the bid, or marks it Not bidding.'
 		]
 	} satisfies Question,
 	written: {
 		id: 'written',
 		q: 'What gets written to Flow PT?',
-		a: 'The award, from your own Flow PT session, after a preview of every write, and the fields an Admin creates for it from the publish page. While you build a request, an edit to a row in a column fed by Flow PT, and a field you create from the mapping.',
+		a: 'The award, from your own Flow PT session, after a preview of every write, and the fields an Admin creates for it from the publish page. While you build a bid, an edit to a row in a column fed by Flow PT, and a field you create from the mapping.',
 		list: [
-			'While you build a request, the field of a Shot or Asset behind a column marked Live in Flow PT, when you edit it. Several selected rows change together after a confirm. Each edit offers Undo, which leaves a value someone changed in Flow PT since.',
-			'One Bid per package each awarded vendor bid on, named with the package, and one General costs Bid with its non-shot costs, discount, tax and rebate. A vendor’s Bids add up to its bid. A request without packages keeps one Bid per vendor. With the switch "every line of every bid" on, the Bids of every vendor that bid.',
-			'One Bid Line per awarded Shot or Asset, under its package’s Bid. A package priced as one figure has its figure on its Bid, and its Bid Lines carry no amount. With the switch on, one per line of every bid.',
+			'While you build a bid, the field of a Shot or Asset behind a column marked Live in Flow PT, when you edit it. Several selected rows change together after a confirm. Each edit offers Undo, which leaves a value someone changed in Flow PT since.',
+			'One Bid in Flow PT per bid of the request each awarded vendor answered, named with that bid, and one General costs Bid with its non-shot costs, discount, tax and rebate. A vendor’s Bids add up to its answer. A request made before bids came first keeps one Bid per vendor. With the switch "every line of every bid" on, the Bids of every vendor that answered.',
+			'One Bid Line per awarded Shot or Asset, under its Bid. A bid priced as one figure has its figure on its Bid, and its Bid Lines carry no amount. With the switch on, one per line of every answer.',
 			'The vendor’s Group, added to the vendor groups field (sg_vendor_groups) of each Shot and Asset it wins.',
 			'For rows from a breakdown, the Shots and Assets you choose to create: the code, the description and the mapped fields that hold a value. Or none, and their Bid Lines carry no Shot or Asset.',
-			'While you build a request, a field on Shot or Asset, when you create one from the mapping.'
+			'While you build a bid, a field on Shot or Asset, when you create one from the mapping.'
 		],
 		note: 'Nothing else on a Shot or an Asset changes. Undo takes back exactly what the award wrote. It removes the Groups it added and deletes the rows it created, unless a Shot or Asset it created has since gained Tasks, Versions or other links. That one stays, and the app says so. A field created from the mapping stays.'
 	} satisfies Question,
 	stays: {
 		id: 'stays',
 		q: 'What stays in the app?',
-		a: 'Everything else: the requests, the bids and the comparison. The app keeps it in its own database, and only its server reads it.',
-		list: ['The request and its frozen Shots and Assets.', 'The invitations.', 'Every bid with its lines, costs, rebates and versions.', 'The rates and the scenarios.', 'The award record.'],
-		note: 'Production can delete a request with all of it. A draft goes after one confirm. An issued request asks for its code first, and its vendors’ links then say the request was withdrawn. While the award is in Flow PT, undo it first. Deleting writes nothing to Flow PT and cannot be undone.'
+		a: 'Everything else: the bids, the requests, the answers and the comparison. The app keeps it in its own database, and only its server reads it.',
+		list: ['Your bids, with their rows.', 'The request and its frozen copy of the bids.', 'The invitations.', 'Every answer with its lines, costs, rebates and versions.', 'The rates and the scenarios.', 'The award record.'],
+		note: 'Production can delete a request with all of it. A draft goes after one confirm. An issued request asks for its code first, and its vendors’ links then say the request was withdrawn. While the award is in Flow PT, undo it first. Deleting a bid takes it out of its draft requests and leaves the requests it went out in as they were. Deleting writes nothing to Flow PT and cannot be undone.'
 	} satisfies Question,
 	see: {
 		id: 'see',
 		q: 'What can vendors see?',
-		a: 'A vendor sees its own bid and the request as it was frozen. It never sees another vendor, another vendor’s prices, or a Flow PT id.',
-		can: ['Its own bid, in the app, through its link.', 'The request as it was frozen.', 'In Flow PT, with a login: the Shots and Assets its Group was given.'],
+		a: 'A vendor sees its own answer and the request as it was frozen. It never sees another vendor, another vendor’s prices, or a Flow PT id.',
+		can: ['Its own answer, in the app, through its link.', 'The request as it was frozen: the bids it is invited to.', 'In Flow PT, with a login: the Shots and Assets its Group was given.'],
 		cannot: ['Another vendor, or another vendor’s prices.', 'Any Flow PT id, in the app.', 'Bid and Bid Line in Flow PT, once an admin sets the Vendor role as below.'],
 		warning: {
 			title: 'Bid and Bid Line must be hidden from the Vendor role.',
@@ -199,14 +199,14 @@ export const HOW = {
 	money: {
 		id: 'money',
 		q: 'Does it handle several currencies and tax rebates?',
-		a: 'Yes. Each vendor bids in its own currency, and production compares every bid in the request’s base currency at a rate it sets per bid, with its date.',
+		a: 'Yes. Each vendor answers in its own currency, and production compares every answer in the request’s base currency at a rate it sets per answer, with its date.',
 		list: [
 			`A request can be based in any of ${CURRENCIES.length} ISO 4217 currencies.`,
-			'Amounts are whole minor units, never floating point. A bid without a rate shows in its own currency and says it needs one.',
+			'Amounts are whole minor units, never floating point. An answer without a rate shows in its own currency and says it needs one.',
 			'The rate is locked once the request has an award.',
-			'A bid can carry rebate splits by place: the share of the work, the rate, and the base (all of it, labour, or a percent of the contract).',
-			`Default rates are filled in for ${places.length} places: ${placeList}. They can be changed per bid.`,
-			'The comparison shows each bid’s rebate and its total after rebate. A rebate is always an estimate.'
+			'An answer can carry rebate splits by place: the share of the work, the rate, and the base (all of it, labour, or a percent of the contract).',
+			`Default rates are filled in for ${places.length} places: ${placeList}. They can be changed per answer.`,
+			'The comparison shows each answer’s rebate and its total after rebate. A rebate is always an estimate.'
 		]
 	} satisfies Question,
 	admin: {

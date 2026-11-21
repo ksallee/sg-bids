@@ -3,7 +3,7 @@
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
-	"description": "VFX bidding for Flow Production Tracking: bid requests, vendor answers through a link, compare, award. Built on sg-widgets.",
+	"description": "VFX bidding for Flow Production Tracking: bids, requests to vendors, answers through a link, compare, award. Built on sg-widgets.",
 	"engines": {
 		"node": ">=22 <25"
 	},

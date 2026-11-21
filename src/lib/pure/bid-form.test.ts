@@ -484,7 +484,7 @@ describe('a package priced as one figure', () => {
 		const form = setBidding(setBidding(emptyForm(packed, TODAY), 'p1', false), 'p2', false);
 		const { problems, blockers } = formToDraft(form, '.', names);
 		expect(problems.map((p) => p.key)).toEqual(['bidding']);
-		expect(blockers).toEqual(['Bid on one package at least.']);
+		expect(blockers).toEqual(['Answer one bid at least.']);
 	});
 
 	it('says what not bidding would clear, clears it, and reads a declined package back', () => {

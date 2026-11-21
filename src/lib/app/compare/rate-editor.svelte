@@ -91,7 +91,7 @@
 			>
 				<div class="flex flex-col gap-1">
 					<p class="text-sm font-semibold">Rate to {base}</p>
-					<p class="text-muted-foreground text-xs">Every {currency} figure of this bid converts at this rate. You can change it until the award.</p>
+					<p class="text-muted-foreground text-xs">Every {currency} figure of this answer converts at this rate. You can change it until the award.</p>
 				</div>
 				<label class="flex flex-col gap-1 text-xs" for={`${uid}-rate`}>
 					<span class="text-muted-foreground">1 {currency} in {base}</span>

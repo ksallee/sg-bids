@@ -5,14 +5,17 @@
  * without naming. Nothing but a project stops a save (`persist.savable` makes the code when it is
  * blank). The issue needs what `header.REQUIRED` names and one Shot or Asset still in. A due date
  * in the past is a warning while the draft is worked on and an error at issue.
+ *
+ * A request made from bids (`send`) needs a bid, no row in two of its bids, a vendor, and a bid for
+ * each vendor; its rows are its bids', so a problem with them points at the bids.
  */
 
 import { OPTIONAL_GROUPS, checkHeader, LABELS, type FieldProblem, type HeaderForm, type Stage } from './header';
 import type { Day, Id } from './model';
 import type { BuilderState } from './request';
 
-/** What a problem points at: a header field, the project, or the picked Shots and Assets. */
-export type Target = keyof HeaderForm | 'project' | 'items';
+/** What a problem points at: a header field, the project, the picked Shots and Assets, the request's bids or its vendors. */
+export type Target = keyof HeaderForm | 'project' | 'items' | 'bids' | 'vendors';
 
 export interface Problem {
 	readonly id: string;
@@ -42,10 +45,21 @@ export interface OtherRequest {
 	readonly round: number;
 }
 
+/** A request made from bids: what it takes beyond the header. */
+export interface SendFacts {
+	/** The bids it is made from, by name. */
+	readonly bids: readonly string[];
+	/** Rows in two of its bids: the code and the two bids' names. */
+	readonly overlaps: readonly { readonly code: string; readonly bids: readonly [string, string] }[];
+	/** The vendors added, each with how many of the bids it is invited to. */
+	readonly vendors: readonly { readonly name: string; readonly bids: number }[];
+}
+
 export interface ReadinessInput {
 	readonly state: BuilderState;
 	readonly today: Day;
 	readonly others?: readonly OtherRequest[];
+	readonly send?: SendFacts;
 }
 
 export interface Readiness {
@@ -94,13 +108,32 @@ function problemsAt(input: ReadinessInput, stage: Stage): Problem[] {
 	}
 	out.push(...header);
 
-	const items = [...state.shots, ...state.assets];
-	if (items.length === 0) out.push({ id: 'items', target: 'items', label: ITEMS_LABEL, tone: 'error', missing: true, short: 'none picked', message: 'Pick at least one shot or asset.' });
-	else if (items.every((item) => item.omitted)) {
-		out.push({ id: 'items', target: 'items', label: ITEMS_LABEL, tone: 'error', missing: false, short: 'every one is omitted', message: 'Every picked item is omitted. Bring one back.' });
+	const send = input.send;
+	if (send && send.bids.length === 0) {
+		out.push({ id: 'bids', target: 'bids', label: BIDS_LABEL, tone: 'error', missing: true, short: 'none picked', message: 'Pick at least one bid.' });
+	} else {
+		const target: Target = send ? 'bids' : 'items';
+		const items = [...state.shots, ...state.assets];
+		if (items.length === 0) out.push({ id: 'items', target, label: ITEMS_LABEL, tone: 'error', missing: true, short: 'none picked', message: send ? 'The bids hold no shot or asset. Add rows to a bid.' : 'Pick at least one shot or asset.' });
+		else if (items.every((item) => item.omitted)) {
+			out.push({ id: 'items', target, label: ITEMS_LABEL, tone: 'error', missing: false, short: 'every one is omitted', message: send ? 'Every row of the bids is omitted. Bring one back in its bid.' : 'Every picked item is omitted. Bring one back.' });
+		}
+	}
+	if (send) {
+		const twice = send.overlaps[0];
+		if (twice) {
+			const more = send.overlaps.length > 1 ? ` And ${send.overlaps.length - 1} more.` : '';
+			out.push({ id: 'overlaps', target: 'bids', label: BIDS_LABEL, tone: 'error', missing: false, short: `${twice.code} is in two bids`, message: `${twice.code} is in ${twice.bids[0]} and in ${twice.bids[1]}. A request takes each row once.${more}` });
+		}
+		if (send.vendors.length === 0) out.push({ id: 'vendors', target: 'vendors', label: VENDORS_LABEL, tone: 'error', missing: true, short: 'none added', message: 'Add a vendor to send the request to.' });
+		const none = send.vendors.find((v) => v.bids === 0);
+		if (none) out.push({ id: 'vendor-bids', target: 'vendors', label: VENDORS_LABEL, tone: 'error', missing: false, short: `${none.name} has no bid`, message: `${none.name} is invited to no bid of the request. Pick its bids.` });
 	}
 	return out;
 }
+
+const BIDS_LABEL = 'Bids';
+const VENDORS_LABEL = 'Vendors';
 
 const stateOf = (p: Problem): ChecklistLine['state'] => (p.missing ? 'todo' : p.tone);
 
@@ -118,11 +151,23 @@ export function readiness(input: ReadinessInput): Readiness {
 	const shots = state.shots.filter((s) => !s.omitted).length;
 	const assets = state.assets.filter((a) => !a.omitted).length;
 	const counted = [shots > 0 ? plural(shots, 'shot') : '', assets > 0 ? plural(assets, 'asset') : ''].filter(Boolean).join(', ');
+	const send = input.send;
+	const listed = new Set<string>(send ? ['bids', 'vendors', 'items', 'project'] : ['items', 'project']);
+	const byId = new Map(problems.map((p) => [p.id, p]));
+	const lineOf = (id: string, key: Target, label: string, detail: string): ChecklistLine => {
+		const p = byId.get(id);
+		return p ? { key: id, label, state: stateOf(p), detail: p.short, target: key } : { key: id, label, state: 'done', detail, target: key };
+	};
 	const checklist: ChecklistLine[] = [
 		...CHECKED.map((field) => line(field, LABELS[field], state.form[field].trim())),
-		line('items', ITEMS_LABEL, counted),
+		...(send
+			? [
+					lineOf(send.bids.length === 0 ? 'bids' : byId.has('overlaps') ? 'overlaps' : 'items', 'bids', BIDS_LABEL, [plural(send.bids.length, 'bid'), counted].filter(Boolean).join(': ')),
+					lineOf(byId.has('vendors') ? 'vendors' : 'vendor-bids', 'vendors', VENDORS_LABEL, plural(send.vendors.length, 'vendor'))
+				]
+			: [line('items', ITEMS_LABEL, counted)]),
 		...problems
-			.filter((p) => p.target !== 'items' && p.target !== 'project' && !CHECKED.includes(p.target as keyof HeaderForm))
+			.filter((p) => !listed.has(p.target) && !CHECKED.includes(p.target as keyof HeaderForm))
 			.map((p): ChecklistLine => ({ key: p.id, label: p.label, state: stateOf(p), detail: p.short, target: p.target }))
 	];
 	return { problems, toIssue, canSave: state.project !== null, canIssue: toIssue.length === 0, checklist };

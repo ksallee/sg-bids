@@ -25,7 +25,7 @@
 			{#if readOnly}<span class="text-sm">{form.number || 'None'}</span>{:else}<Input id="terms-number" bind:value={form.number} placeholder="Quote number" />{/if}
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<FieldLabel for={readOnly ? undefined : vendorControlId('date')} required={!readOnly}>Bid date</FieldLabel>
+			<FieldLabel for={readOnly ? undefined : vendorControlId('date')} required={!readOnly}>Date</FieldLabel>
 			{#if readOnly}<span class="text-sm">{form.date ? day(form.date) : 'None'}</span>{:else}<Input id={vendorControlId('date')} type="date" bind:value={form.date} aria-required="true" aria-invalid={!!errors.date} />{/if}
 			{#if errors.date}<p class="text-destructive text-xs">{errors.date}</p>{/if}
 		</div>
@@ -81,11 +81,11 @@
 
 	<div class="grid gap-4 md:grid-cols-2">
 		<div class="flex flex-col gap-1.5">
-			<FieldLabel for={readOnly ? undefined : 'terms-assumes'}>What the bid assumes</FieldLabel>
+			<FieldLabel for={readOnly ? undefined : 'terms-assumes'}>What your answer assumes</FieldLabel>
 			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.assumptions || 'Nothing written.'}</p>{:else}<textarea id="terms-assumes" bind:value={form.assumptions} rows="4" class={area} aria-describedby="terms-assumes-hint"></textarea><span id="terms-assumes-hint" class="text-muted-foreground text-xs">One per line.</span>{/if}
 		</div>
 		<div class="flex flex-col gap-1.5">
-			<FieldLabel for={readOnly ? undefined : 'terms-leaves'}>What the bid leaves out</FieldLabel>
+			<FieldLabel for={readOnly ? undefined : 'terms-leaves'}>What your answer leaves out</FieldLabel>
 			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.exclusions || 'Nothing written.'}</p>{:else}<textarea id="terms-leaves" bind:value={form.exclusions} rows="4" class={area} aria-describedby="terms-leaves-hint"></textarea><span id="terms-leaves-hint" class="text-muted-foreground text-xs">One per line.</span>{/if}
 		</div>
 	</div>

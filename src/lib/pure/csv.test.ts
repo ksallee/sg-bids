@@ -121,14 +121,14 @@ describe('packages in the CSV', () => {
 
 	it('says in package price on a row, and gives the package as a unit', () => {
 		const lines = gridCsv(grid, groupRows(grid, 'package'), names).split('\r\n');
-		expect(lines).toContain('Creature,shot,A,,,,,in package price,300.00,300.00,lowest,B Studio,');
-		expect(lines).toContain('Packages,package,Creature,,,1000.00,1000.00,one figure,900.00,900.00,rows summed,B Studio,11.11');
+		expect(lines).toContain("Creature,shot,A,,,,,in the bid's figure,300.00,300.00,lowest,B Studio,");
+		expect(lines).toContain('Bids,bid,Creature,,,1000.00,1000.00,one figure,900.00,900.00,rows summed,B Studio,11.11');
 	});
 
 	it('writes the figure once for a package given whole', () => {
 		const picks = pickCell(grid, new Map(), grid.rows[0], 0);
 		const lines = scenarioCsv(grid, 'Packages', picks, summarize(grid, picks), names).split('\r\n');
-		expect(lines).toContain('shot,A,,A Studio,100,,USD,,in package price');
-		expect(lines).toContain('package,Creature,,A Studio,100,1000.00,USD,1000.00,one figure for the package');
+		expect(lines).toContain("shot,A,,A Studio,100,,USD,,in the bid's figure");
+		expect(lines).toContain('bid,Creature,,A Studio,100,1000.00,USD,1000.00,one figure for the bid');
 	});
 });

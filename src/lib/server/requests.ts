@@ -38,7 +38,7 @@ export interface InvitationView {
 	readonly createdAt: string;
 }
 
-const INVITATION_FACTS = 'id, request_id, expires_at, revoked_at, last_opened_at';
+const INVITATION_FACTS = 'id, request_id, expires_at, revoked_at, last_opened_at, link_pending';
 const INVITATION_COLUMNS = `${INVITATION_FACTS}, vendor_name, vendor_group_id, contact_email, details, package_keys, created_at`;
 const BID_FACTS = 'invitation_id, request_id, version, status, submitted_at, withdrawn_at';
 

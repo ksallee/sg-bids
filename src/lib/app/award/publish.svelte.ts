@@ -158,7 +158,7 @@ export class PublishState {
 				requestCode: data.code,
 				allLines: this.allLines,
 				groups: g.groups,
-				appLinks: Object.fromEntries(g.bids.map((b) => [b.id, `${location.origin}/bids/${data.request.id}/compare`]))
+				appLinks: Object.fromEntries(g.bids.map((b) => [b.id, `${location.origin}/requests/${data.request.id}/compare`]))
 			}
 		};
 	}

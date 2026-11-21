@@ -20,7 +20,7 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Check from '@lucide/svelte/icons/check';
-	import Package from '@lucide/svelte/icons/package';
+	import Layers from '@lucide/svelte/icons/layers';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
 	import Info from '@lucide/svelte/icons/info';
 	import UserRoundCheck from '@lucide/svelte/icons/user-round-check';
@@ -155,7 +155,7 @@
 		if (cell.kind === 'excluded') return `${row.label}, ${vendor}: excluded`;
 		if (cell.kind === 'missing') return `${row.label}, ${vendor}: not bid`;
 		if (cell.kind === 'package') return `${row.label}, ${vendor}: in the package price${picked}`;
-		if (cell.kind === 'declined') return `${row.label}, ${vendor}: not bidding on this package`;
+		if (cell.kind === 'declined') return `${row.label}, ${vendor}: not bidding on this bid`;
 		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}, needs a rate${picked}`;
 		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
 	}
@@ -195,7 +195,7 @@
 	class="group/grid relative min-h-0 flex-1 overflow-auto outline-none"
 	role="grid"
 	tabindex="0"
-	aria-label="Bids side by side"
+	aria-label="Answers side by side"
 	aria-rowcount={display.length}
 	aria-colcount={columns.length + 1}
 	aria-activedescendant={display.length ? cellId(cursor.r, cursor.c) : undefined}
@@ -349,7 +349,7 @@
 							>
 								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
 								<span class="text-muted-foreground flex items-center gap-1.5 text-[11px] tabular-nums">
-									{#if unit.kind === 'package'}<Package class="size-3" aria-hidden="true" />{/if}
+									{#if unit.kind === 'package'}<Layers class="size-3" aria-hidden="true" />{/if}
 									<span>{text.note}</span>
 									{#if lowest}
 										<span class="text-success inline-flex items-center gap-1 font-medium"><span class="bg-success size-1.5 rounded-full"></span>Lowest</span>
@@ -368,7 +368,7 @@
 								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
 								{#if sub.excluded || sub.missing || sub.inPackage || sub.declined}
 									<span class="text-muted-foreground text-[11px] tabular-nums">
-										{[sub.inPackage ? `${sub.inPackage} in a package price` : '', sub.declined ? `${sub.declined} not bidding` : '', sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
+										{[sub.inPackage ? `${sub.inPackage} in a bid's figure` : '', sub.declined ? `${sub.declined} not bidding` : '', sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
 									</span>
 								{/if}
 							</div>
@@ -465,8 +465,8 @@
 									</span>
 								{/if}
 							{:else if cell.kind === 'package'}
-								<span class="text-muted-foreground flex items-center gap-1.5 text-xs" title="This vendor priced the whole package as one figure. It is awarded whole or not at all.">
-									<Package class="size-3.5" aria-hidden="true" />In package price
+								<span class="text-muted-foreground flex items-center gap-1.5 text-xs" title="This vendor priced the whole bid as one figure. It is awarded whole or not at all.">
+									<Layers class="size-3.5" aria-hidden="true" />In the bid's figure
 								</span>
 								{#if share !== undefined}
 									<span class="bg-primary text-primary-foreground absolute top-1 left-1.5 inline-flex h-4 items-center gap-0.5 rounded px-1 text-[10px] font-medium">
@@ -474,7 +474,7 @@
 									</span>
 								{/if}
 							{:else if cell.kind === 'declined'}
-								<span class="text-muted-foreground text-xs" title="This vendor is not bidding on this package. It cannot be awarded to it.">Not bidding</span>
+								<span class="text-muted-foreground text-xs" title="This vendor is not bidding on this bid. It cannot be awarded to it.">Not bidding</span>
 							{:else if cell.kind === 'excluded'}
 								<span class="bg-card/80 text-muted-foreground rounded px-1 text-xs">Excluded</span>
 							{:else}

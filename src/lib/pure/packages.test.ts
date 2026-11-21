@@ -1,24 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
 import { money, rate } from './money';
-import {
-	addPackage,
-	ALL_PACKAGE,
-	allocate,
-	deletePackage,
-	duplicatePackage,
-	invitedPackages,
-	lineAmounts,
-	moveRows,
-	nameProblem,
-	packageProblems,
-	packageStats,
-	partialPackagePicks,
-	renamePackage,
-	resolvePackages,
-	visibleRows,
-	withDefaults
-} from './packages';
+import { ALL_PACKAGE, allocate, invitedPackages, lineAmounts, packageProblems, packageStats, partialPackagePicks, resolvePackages, visibleRows, withDefaults } from './packages';
 
 const usd = (minor: number) => money(minor, 'USD');
 
@@ -98,78 +81,9 @@ describe('resolvePackages', () => {
 	});
 });
 
-describe('package edits', () => {
-	const base = withDefaults({
-		shots: [shot('a', { sequence: 'S1', frames: 10 }), shot('b', { sequence: 'S1', frames: 20 }), shot('c', { sequence: 'S2' })],
-		assets: [asset('x')],
-		packages: []
-	});
-
-	it('adds a package by a name not taken', () => {
-		const added = addPackage(base, ' Creature ', 'pkg:1');
-		expect(added.ok && added.rows.packages.at(-1)).toEqual({ id: 'pkg:1', name: 'Creature' });
-		expect(addPackage(base, 's1', 'pkg:2')).toEqual({ ok: false, message: 'Another package is named S1.' });
-		expect(addPackage(base, '  ', 'pkg:3')).toEqual({ ok: false, message: 'Name the package.' });
-	});
-
-	it('duplicates a package: a copy right after it, no rows', () => {
-		const copied = duplicatePackage(base, 'seq:S1', 'pkg:9');
-		expect(copied.ok && copied.rows.packages.slice(0, 2)).toEqual([
-			{ id: 'seq:S1', name: 'S1' },
-			{ id: 'pkg:9', name: 'S1 copy' }
-		]);
-		expect(copied.ok && copied.rows.shots.every((s) => s.package !== 'pkg:9')).toBe(true);
-		if (!copied.ok) throw new Error(copied.message);
-		const again = duplicatePackage(copied.rows, 'seq:S1', 'pkg:10');
-		expect(again.ok && again.rows.packages[1].name).toBe('S1 copy 2');
-	});
-
-	it('renames, refusing a name another package has', () => {
-		const renamed = renamePackage(base, 'seq:S1', 'Opening');
-		expect(renamed.ok && renamed.rows.packages[0]).toEqual({ id: 'seq:S1', name: 'Opening' });
-		expect(renamePackage(base, 'seq:S1', 'S2').ok).toBe(false);
-		expect(renamePackage(base, 'seq:S1', 'S1').ok).toBe(true);
-	});
-
-	it('moves rows to another package', () => {
-		const added = addPackage(base, 'Creature', 'pkg:1');
-		if (!added.ok) throw new Error(added.message);
-		const moved = moveRows(added.rows, [onShot('a'), onAsset('x')], 'pkg:1');
-		expect(moved.ok && moved.rows.shots.map((s) => s.package)).toEqual(['pkg:1', 'seq:S1', 'seq:S2']);
-		expect(moved.ok && moved.rows.assets[0].package).toBe('pkg:1');
-		expect(moveRows(base, [onShot('a')], 'pkg:none').ok).toBe(false);
-	});
-
-	it('deletes a package: its rows go back to their sequence, else to the catch-all of their kind', () => {
-		const added = addPackage(base, 'Creature', 'pkg:1');
-		if (!added.ok) throw new Error(added.message);
-		const moved = moveRows(added.rows, [onShot('a'), onShot('c'), onAsset('x')], 'pkg:1');
-		if (!moved.ok) throw new Error(moved.message);
-		const dropped = deletePackage(moved.rows, 'pkg:1');
-		expect(dropped.ok && dropped.rows.shots.map((s) => s.package)).toEqual(['seq:S1', 'seq:S1', 'seq:S2']);
-		expect(dropped.ok && dropped.rows.assets[0].package).toBe('assets');
-		expect(dropped.ok && dropped.rows.packages.map((p) => p.id)).toEqual(['seq:S1', 'seq:S2', 'assets']);
-	});
-
-	it('deletes a sequence package: its rows go to the catch-all, made when missing', () => {
-		const dropped = deletePackage(base, 'seq:S1');
-		expect(dropped.ok && dropped.rows.shots.map((s) => s.package)).toEqual(['shots', 'shots', 'seq:S2']);
-		expect(dropped.ok && dropped.rows.packages.map((p) => p.id)).toEqual(['seq:S2', 'assets', 'shots']);
-	});
-
-	it('refuses to delete a catch-all whose rows have nowhere else to go', () => {
-		expect(deletePackage(base, 'assets')).toEqual({ ok: false, message: 'Assets holds rows with nowhere else to go. Move them to another package first.' });
-		const emptyAssets = moveRows(base, [onAsset('x')], 'seq:S1');
-		if (!emptyAssets.ok) throw new Error(emptyAssets.message);
-		expect(deletePackage(emptyAssets.rows, 'assets').ok).toBe(true);
-	});
-
-	it('names a problem with a name', () => {
-		expect(nameProblem('x'.repeat(121), base.packages)).toBe('A package name is 120 characters at most.');
-		expect(nameProblem('Assets', base.packages, 'assets')).toBeNull();
-	});
-
+describe('packageStats', () => {
 	it('counts each package: live rows, omitted, frames', () => {
+		const base = withDefaults({ shots: [shot('a', { sequence: 'S1', frames: 10 }), shot('b', { sequence: 'S1', frames: 20 }), shot('c', { sequence: 'S2' })], assets: [asset('x')], packages: [] });
 		const stats = packageStats(request({ ...base, shots: base.shots.map((s) => (s.id === 'b' ? { ...s, omitted: true } : s)) }));
 		expect(stats.get('seq:S1')).toEqual({ rows: 1, omitted: 1, shots: 1, assets: 0, frames: 10, withoutFrames: 0 });
 		expect(stats.get('seq:S2')).toEqual({ rows: 1, omitted: 0, shots: 1, assets: 0, frames: 0, withoutFrames: 1 });
@@ -260,30 +174,30 @@ describe('packageProblems', () => {
 	it('names each break of the rules', () => {
 		expect(packageProblems(resolved, req, { lines: [covered[0]], packages: [{ package: 'p1', total: usd(9) }] })).toEqual(['Creature is priced as one figure. B has no line in it.']);
 		expect(packageProblems(resolved, req, { lines: [...covered, line('l3', onShot('d'), usd(0), { inPackage: true })], packages: [{ package: 'p1', total: usd(9) }] })).toEqual([
-			'D is omitted. It is not in a package price.'
+			"D is omitted. It is not in a bid's figure."
 		]);
 		expect(packageProblems(resolved, req, { lines: [covered[0], line('l2', onShot('b'), usd(4))], packages: [{ package: 'p1', total: usd(9) }] })).toEqual([
 			'B is in Creature, priced as one figure. It takes no price of its own.'
 		]);
-		expect(packageProblems(resolved, req, { lines: covered, packages: [] })).toEqual(['A is in a package price, but Creature has no one figure.', 'B is in a package price, but Creature has no one figure.']);
+		expect(packageProblems(resolved, req, { lines: covered, packages: [] })).toEqual(["A is in a bid's figure, but Creature has no one figure.", "B is in a bid's figure, but Creature has no one figure."]);
 		expect(packageProblems(resolved, req, { lines: covered, packages: [{ package: 'p1', total: usd(1) }, { package: 'p1', total: usd(2) }] })).toEqual(['Creature is priced twice.']);
-		expect(packageProblems(resolved, req, { lines: [], packages: [{ package: 'p9', total: usd(1) }] })).toEqual(['A package price names a package not in the request.']);
+		expect(packageProblems(resolved, req, { lines: [], packages: [{ package: 'p9', total: usd(1) }] })).toEqual(['A figure names a bid not in the request.']);
 	});
 
 	it('takes a package declined: no line and no figure in it, one package bid on at least', () => {
 		expect(packageProblems(resolved, req, { lines: [line('l3', onShot('c'), usd(5))], declined: ['p1'] })).toEqual([]);
 		expect(packageProblems(resolved, req, { lines: [line('l1', onShot('a'), usd(5))], declined: ['p1'] })).toEqual(['A is in Creature, which you are not bidding on. It takes no price.']);
 		expect(packageProblems(resolved, req, { lines: [], packages: [{ package: 'p1', total: usd(1) }], declined: ['p1'] })).toEqual([
-			'You are not bidding on Creature. It takes no price.'
+			'You are not bidding on Creature. It takes no figure.'
 		]);
-		expect(packageProblems(resolved, req, { lines: [], declined: ['p1', 'p2'] })).toEqual(['Bid on one package at least.']);
-		expect(packageProblems(resolved, req, { lines: [], declined: ['p9'] })).toEqual(['You are not bidding on a package that is not in the request.']);
+		expect(packageProblems(resolved, req, { lines: [], declined: ['p1', 'p2'] })).toEqual(['Answer one bid at least.']);
+		expect(packageProblems(resolved, req, { lines: [], declined: ['p9'] })).toEqual(['You are not bidding on a bid that is not in the request.']);
 		// Invited to Comp alone, declining it leaves nothing.
-		expect(packageProblems(resolved, req, { lines: [], declined: ['p2'] }, new Set(['p2']))).toEqual(['Bid on one package at least.']);
+		expect(packageProblems(resolved, req, { lines: [], declined: ['p2'] }, new Set(['p2']))).toEqual(['Answer one bid at least.']);
 	});
 
 	it('takes a package figure only within the packages a vendor may see', () => {
-		expect(packageProblems(resolved, req, { lines: [], packages: [{ package: 'p1', total: usd(1) }] }, new Set(['p2']))).toEqual(['A package price names a package not in the request.']);
+		expect(packageProblems(resolved, req, { lines: [], packages: [{ package: 'p1', total: usd(1) }] }, new Set(['p2']))).toEqual(['A figure names a bid not in the request.']);
 	});
 });
 

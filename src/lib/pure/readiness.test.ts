@@ -108,3 +108,41 @@ describe('controlId and foldOf', () => {
 		expect(foldOf('items')).toBeNull();
 	});
 });
+
+describe('readiness of a request made from bids', () => {
+	const send = { bids: ['SEQ010', 'Creature'], overlaps: [], vendors: [{ name: 'Vendor A', bids: 2 }] };
+
+	it('is ready with the header, a bid with a row in, and a vendor with a bid', () => {
+		const r = readiness({ state: state(), today: TODAY, send });
+		expect(r.problems).toEqual([]);
+		expect(r.canIssue).toBe(true);
+		expect(r.checklist.slice(4).map((l) => [l.label, l.state, l.detail])).toEqual([
+			['Bids', 'done', '2 bids: 1 shot'],
+			['Vendors', 'done', '1 vendor']
+		]);
+	});
+
+	it('wants a bid, a vendor, and a bid for each vendor, each pointing at its step', () => {
+		const r = readiness({ state: state({ shots: [] }), today: TODAY, send: { bids: [], overlaps: [], vendors: [{ name: 'Vendor B', bids: 0 }] } });
+		expect(r.problems.map((p) => [p.target, p.short])).toEqual([
+			['bids', 'none picked'],
+			['vendors', 'Vendor B has no bid']
+		]);
+		expect(readiness({ state: state(), today: TODAY, send: { ...send, vendors: [] } }).problems.map((p) => [p.target, p.message])).toEqual([['vendors', 'Add a vendor to send the request to.']]);
+	});
+
+	it('points rows with nothing in at the bids', () => {
+		const r = readiness({ state: state({ shots: [shot('s', { omitted: true })] }), today: TODAY, send });
+		expect(r.problems.map((p) => [p.target, p.message])).toEqual([['bids', 'Every row of the bids is omitted. Bring one back in its bid.']]);
+	});
+
+	it('names a row in two bids, and counts the rest', () => {
+		const overlaps = [
+			{ code: 'SH010', bids: ['SEQ010', 'SEQ010 copy'] as const },
+			{ code: 'SH020', bids: ['SEQ010', 'SEQ010 copy'] as const }
+		];
+		const r = readiness({ state: state(), today: TODAY, send: { ...send, overlaps } });
+		expect(r.problems.map((p) => [p.target, p.short, p.message])).toEqual([['bids', 'SH010 is in two bids', 'SH010 is in SEQ010 and in SEQ010 copy. A request takes each row once. And 1 more.']]);
+		expect(r.checklist.find((l) => l.label === 'Bids')?.state).toBe('error');
+	});
+});

@@ -143,8 +143,8 @@ export function setShares(grid: Grid, picks: Picks, row: Row, shares: readonly S
 	if (new Set(live.map((s) => s.bidId)).size !== live.length) return { ok: false, message: 'A vendor appears twice.' };
 	const inPackage = live.some((share) => row.cells[columnOf(grid, share.bidId)]?.kind === 'package');
 	if (inPackage && live.length > 1) {
-		const name = packageOf(grid, row.package)?.name ?? 'This package';
-		return { ok: false, message: `${name} was priced as one figure by a vendor here. Give that vendor the whole package, or none of it.` };
+		const name = packageOf(grid, row.package)?.name ?? 'This bid';
+		return { ok: false, message: `${name} was priced as one figure by a vendor here. Give that vendor the whole bid, or none of it.` };
 	}
 	for (const share of live) {
 		const column = columnOf(grid, share.bidId);

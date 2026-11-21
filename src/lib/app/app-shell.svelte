@@ -1,5 +1,5 @@
 <!--
-	The frame of every screen: one h-12 header (wordmark, Bid requests, the demo badge, the site and
+	The frame of every screen: one h-12 header (wordmark, Bids and Requests, the demo badge, the site and
 	who reads it, the scheme switch), then the page, which takes the rest and scrolls on its own. The
 	header holds who and where; the page holds what this screen is about. On the vendor's side
 	(`vendor`) there is no site and no person: the vendor has no Flow PT sign-in, so the header holds
@@ -21,7 +21,11 @@
 
 	let { children, vendor = false }: { children: Snippet; vendor?: boolean } = $props();
 
-	const inRequests = $derived(page.url.pathname === '/bids' || page.url.pathname.startsWith('/bids/'));
+	const under = (prefix: string) => page.url.pathname === prefix || page.url.pathname.startsWith(`${prefix}/`);
+	const NAV = [
+		{ href: '/bids', label: 'Bids', slot: 'nav-bids' },
+		{ href: '/requests', label: 'Requests', slot: 'nav-requests' }
+	] as const;
 	let live = $state<LiveState | null>(null);
 	// The public pages render at build too (`(public)/+layout.ts`): nothing there reads the browser.
 	// svelte-ignore state_referenced_locally
@@ -58,15 +62,15 @@
 				<Wordmark />
 			</a>
 			<nav class="hidden items-center gap-1 text-sm sm:flex" aria-label="App">
-				<a
-					href="/bids"
-					class={cn(
-						'focus-visible:ring-ring rounded-md px-2 py-1 outline-none focus-visible:ring-2',
-						inRequests ? 'text-foreground bg-accent font-medium' : 'text-muted-foreground hover:text-foreground'
-					)}
-					aria-current={inRequests ? 'page' : undefined}
-					data-slot="nav-requests">Bid requests</a
-				>
+				{#each NAV as item (item.href)}
+					{@const on = under(item.href)}
+					<a
+						href={item.href}
+						class={cn('focus-visible:ring-ring rounded-md px-2 py-1 outline-none focus-visible:ring-2', on ? 'text-foreground bg-accent font-medium' : 'text-muted-foreground hover:text-foreground')}
+						aria-current={on ? 'page' : undefined}
+						data-slot={item.slot}>{item.label}</a
+					>
+				{/each}
 			</nav>
 		{/if}
 		<DemoBanner />
