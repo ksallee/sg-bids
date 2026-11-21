@@ -50,7 +50,7 @@ function status(cell: Cell): string {
 /** Every row of the grid, group by group, a price in the bid and the base currency per vendor, then the totals. */
 export function gridCsv(grid: Grid, groups: readonly Group[], names: readonly string[]): string {
 	const base = grid.baseCurrency;
-	const head = ['Group', 'Kind', 'Code', 'Description', 'Omitted'];
+	const head = ['Group', 'Kind', 'Code', 'Description', 'Cut this round'];
 	grid.columns.forEach((column, i) => head.push(`${names[i]} (${column.currency})`, `${names[i]} (${base})`, `${names[i]} status`));
 	head.push('Lowest vendor', 'Spread %');
 

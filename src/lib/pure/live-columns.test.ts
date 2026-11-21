@@ -15,7 +15,7 @@ const mappingB = { description: 'sg_brief', frames: 'sg_frame_count', sequence: 
 describe('requestColumns', () => {
 	it('lists a Shot request’s columns in order, live where a field feeds them', () => {
 		const columns = requestColumns('shot', mappingB, shotB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'omitted', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'notes']);
 		expect(columns.filter((c) => c.live).map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty']);
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_complexity', dataType: 'list', validValues: ['A', 'B', 'C', 'D'], lock: null });
 		expect(columnByKey(columns, 'frames')).toMatchObject({ field: 'sg_frame_count', dataType: 'number' });
@@ -51,7 +51,7 @@ describe('requestColumns', () => {
 
 	it('lists an Asset request’s columns', () => {
 		const columns = requestColumns('asset', { description: 'sg_brief', type: 'sg_asset_type', difficulty: 'sg_difficulty' }, assetB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'type', 'description', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'omitted', 'count', 'type', 'description', 'difficulty', 'notes']);
 		expect(columnByKey(columns, 'type')).toMatchObject({ dataType: 'list', validValues: ['Character', 'Prop'] });
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_difficulty', dataType: 'text' });
 		expect(columnByKey(requestColumns('asset', { description: null, type: null, difficulty: null }, assetA), 'code').label).toBe('Asset');
@@ -143,6 +143,12 @@ describe('Omit, by round', () => {
 		const columns = requestColumns('shot', mappingB, shotB, {}, { omit: false });
 		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'notes']);
 		expect(requestColumns('asset', mappingB, assetB, {}, { omit: false }).map((c) => c.key)).not.toContain('omitted');
+	});
+
+	it('sits beside the code, narrow, so it is in sight on a wide table that scrolls', () => {
+		const columns = requestColumns('shot', mappingB, shotB);
+		expect(columns[1].key).toBe('omitted');
+		expect(columnByKey(columns, 'omitted').width).toBeLessThanOrEqual(80);
 	});
 
 	it('offers Omit on the selection from round 2, and Include whenever a selected row is omitted', () => {

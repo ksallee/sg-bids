@@ -79,7 +79,7 @@
 				<Dialog.Title class="flex items-center gap-2">
 					<span class="font-mono">{row.label}</span>
 					{#if row.count > 1}<span class="rounded border px-1 text-xs font-normal tabular-nums" data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
-					{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-xs font-normal">omitted</span>{/if}
+					{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-xs font-normal">cut this round</span>{/if}
 				</Dialog.Title>
 				<Dialog.Description class="flex flex-wrap gap-x-3">
 					{#each [row.count > 1 ? `${row.count.toLocaleString()} ${row.target.kind === 'shot' ? 'shots' : 'assets'} in this row` : '', row.target.kind === 'shot' ? row.sequence : 'Asset', item?.description, item && 'frames' in item && item.frames ? (row.count > 1 ? `${item.frames} frames each, ${(item.frames * row.count).toLocaleString()} in all` : `${item.frames} frames`) : '', item?.difficulty].filter(Boolean) as part, i (i)}

@@ -40,7 +40,7 @@
 //   8. duplicates the request from the list, without its rows, and checks the copy;
 //   8b. round 1 had no Omit column and no Omit on the selection; starts round 2 from the issued
 //      request, omits one Seq A row with a double click on its Omit cell, issues it, answers as
-//      Vendor A (the cut row takes no price), and reads the comparison's mark on the row;
+//      Vendor A (the cut row takes no price), and reads the comparison's cut mark on the row;
 //   9. on the list: opens the request from its row's link; reads back its Bids, Shots and Assets
 //      (both bids by name, the totals by unit, the counted row as 120) and the copy's; filters to
 //      the drive's rows and ticks them with the header box; duplicates both with their rows and reads
@@ -829,7 +829,7 @@ const stages = {
 		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
 		await page.locator('[data-slot=vendor-links]').waitFor({ timeout: 60_000 });
 		const links = await page.locator('[data-slot=link-value]').evaluateAll((els) => els.map((e) => e.value));
-		const vctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		const vctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
 		const vp = await vctx.newPage();
 		await vp.goto(links[0].replace(/^https?:\/\/[^/]+/, APP));
 		await vp.waitForLoadState('networkidle');
@@ -842,7 +842,8 @@ const stages = {
 		const cutInputs = await cutRow.locator('input[data-price]').count();
 		await vp.waitForTimeout(800);
 		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
-		await shoot(vp, 'round2-vendor-cut-row');
+		await cutRow.scrollIntoViewIfNeeded();
+		await shoot(vp, 'round2-vendor-cut-row-1920');
 		await vp.getByRole('button', { name: 'Review and submit' }).first().click();
 		await vp.getByRole('button', { name: 'Submit answer' }).click();
 		await vp.getByText('Submitted.').first().waitFor({ timeout: 20_000 });
@@ -852,10 +853,10 @@ const stages = {
 			/Cut this round/.test(cutWords) && cutInputs === 0 && lines.length === 5 && !lines.some((l) => l.code === cut),
 			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field; Vendor A submitted ${lines.length} lines, none for the cut row`
 		);
-		// The comparison hides omitted rows by default; shown, it marks the row.
+		// The comparison hides cut rows by default; shown, it marks the row cut.
 		await page.goto(`${APP}/requests/${state.round2Id}/compare?project=${state.projectId}`);
 		await page.waitForLoadState('networkidle');
-		const hide = page.getByRole('checkbox', { name: 'Hide omitted' });
+		const hide = page.getByRole('checkbox', { name: 'Hide cut rows' });
 		await hide.waitFor({ timeout: 30_000 });
 		await page.locator('[data-slot=item-row]').first().waitFor({ timeout: 30_000 });
 		const hiddenFirst = (await page.locator('[data-slot=item-row]', { hasText: cut }).count()) === 0;
@@ -864,7 +865,8 @@ const stages = {
 		await compareRow.waitFor({ timeout: 30_000 });
 		const compareText = (await compareRow.locator('[role=rowheader]').innerText()).replace(/\s+/g, ' ').trim();
 		await shoot(page, 'round2-compare');
-		expect(hiddenFirst && /omitted/.test(compareText), `round 2's comparison hides ${cut} under Hide omitted, and shown it marks it: "${compareText}"`);
+		const tag = await compareRow.locator('[data-slot=row-cut]').innerText();
+		expect(hiddenFirst && tag.trim() === 'cut', `round 2's comparison hides ${cut} under Hide cut rows; shown, it is tagged "${tag.trim()}": "${compareText}"`);
 	},
 
 	async bulk() {

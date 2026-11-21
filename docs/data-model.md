@@ -31,8 +31,9 @@ The "Seen in" column says:
   with no mapped field, and every value of a breakdown row are the request's own. Issuing copies
   the rows as they are and freezes them; from then on no Flow PT edit reaches them.
 - Omit is for a round after the first: a row the earlier round held is marked as cut. The vendor
-  form shows it as cut with no price field and sends no line for it; the comparison marks it and
-  picks no one for it. A round 1 draft has no Omit column, since removing the row does it; one
+  form shows it as "Cut this round" with no price field and sends no line for it; the comparison
+  hides it under Hide cut rows, tags it "cut" when shown, and picks no one for it. The Omit column
+  sits beside the code. A round 1 draft has no Omit column, since removing the row does it; one
   that holds an omitted row already (a draft from before) keeps the column until no row is
   omitted, so the row can be brought back.
 

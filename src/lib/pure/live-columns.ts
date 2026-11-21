@@ -61,6 +61,8 @@ interface ColumnSpec {
 // The code gets room for a long code and its marks: the last column takes what is left.
 const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Shot', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
+	// Beside the code, narrow: a cut row is read with its code, and a wide table scrolls (round 2 on).
+	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null },
 	// In this request only: how many shots of a kind the row stands for. Frames are per unit.
 	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'sequence', label: 'Sequence', width: 150, fallback: 'text', field: (m) => m.sequence, fixedLock: 'Move a Shot to another Sequence in Flow PT.' },
@@ -68,18 +70,18 @@ const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'description', label: 'Description', width: 320, fallback: 'text', field: (m) => m.description },
 	{ key: 'type', label: 'Type', width: 140, fallback: 'text', field: (m) => m.type },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
 	// Last, so it takes the width the table has left.
 	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
 const ASSET_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Asset', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
+	// Beside the code, narrow: a cut row is read with its code, and a wide table scrolls (round 2 on).
+	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null },
 	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'type', label: 'Type', width: 150, fallback: 'text', field: (m) => m.type },
 	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
 	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
