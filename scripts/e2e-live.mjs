@@ -852,14 +852,19 @@ const stages = {
 			/Cut this round/.test(cutWords) && cutInputs === 0 && lines.length === 5 && !lines.some((l) => l.code === cut),
 			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field; Vendor A submitted ${lines.length} lines, none for the cut row`
 		);
-		// The comparison marks the row.
+		// The comparison hides omitted rows by default; shown, it marks the row.
 		await page.goto(`${APP}/requests/${state.round2Id}/compare?project=${state.projectId}`);
 		await page.waitForLoadState('networkidle');
+		const hide = page.getByRole('checkbox', { name: 'Hide omitted' });
+		await hide.waitFor({ timeout: 30_000 });
+		await page.locator('[data-slot=item-row]').first().waitFor({ timeout: 30_000 });
+		const hiddenFirst = (await page.locator('[data-slot=item-row]', { hasText: cut }).count()) === 0;
+		await hide.uncheck();
 		const compareRow = page.locator('[data-slot=item-row]', { hasText: cut }).first();
 		await compareRow.waitFor({ timeout: 30_000 });
 		const compareText = (await compareRow.locator('[role=rowheader]').innerText()).replace(/\s+/g, ' ').trim();
 		await shoot(page, 'round2-compare');
-		expect(/omitted/.test(compareText), `round 2's comparison marks ${cut}: "${compareText}"`);
+		expect(hiddenFirst && /omitted/.test(compareText), `round 2's comparison hides ${cut} under Hide omitted, and shown it marks it: "${compareText}"`);
 	},
 
 	async bulk() {
