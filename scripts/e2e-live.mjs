@@ -16,7 +16,7 @@
 // worktrees driving at once each talk to their own app and database (docs/development.md), then:
 //   1. makes a request from the Requests list: a name and the project, in the New request dialog;
 //   2. on its one page: 4 Shots of the sandbox from Flow PT (`zzsgbids_*` fixtures when it has
-//      fewer) and 2 breakdown Shots with a difficulty into Bid 1, renamed Seq A; a row typed by hand
+//      fewer) and 2 breakdown Shots with a difficulty into the first bid (the request's name and 01), renamed Seq A; a row typed by hand
 //      into Seq A with Add row, its code then Tab then a count of 120, Enter adding the next row
 //      (taken out again); Add bid, renamed Creature, a breakdown Shot and Asset into it; one Flow PT
 //      Shot moved from Seq A to Creature; the side panel hidden and shown;
@@ -263,11 +263,11 @@ const stages = {
 		await screens(page, 'draft-empty');
 		const [req] = await sql`select code, status, header->>'title' as title from public.bid_requests where id = ${state.requestId}`;
 		const bids = await sql`select p.name from public.request_packages p where p.request_id = ${state.requestId}`;
-		expect(req?.status === 'draft' && req.title === NAME && bids.map((b) => b.name).join() === 'Bid 1', `a draft made from the New request dialog: "${req?.title}", one bid, Bid 1, its code made from the name (${req?.code}) and shown nowhere`);
+		expect(req?.status === 'draft' && req.title === NAME && bids.map((b) => b.name).join() === `${NAME} 01`, `a draft made from the New request dialog: "${req?.title}", one bid named after it with 01, its code made from the name (${req?.code}) and shown nowhere`);
 	},
 
 	async bids() {
-		await renameBid('Bid 1', 'Seq A');
+		await renameBid(`${NAME} 01`, 'Seq A');
 		// Four Shots from Flow PT, into Seq A.
 		await page.locator('[data-slot=fpt-open]').click();
 		const dialog = page.locator('[data-slot=fpt-add-dialog]');

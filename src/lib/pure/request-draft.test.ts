@@ -8,6 +8,9 @@ import {
 	draftFrom,
 	inBid,
 	moveRows,
+	defaultBidName,
+	followRequestName,
+	MAX_BID_NAME,
 	nextBidName,
 	renameBid,
 	savableBids,
@@ -36,15 +39,67 @@ const rows: DraftRows = {
 };
 
 describe('a new bid', () => {
-	it('is named Bid and the first number no bid of the request holds, in any case', () => {
-		expect(nextBidName([])).toBe('Bid 1');
-		expect(nextBidName([{ key: 'k', name: 'Bid 1' }])).toBe('Bid 2');
-		expect(nextBidName([{ key: 'k', name: 'bid 2' }])).toBe('Bid 1');
-		expect(nextBidName(two)).toBe('Bid 2');
+	it('is named after the request, with the first two digit number no bid holds, in any case', () => {
+		expect(nextBidName([], 'Spring pitch')).toBe('Spring pitch 01');
+		expect(nextBidName([{ key: 'k', name: 'Spring pitch 01' }], 'Spring pitch')).toBe('Spring pitch 02');
+		expect(nextBidName([{ key: 'k', name: 'spring PITCH 02' }], ' Spring pitch ')).toBe('Spring pitch 01');
+		expect(defaultBidName('Spring pitch', 12)).toBe('Spring pitch 12');
+		expect(defaultBidName('Spring pitch', 100)).toBe('Spring pitch 100');
+	});
+
+	it('is Bid and the number while the request has no name', () => {
+		expect(nextBidName([])).toBe('Bid 01');
+		expect(nextBidName(two, '  ')).toBe('Bid 01');
+		expect(nextBidName([{ key: 'k', name: 'bid 01' }])).toBe('Bid 02');
+	});
+
+	it('keeps to the longest bid name', () => {
+		const name = defaultBidName('x'.repeat(200), 3);
+		expect(name).toHaveLength(MAX_BID_NAME);
+		expect(name.endsWith(' 03')).toBe(true);
 	});
 
 	it('goes last, with its key', () => {
-		expect(addBid(two, 'bid:c')).toEqual([...two, { key: 'bid:c', name: 'Bid 2' }]);
+		expect(addBid(two, 'bid:c', 'Pitch')).toEqual([...two, { key: 'bid:c', name: 'Pitch 01' }]);
+	});
+});
+
+describe('renaming the request', () => {
+	const bids: DraftBid[] = [
+		{ key: 'a', name: 'Pitch 01' },
+		{ key: 'b', name: 'Hero' },
+		{ key: 'c', name: 'Pitch 03' }
+	];
+
+	it('renames the bids still on their default name, keeping their numbers', () => {
+		expect(followRequestName(bids, 'Pitch', 'Spring pitch')).toEqual([
+			{ key: 'a', name: 'Spring pitch 01' },
+			{ key: 'b', name: 'Hero' },
+			{ key: 'c', name: 'Spring pitch 03' }
+		]);
+	});
+
+	it('follows from no name and back to none', () => {
+		expect(followRequestName([{ key: 'a', name: 'Bid 01' }], '', 'Pitch')).toEqual([{ key: 'a', name: 'Pitch 01' }]);
+		expect(followRequestName([{ key: 'a', name: 'Pitch 01' }], 'Pitch', '')).toEqual([{ key: 'a', name: 'Bid 01' }]);
+	});
+
+	it('leaves a bid whose new name another bid holds', () => {
+		const taken: DraftBid[] = [
+			{ key: 'a', name: 'Pitch 01' },
+			{ key: 'b', name: 'Hero 01' }
+		];
+		expect(followRequestName(taken, 'Pitch', 'Hero')).toEqual(taken);
+	});
+
+	it('typed letter by letter ends as typed at once', () => {
+		let step: DraftBid[] = [{ key: 'a', name: 'Bid 01' }];
+		let was = '';
+		for (const now of ['P', 'Pi', 'Pit', 'Pitc', 'Pitch']) {
+			step = followRequestName(step, was, now);
+			was = now;
+		}
+		expect(step).toEqual([{ key: 'a', name: 'Pitch 01' }]);
 	});
 });
 
@@ -135,9 +190,9 @@ describe('a draft as stored', () => {
 		expect(draft.rows.shots.map((s) => s.package)).toEqual(['bid:a', 'bid:a', 'bid:b']);
 	});
 
-	it('starts with one bid, Bid 1, holding every row, when it has none', () => {
+	it('starts with one bid, Bid 01, holding every row, when it has none', () => {
 		const draft = draftFrom(request(undefined, [shot('sh010', undefined)]), 'bid:new');
-		expect(draft.bids).toEqual([{ key: 'bid:new', name: 'Bid 1' }]);
+		expect(draft.bids).toEqual([{ key: 'bid:new', name: 'Bid 01' }]);
 		expect(draft.rows.shots.map((s) => s.package)).toEqual(['bid:new']);
 	});
 
@@ -214,9 +269,9 @@ describe('copying a request', () => {
 		]);
 	});
 
-	it('makes one bid, Bid 1, of a request from before bids', () => {
+	it('makes one bid, Bid 01, of a request from before bids', () => {
 		n = 0;
 		const copy = copyRequest({ ...request, packages: undefined, vendors: [] }, { rows: true, key: fresh, id: fresh });
-		expect(copy.bids.map((b) => [b.key, b.name, b.shots.length, b.assets.length])).toEqual([['bid:new1', 'Bid 1', 2, 1]]);
+		expect(copy.bids.map((b) => [b.key, b.name, b.shots.length, b.assets.length])).toEqual([['bid:new1', 'Bid 01', 2, 1]]);
 	});
 });

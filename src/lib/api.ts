@@ -114,7 +114,7 @@ async function post<T>(action: string, body: Record<string, unknown>): Promise<T
 export const api = {
 	list: (projectId: number) => call<RequestOverview[]>('list', projectId),
 	get: (projectId: number, id: string) => call<LoadedRequest>('get', projectId, { id }),
-	/** A new draft: its name and the details it starts with. It holds one bid, Bid 1. */
+	/** A new draft: its name and the details it starts with. It holds one bid, named after it with 01. */
 	create: (projectId: number, body: { name: string; header: RequestHeader }) => call<{ request: { id: string } }>('create', projectId, body),
 	/** A draft's page in one write. What is left out stays as it is. */
 	saveDraft: (projectId: number, body: { id: string; header?: RequestHeader; bids?: SavedBidWire[]; vendors?: DraftVendorWire[] }) => call<{ ok: true }>('save', projectId, body),

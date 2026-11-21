@@ -106,7 +106,7 @@ describe('a counted row on a draft', () => {
 		const request = await s.createDraftRequest(production, { code: 'CT-1', header: header(), items: { shots: [...typed.shots, { id: 'shot-bd-new', code: '', source: 'breakdown', omitted: false, assetIds: [] }], assets: typed.assets } });
 		await s.inviteVendor(production, request.id, vendor('Vendor A'));
 		const error = await refusal(() => s.issueRequest(production, request.id));
-		expect(error.message).toMatch(/A row in Bid 1 has no code\. Type one, or remove the row\./);
+		expect(error.message).toMatch(/A row in Bid 01 has no code\. Type one, or remove the row\./);
 	});
 });
 

@@ -46,9 +46,9 @@ What production sends: one or several bids, the details they share, to the vendo
 The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readiness.ts`.
 
 - Made from the Requests list: New request asks for a name and a project, then the request's one
-  page opens with one empty bid, Bid 1. One name: the code is made from it (`header.suggestCode`),
+  page opens with one empty bid, named after the request with 01. One name: the code is made from it (`header.suggestCode`),
   kept out of sight, and written to Flow PT's Request Code at the award.
-- A draft owns its bids. Add bid makes the next one, `Bid 2`, `Bid 3`: the first number no bid of
+- A draft owns its bids. Add bid makes the next one, the request's name and `02`, `03`: the first number no bid of
   the request holds. A bid's name is unique in the request, in any case, 120 characters at most. A
   request keeps one bid at least. Deleting a bid takes its rows with it or moves them to another bid.
 - Every row sits in exactly one bid of the request (`production_bid_items_one_bid`). Rows move

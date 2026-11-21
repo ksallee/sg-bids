@@ -3,8 +3,8 @@
  * `src/routes/api/production/` are one line each over these. Bodies are checked by
  * `$lib/pure/wire` before the data layer sees them.
  *
- * A request is made, filled and issued on one page. It owns its bids: `create` makes it with one,
- * Bid 1; `save` writes its page (details, bids with their rows, vendors); `issue` sends it. A request
+ * A request is made, filled and issued on one page. It owns its bids: `create` makes it with one, named after it with 01;
+ * `save` writes its page (details, bids with their rows, vendors); `issue` sends it. A request
  * is copied whole with `duplicate`, with its rows or without, and an issued one starts its next
  * round with `new-round`.
  */
@@ -81,7 +81,7 @@ export async function getRequest(production: VerifiedProduction, body: Body) {
 	return { request, ...meta, invitations, award };
 }
 
-/** A new draft: its name, the details it starts with, and one empty bid, Bid 1. */
+/** A new draft: its name, the details it starts with, and one empty bid named after it, 01. */
 export async function createRequest(production: VerifiedProduction, body: Body) {
 	const parsed = parseCreate(body);
 	if (!parsed.ok) throw new StoreError(422, parsed.message);
