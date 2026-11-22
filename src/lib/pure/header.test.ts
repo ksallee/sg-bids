@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OPTIONAL_GROUPS, REQUIRED, checkHeader, emptyHeaderForm, headerForm, isDay, splitAssumptions, suggestCode, toHeader, type HeaderForm, type Stage } from './header';
+import { OPTIONAL_GROUPS, REQUIRED, checkHeader, emptyHeaderForm, headerForm, isDay, roundOf, splitAssumptions, suggestCode, toHeader, type HeaderForm, type Stage } from './header';
 
 const TODAY = '2026-11-20';
 const project = { id: 85, name: 'Demo Show' };
@@ -157,5 +157,13 @@ describe('headerForm', () => {
 	it('reads a header back into the form it came from', () => {
 		const start = form({ round: '3', dueDate: '2026-12-01', deliveryFormat: 'ProRes', assumptions: 'A\nB' });
 		expect(headerForm(toHeader(start, project))).toEqual(start);
+	});
+});
+
+describe('roundOf', () => {
+	it('reads the round typed, and 1 for one it cannot read', () => {
+		expect(roundOf(form({ round: ' 3 ' }))).toBe(3);
+		expect(roundOf(form({ round: '0' }))).toBe(1);
+		expect(roundOf(form({ round: 'x' }))).toBe(1);
 	});
 });

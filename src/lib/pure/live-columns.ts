@@ -13,6 +13,10 @@
  * here, and a count (`count.ts`); a row linked to Flow PT keeps its code and a count of 1.
  *
  * A row belongs to a bid because it was added to it: there is no column for its group.
+ *
+ * Omit marks a row the earlier round held as cut, so vendors and the comparison see it was dropped.
+ * A round 1 draft has no earlier round: removing the row does it, so it has no Omit column, unless a
+ * row there is omitted already (a draft from before), which keeps the column so it can be brought back.
  */
 
 import type { FieldSchema } from 'sg-widgets-core';
@@ -57,6 +61,8 @@ interface ColumnSpec {
 // The code gets room for a long code and its marks: the last column takes what is left.
 const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Shot', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Shot in the pipeline. Rename it in Flow PT.' },
+	// Beside the code, narrow: a cut row is read with its code, and a wide table scrolls (round 2 on).
+	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null },
 	// In this request only: how many shots of a kind the row stands for. Frames are per unit.
 	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'sequence', label: 'Sequence', width: 150, fallback: 'text', field: (m) => m.sequence, fixedLock: 'Move a Shot to another Sequence in Flow PT.' },
@@ -64,18 +70,18 @@ const SHOT_SPECS: readonly ColumnSpec[] = [
 	{ key: 'description', label: 'Description', width: 320, fallback: 'text', field: (m) => m.description },
 	{ key: 'type', label: 'Type', width: 140, fallback: 'text', field: (m) => m.type },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
 	// Last, so it takes the width the table has left.
 	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
 const ASSET_SPECS: readonly ColumnSpec[] = [
 	{ key: 'code', label: 'Asset', width: 300, fallback: 'text', field: () => 'code', fixedLock: 'The code names the Asset in the pipeline. Rename it in Flow PT.' },
+	// Beside the code, narrow: a cut row is read with its code, and a wide table scrolls (round 2 on).
+	{ key: 'omitted', label: 'Omit', width: 80, fallback: 'checkbox', field: () => null },
 	{ key: 'count', label: 'Count', width: 130, fallback: 'number', field: () => null },
 	{ key: 'type', label: 'Type', width: 150, fallback: 'text', field: (m) => m.type },
 	{ key: 'description', label: 'Description', width: 380, fallback: 'text', field: (m) => m.description },
 	{ key: 'difficulty', label: 'Difficulty', width: 150, fallback: 'list', field: (m) => m.difficulty },
-	{ key: 'omitted', label: 'Omit', width: 96, fallback: 'checkbox', field: () => null },
 	{ key: 'notes', label: 'Note to vendors', width: 260, fallback: 'text', field: () => null }
 ];
 
@@ -99,8 +105,15 @@ function cellTypeOf(field: FieldSchema): CellType | null {
  * The table's columns for a kind. `denied`: the fields the preflight write was refused on, with
  * what the site said (094).
  */
-export function requestColumns(kind: ItemKind, mapping: Mapping, schema: Record<string, FieldSchema>, denied: Readonly<Record<string, string>> = {}): RequestColumn[] {
-	return (kind === 'shot' ? SHOT_SPECS : ASSET_SPECS).map((spec): RequestColumn => {
+export function requestColumns(
+	kind: ItemKind,
+	mapping: Mapping,
+	schema: Record<string, FieldSchema>,
+	denied: Readonly<Record<string, string>> = {},
+	options: { readonly omit: boolean } = { omit: true }
+): RequestColumn[] {
+	const specs = (kind === 'shot' ? SHOT_SPECS : ASSET_SPECS).filter((spec) => options.omit || spec.key !== 'omitted');
+	return specs.map((spec): RequestColumn => {
 		const name = spec.field(mapping);
 		const field = typeof name === 'string' ? schema[name] : undefined;
 		if (!field) {
@@ -126,6 +139,17 @@ export function requestColumns(kind: ItemKind, mapping: Mapping, schema: Record<
 			width: spec.width
 		};
 	});
+}
+
+/** Whether a draft of this round offers Omit. `anyOmitted`: a row of it is omitted already. */
+export function offersOmit(round: number, anyOmitted: boolean): boolean {
+	return round >= 2 || anyOmitted;
+}
+
+/** What the bar over a selection offers: Omit from round 2, Include while a selected row is omitted. */
+export function omitActions(round: number, selectedOmitted: readonly boolean[]): { readonly omit: boolean; readonly include: boolean } {
+	const later = round >= 2;
+	return { omit: later, include: later || selectedOmitted.some(Boolean) };
 }
 
 export function columnByKey(columns: readonly RequestColumn[], key: ColumnKey): RequestColumn {

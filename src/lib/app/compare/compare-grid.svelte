@@ -397,7 +397,7 @@
 							<span class="flex items-center gap-1.5">
 								<span class="font-mono text-xs font-medium">{row.label}</span>
 								{#if row.count > 1}<span class="rounded border px-1 text-[10px] font-medium tabular-nums" title={`This row stands for ${row.count.toLocaleString()}. Prices are for all of them.`} data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
-								{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-[10px]">omitted</span>{/if}
+								{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-[10px]" title="Cut this round. It takes no price." data-slot="row-cut">cut</span>{/if}
 							</span>
 							{#if row.description}<span class="text-muted-foreground w-full truncate text-xs">{row.description}</span>{/if}
 						</button>

@@ -5,7 +5,8 @@
  * names each field it cannot read, and builds the draft from the rest, so totals and autosave work
  * while a cell is wrong. A submit waits for `blockers` to be empty.
  *
- * - A line exists for a priced or excluded item. An item with neither is not bid.
+ * - A line exists for a priced or excluded item. An item with neither is not bid. A row omitted in
+ *   a later round was cut: it takes no line, however its bid is priced.
  * - An excluded line keeps its typed price (zero when none); the price is ignored in every total.
  * - The vendor never gives an exchange rate. Production locks one.
  * - Totals run in the bid's own currency (`totals.ts`, `rebate.ts`).
@@ -427,18 +428,19 @@ export function formToDraft(form: BidForm, mark: DecimalMark, names: ReadonlyMap
 	for (const line of form.lines) {
 		const at = `line:${line.key}`;
 		const pkg = line.package ?? 'all';
+		// A row omitted in a later round was cut: it takes no price, however the bid is priced.
+		if (line.omitted) continue;
 		if (declined.has(pkg)) {
-			if (!line.omitted) counts.declined++;
+			counts.declined++;
 			continue;
 		}
 		if (asFigure.has(pkg)) {
-			if (line.omitted) continue;
 			counts.packaged++;
 			draftLines.push({ target: line.target, total: money(0, currency), excluded: false, inPackage: true });
 			continue;
 		}
 		if (blankFigure.has(pkg)) {
-			if (!line.omitted) counts.open++;
+			counts.open++;
 			continue;
 		}
 		const viaRate = form.rates !== undefined && followsRate(form, line);

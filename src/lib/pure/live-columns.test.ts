@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeFields } from 'sg-widgets-core';
 import { ASSET_FIELDS_A, ASSET_FIELDS_B, SHOT_FIELDS_A, SHOT_FIELDS_B } from './fixtures/schema';
 import { shot, asset } from './fixtures';
-import { cellTarget, columnByKey, descriptionAdvice, requestColumns, BID_DESCRIPTION } from './live-columns';
+import { cellTarget, columnByKey, descriptionAdvice, offersOmit, omitActions, requestColumns, BID_DESCRIPTION } from './live-columns';
 
 const shotA = normalizeFields(SHOT_FIELDS_A);
 const shotB = normalizeFields(SHOT_FIELDS_B);
@@ -15,7 +15,7 @@ const mappingB = { description: 'sg_brief', frames: 'sg_frame_count', sequence: 
 describe('requestColumns', () => {
 	it('lists a Shot request’s columns in order, live where a field feeds them', () => {
 		const columns = requestColumns('shot', mappingB, shotB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'omitted', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'notes']);
 		expect(columns.filter((c) => c.live).map((c) => c.key)).toEqual(['code', 'sequence', 'frames', 'description', 'type', 'difficulty']);
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_complexity', dataType: 'list', validValues: ['A', 'B', 'C', 'D'], lock: null });
 		expect(columnByKey(columns, 'frames')).toMatchObject({ field: 'sg_frame_count', dataType: 'number' });
@@ -51,7 +51,7 @@ describe('requestColumns', () => {
 
 	it('lists an Asset request’s columns', () => {
 		const columns = requestColumns('asset', { description: 'sg_brief', type: 'sg_asset_type', difficulty: 'sg_difficulty' }, assetB);
-		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'type', 'description', 'difficulty', 'omitted', 'notes']);
+		expect(columns.map((c) => c.key)).toEqual(['code', 'omitted', 'count', 'type', 'description', 'difficulty', 'notes']);
 		expect(columnByKey(columns, 'type')).toMatchObject({ dataType: 'list', validValues: ['Character', 'Prop'] });
 		expect(columnByKey(columns, 'difficulty')).toMatchObject({ field: 'sg_difficulty', dataType: 'text' });
 		expect(columnByKey(requestColumns('asset', { description: null, type: null, difficulty: null }, assetA), 'code').label).toBe('Asset');
@@ -122,6 +122,39 @@ describe('descriptionAdvice', () => {
 describe('the widths', () => {
 	it('gives the code room for a long code', () => {
 		expect(columnByKey(requestColumns('shot', mappingA, shotA), 'code').width).toBeGreaterThanOrEqual(300);
+	});
+});
+
+describe('Omit, by round', () => {
+	it('is offered from round 2 on, where a row the earlier round held can be cut', () => {
+		expect(offersOmit(2, false)).toBe(true);
+		expect(offersOmit(5, false)).toBe(true);
+	});
+
+	it('is not offered on a round 1 draft: there, removing the row does it', () => {
+		expect(offersOmit(1, false)).toBe(false);
+	});
+
+	it('stays on a round 1 draft while a row is omitted already, so it can be brought back', () => {
+		expect(offersOmit(1, true)).toBe(true);
+	});
+
+	it('drops the column when not offered, and keeps every other in order', () => {
+		const columns = requestColumns('shot', mappingB, shotB, {}, { omit: false });
+		expect(columns.map((c) => c.key)).toEqual(['code', 'count', 'sequence', 'frames', 'description', 'type', 'difficulty', 'notes']);
+		expect(requestColumns('asset', mappingB, assetB, {}, { omit: false }).map((c) => c.key)).not.toContain('omitted');
+	});
+
+	it('sits beside the code, narrow, so it is in sight on a wide table that scrolls', () => {
+		const columns = requestColumns('shot', mappingB, shotB);
+		expect(columns[1].key).toBe('omitted');
+		expect(columnByKey(columns, 'omitted').width).toBeLessThanOrEqual(80);
+	});
+
+	it('offers Omit on the selection from round 2, and Include whenever a selected row is omitted', () => {
+		expect(omitActions(1, [false, false])).toEqual({ omit: false, include: false });
+		expect(omitActions(1, [false, true])).toEqual({ omit: false, include: true });
+		expect(omitActions(2, [false])).toEqual({ omit: true, include: true });
 	});
 });
 

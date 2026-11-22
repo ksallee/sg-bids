@@ -102,7 +102,7 @@
 		kept =
 			next === 'all'
 				? null
-				: new Set(form.lines.filter((l) => (next === 'excluded' ? l.excluded : !l.excluded && !prices.has(l.key))).map((l) => l.key));
+				: new Set(form.lines.filter((l) => (next === 'excluded' ? l.excluded : !l.omitted && !l.excluded && !prices.has(l.key))).map((l) => l.key));
 	}
 
 	function shows(key: string): boolean {
@@ -156,7 +156,7 @@
 
 	const counts = $derived({
 		all: form.lines.length,
-		open: form.lines.filter((l) => !l.excluded && !prices.has(l.key) && !notBidding(l.key) && !(inFigure(l.key) && figures.has(l.package ?? 'all'))).length,
+		open: form.lines.filter((l) => !l.omitted && !l.excluded && !prices.has(l.key) && !notBidding(l.key) && !(inFigure(l.key) && figures.has(l.package ?? 'all'))).length,
 		excluded: form.lines.filter((l) => l.excluded).length
 	});
 
@@ -430,7 +430,7 @@
 						{/if}
 					</span>
 					<span
-						class={cn('hidden min-w-0 truncate sm:block', line.excluded && 'line-through decoration-current/40')}
+						class={cn('hidden min-w-0 truncate sm:block', (line.excluded || line.omitted) && 'line-through decoration-current/40')}
 						role="cell"
 						title={[shot?.description ?? item?.description, meta(key)].filter(Boolean).join('. ')}
 					>
@@ -439,12 +439,12 @@
 					<span class="text-muted-foreground hidden truncate text-xs xl:block" role="cell">{meta(key)}</span>
 					<span class="text-muted-foreground hidden text-right text-xs tabular-nums xl:block" role="cell" title={(line.count ?? 1) > 1 && shot?.frames !== undefined ? `${shot.frames} frames each, ${(shot.frames * (line.count ?? 1)).toLocaleString()} in all` : undefined}>{shot?.frames ?? ''}{#if (line.count ?? 1) > 1 && shot?.frames !== undefined}<span class="block text-[11px] leading-tight">each</span>{/if}</span>
 					<span class="flex flex-col items-end" role="cell">
-						{#if declined}
+						{#if line.omitted}
+							<span class="text-muted-foreground py-1.5 text-xs" title="Production cut this row in this round. It takes no price." data-slot="line-omitted">Cut this round</span>
+						{:else if declined}
 							<span class="text-muted-foreground py-1.5 text-xs" data-slot="not-bidding">Not bidding</span>
 						{:else if covered}
-							<span class="text-muted-foreground flex items-center gap-1.5 py-1.5 text-xs" data-slot="in-package">
-								{#if line.omitted}Omitted{:else}<Layers class="size-3.5" aria-hidden="true" />In the bid's figure{/if}
-							</span>
+							<span class="text-muted-foreground flex items-center gap-1.5 py-1.5 text-xs" data-slot="in-package"><Layers class="size-3.5" aria-hidden="true" />In the bid's figure</span>
 						{:else if readOnly}
 							<span class="py-1.5 tabular-nums">{line.excluded ? 'Excluded' : prices.has(key) ? format(prices.get(key)!, locale) : 'Not bid'}</span>
 							{#if (line.count ?? 1) > 1 && !line.excluded && prices.has(key)}<span class="text-muted-foreground text-xs tabular-nums" data-slot="line-extended">{line.price} each × {line.count?.toLocaleString()}</span>{/if}
@@ -498,13 +498,13 @@
 						<input
 							type="checkbox"
 							bind:checked={form.lines[index].excluded}
-							disabled={readOnly || covered || declined}
+							disabled={readOnly || covered || declined || line.omitted}
 							aria-label={`Exclude ${shot?.code ?? item?.name}`}
 							class="accent-primary size-4"
 						/>
 					</span>
 				</div>
-				{#if detailOpen && !covered && !declined}
+				{#if detailOpen && !covered && !declined && !line.omitted}
 					<LineDetail bind:line={form.lines[index]} {errors} currency={form.currency} {mark} {locale} price={prices.get(key) ?? null} {readOnly} listId="departments" />
 				{/if}
 			{/each}

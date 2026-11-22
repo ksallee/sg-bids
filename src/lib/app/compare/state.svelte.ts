@@ -50,7 +50,7 @@ export class CompareState {
 	differsOver = $state('');
 	only = $state<Only>('all');
 	lowestColumn = $state<number | null>(null);
-	/** Omitted shots and assets are out of the request: vendors never saw them. Hidden unless asked. */
+	/** Rows cut this round (omitted) take no price: vendors see them marked as cut. Hidden unless asked. */
 	hideOmitted = $state(true);
 	onlyUnawarded = $state(false);
 	collapsed = new SvelteSet<string>();

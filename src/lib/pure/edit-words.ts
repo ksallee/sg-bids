@@ -86,3 +86,18 @@ export function undoLine(plan: UndoShape, codeOf: (id: Id) => string): string {
 	if (plan.gone.length > 0) parts.push(`${plan.gone.length} ${plan.gone.length === 1 ? 'is' : 'are'} gone from Flow PT.`);
 	return parts.join(' ');
 }
+
+/** One row by its code, or a row with no code as such: never its inner id. */
+function oneRow(code: string): string {
+	return code.trim() === '' ? 'A row with no code' : code.trim();
+}
+
+/** The line after rows are taken out of the request, by their codes. */
+export function removedLine(codes: readonly string[]): string {
+	return codes.length === 1 ? `${oneRow(codes[0])} is out of the request.` : `${codes.length} rows are out of the request.`;
+}
+
+/** The line after rows move to another bid, by their codes. */
+export function movedLine(codes: readonly string[], bidName: string): string {
+	return codes.length === 1 ? `${oneRow(codes[0])} is in ${bidName} now.` : `${codes.length} rows are in ${bidName} now.`;
+}

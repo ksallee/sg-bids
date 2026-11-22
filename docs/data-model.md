@@ -30,6 +30,12 @@ The "Seen in" column says:
   stored draft holds the values last read, so a reload is safe. The note to vendors, omit, a concept
   with no mapped field, and every value of a breakdown row are the request's own. Issuing copies
   the rows as they are and freezes them; from then on no Flow PT edit reaches them.
+- Omit is for a round after the first: a row the earlier round held is marked as cut. The vendor
+  form shows it as "Cut this round" with no price field and sends no line for it; the comparison
+  hides it under Hide cut rows, tags it "cut" when shown, and picks no one for it. The Omit column
+  sits beside the code. A round 1 draft has no Omit column, since removing the row does it; one
+  that holds an omitted row already (a draft from before) keeps the column until no row is
+  omitted, so the row can be brought back.
 
 ## Words
 
@@ -110,7 +116,7 @@ The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readines
 | cutCount | cut count | 2+ |
 | frames | frame count, per unit on a counted row | 2+ |
 | count | how many shots of its kind the row stands for, on a row with no Flow PT Shot. Absent: 1 | sg-bids |
-| omitted | the shot is out | 2+ |
+| omitted | the shot is cut in a later round | 2+ |
 | assetIds | linked assets | 2+ |
 | thumbnail | thumbnail | 2+ |
 | directorNotes | director's notes | 2+ |
@@ -129,7 +135,7 @@ The rules are in `src/lib/pure/request-draft.ts`, `vendor-rows.ts` and `readines
 | type, difficulty | kind of asset and how hard | 2+ |
 | timesUsed | how many shots use it | 2+ |
 | count | how many assets of its kind the row stands for, on a row with no Flow PT Asset. Absent: 1 | sg-bids |
-| omitted | the asset is out | sg-bids |
+| omitted | the asset is cut in a later round | sg-bids |
 | notes | production's note to the vendors | sg-bids |
 
 ### Rows from a breakdown

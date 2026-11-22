@@ -67,7 +67,7 @@ describe('gridCsv', () => {
 
 	it('heads a price in both currencies and a status per vendor', () => {
 		expect(lines[0]).toBe(
-			'Group,Kind,Code,Description,Omitted,"North, Ltd (USD)","North, Ltd (USD)","North, Ltd status",South (GBP),South (USD),South status,Lowest vendor,Spread %'
+			'Group,Kind,Code,Description,Cut this round,"North, Ltd (USD)","North, Ltd (USD)","North, Ltd status",South (GBP),South (USD),South status,Lowest vendor,Spread %'
 		);
 	});
 

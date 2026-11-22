@@ -3,7 +3,7 @@ import { normalizeFields } from 'sg-widgets-core';
 import { SHOT_FIELDS_B } from './fixtures/schema';
 import { shot } from './fixtures';
 import { columnByKey, requestColumns } from './live-columns';
-import { bulkConfirm, editLine, splitTargets, undoLine } from './edit-words';
+import { bulkConfirm, editLine, movedLine, removedLine, splitTargets, undoLine } from './edit-words';
 import type { Change } from './row-edit';
 
 const columns = requestColumns('shot', { description: 'sg_brief', difficulty: 'sg_complexity', sequence: 'sg_sequence' }, normalizeFields(SHOT_FIELDS_B));
@@ -66,5 +66,23 @@ describe('undoLine', () => {
 	it('names the values changed in Flow PT since, and left', () => {
 		const line = undoLine({ fpt: [], local: [], conflicts: [{ change: change('shot-1', true), now: 'C' }, { change: change('shot-2', true), now: null }], gone: [change('x', true)] }, codeOf);
 		expect(line).toBe('2 changed in Flow PT since your edit and stay as Flow PT holds them: SH010 (now C), SH020 (now empty). 1 is gone from Flow PT.');
+	});
+});
+
+describe('the line after rows go or move', () => {
+	it('names one row by its code', () => {
+		expect(removedLine(['SH010'])).toBe('SH010 is out of the request.');
+		expect(movedLine(['SH010'], 'Creature')).toBe('SH010 is in Creature now.');
+	});
+
+	it('says a row with no code is one, never its inner id', () => {
+		expect(removedLine([''])).toBe('A row with no code is out of the request.');
+		expect(removedLine(['  '])).toBe('A row with no code is out of the request.');
+		expect(movedLine([''], 'Creature')).toBe('A row with no code is in Creature now.');
+	});
+
+	it('counts several', () => {
+		expect(removedLine(['SH010', ''])).toBe('2 rows are out of the request.');
+		expect(movedLine(['SH010', 'SH020', ''], 'Creature')).toBe('3 rows are in Creature now.');
 	});
 });

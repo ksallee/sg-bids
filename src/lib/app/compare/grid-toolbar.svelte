@@ -97,7 +97,7 @@
 		</label>
 		<label class="flex items-center gap-1.5 text-xs">
 			<input type="checkbox" class="accent-primary" bind:checked={s.hideOmitted} />
-			<span>Hide omitted</span>
+			<span>Hide cut rows</span>
 		</label>
 		<div class="relative ml-auto">
 			<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" aria-hidden="true" />

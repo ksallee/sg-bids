@@ -38,11 +38,16 @@
 //      when the site has the field; the drive creates no field), the Groups on the Shots; undoes from
 //      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
+//   8b. round 1 had no Omit column and no Omit on the selection; starts round 2 from the issued
+//      request, flips one Seq A row's Omit box beside the code with one click (on, off, on, no row
+//      selected, no editor), issues it, answers as
+//      Vendor A (the cut row takes no price), and reads the comparison's cut mark on the row;
 //   9. on the list: opens the request from its row's link; reads back its Bids, Shots and Assets
-//      (both bids by name, the totals by unit, the counted row as 120) and the copy's; filters to
-//      the drive's rows and ticks them with the header box; duplicates both with their rows and reads
-//      back the two new drafts and their totals; Shift ticks all four and deletes them, a mix of
-//      drafts and the issued request behind the typed word, and reads back that they are gone;
+//      (both bids by name, the totals by unit, the counted row as 120), the copy's, and round 2's
+//      (its cut row left out); filters to the drive's three rows and ticks them with the header box;
+//      duplicates all three with their rows and reads back the new drafts and their totals; Shift
+//      ticks all six and deletes them, drafts and both issued rounds behind the typed word, and reads
+//      back that they are gone;
 //  10. deletes what the drive made, in Flow PT (its Group too) and in the database, also on a
 //      failure part way.
 // Screenshots go to `shots/e2e-live/`. It prints ids and counts, never a token, a key or the site.
@@ -237,15 +242,15 @@ async function renameBid(from, to) {
 }
 
 /** A breakdown row's stored frames, note and Omit, from the database. */
-async function storedItem(code) {
-	const [item] = await sql`select fields->>'frames' as frames, fields->>'notes' as notes, omitted from public.production_bid_items where request_id = ${state.requestId} and code = ${code}`;
+async function storedItem(code, requestId = state.requestId) {
+	const [item] = await sql`select fields->>'frames' as frames, fields->>'notes' as notes, omitted from public.production_bid_items where request_id = ${requestId} and code = ${code}`;
 	return item;
 }
 
 /**
  * One click edits a cell, at 1920: a number is a bare field, its value selected, no steppers; a text
- * cell its field. The edit offers Undo. One click on a checkbox flips it. No row gets selected. Each
- * value is read back from the database.
+ * cell its field. The edit offers Undo. No row gets selected. Each value is read back from the
+ * database. A round 1 draft has no Omit: its one-click box is driven on round 2 (`nextRound`).
  */
 async function cellEdits(table) {
 	const was = page.viewportSize();
@@ -289,23 +294,6 @@ async function cellEdits(table) {
 	const noted = await storedItem('zzsgbids_SQ910');
 	expect(notesFocused && noted?.notes === 'Roof only' && (await selected()) === 0, `one click on zzsgbids_SQ910's Note to vendors opened its field, focused; typed and Enter stored "${noted?.notes}"; no row selected`);
 
-	// Omit: one click flips it on, another off.
-	const omit = row('zzsgbids_SQ910').locator('td[data-column=c_omitted]');
-	const box = omit.getByRole('checkbox');
-	await omit.click();
-	await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
-	await saved();
-	const omitted = await storedItem('zzsgbids_SQ910');
-	const omitEditor = await omit.locator('[data-slot=entity-table-editor]').count();
-	const selectedOn = await selected();
-	await omit.click();
-	await box.and(page.locator('[data-state=unchecked]')).waitFor({ timeout: 10_000 });
-	await saved();
-	const included = await storedItem('zzsgbids_SQ910');
-	expect(
-		omitted?.omitted === true && included?.omitted === false && omitEditor === 0 && selectedOn === 0 && (await selected()) === 0,
-		`one click on zzsgbids_SQ910's Omit box stored omitted ${omitted?.omitted} with no editor and no row selected; a second click stored ${included?.omitted}`
-	);
 	await page.setViewportSize(was);
 }
 
@@ -431,6 +419,14 @@ const stages = {
 		await page.waitForTimeout(800);
 		// One Flow PT Shot moves from Seq A to Creature, from the selection bar.
 		await page.locator('[data-slot=request-table] tr', { hasText: state.moved.code }).getByRole('checkbox').first().click();
+		// Round 1 has no Omit: removing a row does it.
+		const omitCells = await page.locator('[data-slot=request-table] td[data-column=c_omitted]').count();
+		const omitButton = await page.locator('[data-slot=bulk-omit]').count();
+		await page.setViewportSize({ width: 1920, height: 1080 });
+		await page.waitForTimeout(600);
+		await shoot(page, 'round1-no-omit-1920');
+		await page.setViewportSize({ width: 1440, height: 900 });
+		expect(omitCells === 0 && omitButton === 0, 'a round 1 draft has no Omit column and no Omit on the selection');
 		await page.locator('[data-slot=bulk-move]').click();
 		await page.locator('[data-slot=bulk-move-to][data-bid="Creature"]').click();
 		await saved();
@@ -789,9 +785,96 @@ const stages = {
 		);
 	},
 
+	async nextRound() {
+		await page.goto(`${APP}/requests/${state.requestId}?project=${state.projectId}`);
+		await page.waitForLoadState('networkidle');
+		await page.locator('[data-slot=request-more]').click();
+		await page.locator('[data-slot=new-round]').click();
+		await page.waitForURL((url) => /\/requests\/[0-9a-f-]{36}/.test(url.pathname) && !url.pathname.includes(state.requestId), { timeout: 30_000 });
+		state.round2Id = new URL(page.url()).pathname.split('/').pop();
+		await page.locator('[data-slot=items-panel]').waitFor({ timeout: 60_000 });
+		await page.waitForTimeout(1500);
+		// Round 2 keeps Omit, a box beside the code: one click flips it on, another off, with no editor
+		// and no row selected. A third leaves the row cut for the rest of the round.
+		const cut = state.seqShots[0].code;
+		const selected = () => page.locator('[data-slot=bulk-bar]').count();
+		const omit = page.locator('[data-slot=request-table] tr[data-row-key]', { hasText: cut }).locator('td[data-column=c_omitted]');
+		const box = omit.getByRole('checkbox');
+		const [row2] = await sql`select round from public.bid_requests where id = ${state.round2Id}`;
+		const placed = await page.locator('[data-slot=request-table] thead th').evaluateAll((ths) => ths.map((th) => th.textContent?.trim() ?? ''));
+		await omit.click();
+		await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const omitted = await storedItem(cut, state.round2Id);
+		const omitEditor = await omit.locator('[data-slot=entity-table-editor]').count();
+		const selectedOn = await selected();
+		await omit.click();
+		await box.and(page.locator('[data-state=unchecked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const included = await storedItem(cut, state.round2Id);
+		const selectedOff = await selected();
+		await omit.click();
+		await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const cutAgain = await storedItem(cut, state.round2Id);
+		await page.setViewportSize({ width: 1920, height: 1080 });
+		await page.waitForTimeout(600);
+		await shoot(page, 'round2-omitted-1920');
+		await page.setViewportSize({ width: 1440, height: 900 });
+		expect(
+			Number(row2?.round) === 2 && placed.indexOf('Omit') === placed.findIndex((t) => t.startsWith('Shot')) + 1 && omitted?.omitted === true && included?.omitted === false && cutAgain?.omitted === true && omitEditor === 0 && selectedOn === 0 && selectedOff === 0 && (await selected()) === 0,
+			`round ${row2?.round} started from the issued request, Omit beside the code; one click on ${cut}'s Omit box stored omitted ${omitted?.omitted} with no editor and no row selected, a second stored ${included?.omitted}, a third ${cutAgain?.omitted}`
+		);
+		// Issued, Vendor A answers: the cut row takes no price.
+		await page.locator('[data-slot=issue]').click();
+		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();
+		await page.locator('[data-slot=vendor-links]').waitFor({ timeout: 60_000 });
+		const links = await page.locator('[data-slot=link-value]').evaluateAll((els) => els.map((e) => e.value));
+		const vctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+		const vp = await vctx.newPage();
+		await vp.goto(links[0].replace(/^https?:\/\/[^/]+/, APP));
+		await vp.waitForLoadState('networkidle');
+		await vp.locator('[data-slot=package-head]').first().waitFor({ timeout: 30_000 });
+		await vp.locator('[data-slot=package-head]', { hasText: 'Creature' }).getByRole('radio', { name: 'Not bidding' }).click();
+		const offered = await vp.locator('[data-slot=rate-input]').evaluateAll((els) => els.map((e) => e.getAttribute('data-difficulty') ?? ''));
+		for (const d of offered) await vp.locator(`[data-slot=rate-input][data-difficulty="${d}"]`).fill('1000');
+		const cutRow = vp.locator('[data-row]', { hasText: cut });
+		const cutWords = await cutRow.locator('[data-slot=line-omitted]').innerText();
+		const cutInputs = await cutRow.locator('input[data-price]').count();
+		const cutExclude = await cutRow.locator('input[type=checkbox]').isDisabled();
+		await vp.waitForTimeout(800);
+		await vp.locator('[data-slot=totals-rail] [data-save=saved]').filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+		await cutRow.scrollIntoViewIfNeeded();
+		await shoot(vp, 'round2-vendor-cut-row-1920');
+		await vp.getByRole('button', { name: 'Review and submit' }).first().click();
+		await vp.getByRole('button', { name: 'Submit answer' }).click();
+		await vp.getByText('Submitted.').first().waitFor({ timeout: 20_000 });
+		await vctx.close();
+		const lines = await sql`select i.code from public.bid_lines l join public.bids b on b.id = l.bid_id join public.request_items i on i.request_id = l.request_id and i.kind = l.item_kind and i.key = l.item_key where l.request_id = ${state.round2Id} and b.status = 'submitted'`;
+		expect(
+			/Cut this round/.test(cutWords) && cutInputs === 0 && cutExclude && lines.length === 5 && !lines.some((l) => l.code === cut),
+			`round 2's vendor form shows ${cut} as "${cutWords.trim()}" with no price field and no Exclude to tick; Vendor A submitted ${lines.length} lines, none for the cut row`
+		);
+		// The comparison hides cut rows by default; shown, it marks the row cut.
+		await page.goto(`${APP}/requests/${state.round2Id}/compare?project=${state.projectId}`);
+		await page.waitForLoadState('networkidle');
+		const hide = page.getByRole('checkbox', { name: 'Hide cut rows' });
+		await hide.waitFor({ timeout: 30_000 });
+		await page.locator('[data-slot=item-row]').first().waitFor({ timeout: 30_000 });
+		const hiddenFirst = (await page.locator('[data-slot=item-row]', { hasText: cut }).count()) === 0;
+		await hide.uncheck();
+		const compareRow = page.locator('[data-slot=item-row]', { hasText: cut }).first();
+		await compareRow.waitFor({ timeout: 30_000 });
+		const compareText = (await compareRow.locator('[role=rowheader]').innerText()).replace(/\s+/g, ' ').trim();
+		await shoot(page, 'round2-compare');
+		const tag = await compareRow.locator('[data-slot=row-cut]').innerText();
+		expect(hiddenFirst && tag.trim() === 'cut', `round 2's comparison hides ${cut} under Hide cut rows; shown, it is tagged "${tag.trim()}": "${compareText}"`);
+	},
+
 	async bulk() {
 		const rows = page.locator('[data-slot=requests] tbody tr');
-		const rowOf = (title) => rows.filter({ has: page.locator('a', { hasText: new RegExp(`^${esc(title)}$`) }) });
+		// Round 2 keeps the request's name, so a row is found by the request's id in its link.
+		const rowOf = (id) => rows.filter({ has: page.locator(`a[href*="${id}"]`) });
 		const cells = async (row) => ({
 			bids: (await row.locator('[data-slot=row-bids]').getAttribute('title')) ?? '',
 			shots: Number((await row.locator('[data-slot=row-shots]').innerText()).replace(/,/g, '')),
@@ -807,36 +890,44 @@ const stages = {
 
 		await page.goto(`${APP}/requests`);
 		await page.waitForLoadState('networkidle');
-		await rowOf(NAME).waitFor({ timeout: 30_000 });
+		await rowOf(state.requestId).waitFor({ timeout: 30_000 });
 		// The row's link still opens the request, the box beside it aside.
-		await rowOf(NAME).locator('a').click();
+		await rowOf(state.requestId).locator('a').click();
 		await page.waitForURL((url) => url.pathname.endsWith(`/requests/${state.requestId}`), { timeout: 30_000 });
 		prove('the row link opens the request, beside its box');
 		await page.goto(`${APP}/requests`);
 		await page.waitForLoadState('networkidle');
-		await rowOf(NAME).waitFor({ timeout: 30_000 });
+		await rowOf(state.requestId).waitFor({ timeout: 30_000 });
 
-		const issued = await cells(rowOf(NAME));
+		const issued = await cells(rowOf(state.requestId));
 		const issuedUnits = await units('request_items', state.requestId);
 		expect(
 			issued.bids === 'Seq A, Creature' && issued.shots === issuedUnits.shots && issued.assets === issuedUnits.assets && issuedUnits.counted === 1 && issued.shots === issuedUnits.shotRows - 1 + COUNTED.count,
 			`the list names the issued request's bids "${issued.bids}" and counts ${issued.shots} shots by unit (${issuedUnits.shotRows} rows, one standing for ${COUNTED.count}) and ${issued.assets} asset`
 		);
-		const copy = await cells(rowOf(`${NAME} copy`));
+		const copy = await cells(rowOf(state.copyId));
 		expect(copy.bids === 'Seq A, Creature' && copy.shots === 0 && copy.assets === 0, `the draft copy without rows lists "${copy.bids}", 0 shots and 0 assets`);
+		// Round 2 holds the row cut there: the list leaves it out, as the issued rows not omitted say.
+		const round2 = await cells(rowOf(state.round2Id));
+		const round2Units = await units('request_items', state.round2Id);
+		const [cutItem] = await sql`select unit_count from public.request_items where request_id = ${state.round2Id} and omitted`;
+		expect(
+			round2.bids === 'Seq A, Creature' && round2.shots === round2Units.shots && round2.assets === round2Units.assets && !!cutItem && round2.shots === issued.shots - cutItem.unit_count,
+			`the list counts round 2 without its cut row: ${round2.shots} shots (round 1: ${issued.shots}, the cut row ${cutItem?.unit_count}) and ${round2.assets} asset, bids "${round2.bids}"`
+		);
 
 		// The header box ticks what the filters show, and only that.
 		await page.getByLabel('Find a request').fill(`zzsgbids drive ${STAMP}`);
-		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 2, { timeout: 10_000 });
+		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 3, { timeout: 10_000 });
 		const before = await page.locator('[data-slot=requests]').boundingBox();
 		await page.locator('[data-slot=requests-select-all]').click();
 		const count = await page.locator('[data-slot=requests-bulk-count]').innerText();
 		const after = await page.locator('[data-slot=requests]').boundingBox();
 		const ticked = await page.locator('[data-slot=row-select][aria-checked=true]').count();
-		expect(count === '2 selected' && ticked === 2 && before.y === after.y, `the header box ticks the 2 rows the search shows, the bar says "${count}", and the table does not move`);
-		await shoot(page, 'requests-two-selected');
+		expect(count === '3 selected' && ticked === 3 && before.y === after.y, `the header box ticks the 3 rows the search shows (round 1, its copy, round 2), the bar says "${count}", and the table does not move`);
+		await shoot(page, 'requests-three-selected');
 
-		// Duplicate both, with their rows.
+		// Duplicate all three, with their rows.
 		const known = new Set((await mine()).map((r) => r.id));
 		await page.locator('[data-slot=requests-bulk-duplicate]').click();
 		const dup = page.locator('[data-slot=bulk-duplicate]');
@@ -845,29 +936,35 @@ const stages = {
 		await shoot(page, 'bulk-duplicate');
 		await dup.locator('[data-slot=bulk-duplicate-now]').click();
 		const dupLine = await page.locator('[data-slot=bulk-result]', { hasText: /Made \d+ draft cop|Nothing duplicated/ }).innerText({ timeout: 60_000 });
-		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 4, { timeout: 30_000 });
+		await page.waitForFunction((n) => document.querySelectorAll('[data-slot=requests] tbody tr').length === n, 6, { timeout: 30_000 });
 		const made = (await mine()).filter((r) => !known.has(r.id));
-		const copyOfIssued = made.find((r) => r.title === `${NAME} copy`);
+		// Round 1 and round 2 share the name, so both copies are `<name> copy`: told apart by their rows.
+		const named = await Promise.all(made.filter((r) => r.title === `${NAME} copy`).map(async (r) => ({ ...r, units: await units('production_bid_items', r.id) })));
+		const copyOfIssued = named.find((r) => r.units.shots === issuedUnits.shots && r.units.assets === issuedUnits.assets);
+		const copyOfRound2 = named.find((r) => r.units.shots === round2Units.shots && r.units.assets === round2Units.assets);
 		const copyOfCopy = made.find((r) => r.title === `${NAME} copy copy`);
-		const draftUnits = copyOfIssued ? await units('production_bid_items', copyOfIssued.id) : null;
+		const draftUnits = copyOfIssued?.units ?? null;
 		const copyBids = copyOfIssued ? (await sql`select name from public.request_packages where request_id = ${copyOfIssued.id} order by position`).map((b) => b.name).join() : '';
+		const cutKept = copyOfRound2 ? (await sql`select count(*)::int as n from public.production_bid_items where request_id = ${copyOfRound2.id} and omitted`)[0].n : 0;
 		expect(
-			dupLine.startsWith('Made 2 draft copies.') && made.length === 2 && made.every((r) => r.status === 'draft') && copyOfIssued && copyOfCopy && copyBids === 'Seq A,Creature' && draftUnits.shots === issuedUnits.shots && draftUnits.assets === issuedUnits.assets,
-			`duplicated two at once with their rows: "${dupLine.split('\n')[0]}", 2 new drafts "${copyOfIssued?.title}" and "${copyOfCopy?.title}", the first with bids ${copyBids} and ${draftUnits?.shots} shots and ${draftUnits?.assets} asset as the issued request`
+			dupLine.startsWith('Made 3 draft copies.') && made.length === 3 && made.every((r) => r.status === 'draft') && copyOfIssued && copyOfRound2 && copyOfIssued.id !== copyOfRound2.id && copyOfCopy && copyBids === 'Seq A,Creature' && cutKept === 1,
+			`duplicated three at once with their rows: "${dupLine.split('\n')[0]}", 3 new drafts: "${copyOfIssued?.title}" of round 1 with bids ${copyBids} and ${draftUnits?.shots} shots and ${draftUnits?.assets} asset as the issued request, "${copyOfRound2?.title}" of round 2 with ${copyOfRound2?.units.shots} shots, its cut row kept omitted (${cutKept}), and "${copyOfCopy?.title}"`
 		);
 		const copies = await rows.filter({ has: page.locator('a', { hasText: new RegExp(`^${esc(`${NAME} copy`)}$`) }) }).all();
 		const totals = await Promise.all(copies.map(cells));
 		expect(
-			totals.length === 2 && totals.some((t) => t.shots === issuedUnits.shots && t.assets === issuedUnits.assets && t.bids === 'Seq A, Creature'),
-			`the list counts the new draft with its rows as the issued request: ${issuedUnits.shots} shots and ${issuedUnits.assets} asset, by unit`
+			totals.length === 3 &&
+				totals.some((t) => t.shots === issuedUnits.shots && t.assets === issuedUnits.assets && t.bids === 'Seq A, Creature') &&
+				totals.some((t) => t.shots === round2Units.shots && t.assets === round2Units.assets && t.bids === 'Seq A, Creature'),
+			`the list counts the new drafts with their rows by unit: the copy of round 1 as the issued request (${issuedUnits.shots} shots, ${issuedUnits.assets} asset), the copy of round 2 without its cut row (${round2Units.shots} shots)`
 		);
 		await shoot(page, 'bulk-duplicate-result');
 
-		// Shift ticks all four; delete them: drafts and the issued request, behind the typed word.
+		// Shift ticks all six; delete them: drafts and both issued rounds, behind the typed word.
 		const boxes = page.locator('[data-slot=row-select]');
 		await boxes.first().click();
 		await boxes.last().click({ modifiers: ['Shift'] });
-		const four = await page.locator('[data-slot=requests-bulk-count]').innerText();
+		const six = await page.locator('[data-slot=requests-bulk-count]').innerText();
 		await page.locator('[data-slot=requests-bulk-delete]').click();
 		const del = page.locator('[data-slot=bulk-delete]');
 		await del.locator('[data-slot=bulk-delete-lines]').waitFor({ timeout: 30_000 });
@@ -876,15 +973,15 @@ const stages = {
 		await del.locator('[data-slot=bulk-delete-word]').fill('delete');
 		await shoot(page, 'bulk-delete');
 		expect(
-			four === '4 selected' && disabled && lines.includes('3 drafts') && lines.includes('1 request sent to vendors') && (await del.getAttribute('data-typed')) === 'true',
-			`Shift ticks all 4; the one confirm names 3 drafts and 1 request sent to vendors, and stays shut until the word is typed`
+			six === '6 selected' && disabled && lines.includes('4 drafts') && lines.includes('2 requests sent to vendors') && (await del.getAttribute('data-typed')) === 'true',
+			`Shift ticks all 6; the one confirm names 4 drafts and 2 requests sent to vendors, and stays shut until the word is typed`
 		);
 		await del.locator('[data-slot=bulk-delete-now]').click();
 		const delLine = await page.locator('[data-slot=bulk-result]', { hasText: /Deleted \d+ request|Nothing deleted/ }).innerText({ timeout: 60_000 });
 		await page.locator('[data-slot=requests]').waitFor({ state: 'detached', timeout: 30_000 });
 		await shoot(page, 'bulk-delete-result');
 		const left = await mine();
-		expect(delLine.startsWith('Deleted 4 requests.') && left.length === 0, `deleted 4 at once: "${delLine.split('\n')[0]}", and the database holds none of the drive's requests`);
+		expect(delLine.startsWith('Deleted 6 requests.') && left.length === 0, `deleted 6 at once: "${delLine.split('\n')[0]}", and the database holds none of the drive's requests`);
 	}
 };
 
@@ -938,7 +1035,7 @@ try {
 	ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 	page = await ctx.newPage();
 	page.on('pageerror', (e) => log('page error:', e.message.slice(0, 200)));
-	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate', 'bulk']) {
+	for (const name of ['pre', 'newRequest', 'bids', 'vendors', 'groupCreate', 'issue', 'vendorA', 'vendorB', 'compare', 'publish', 'readBack', 'undo', 'duplicate', 'nextRound', 'bulk']) {
 		log('stage', name);
 		await stages[name]();
 	}
