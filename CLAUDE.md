@@ -45,7 +45,7 @@ metaphors, no "not X, Y", no filler.
   a draft request's one page under `builder/` (the page, the bids bar, the one table grouped by bid,
   the add dialogs, the details and vendors panels, the Issue bar, the fields setting) with its page
   state in `builder.svelte.ts`, an issued request's page, its vendor links, the new request,
-  duplicate and delete dialogs under `request/`, the comparison's grid, scenario rail and page state
+  duplicate and delete dialogs and the list's bulk delete and duplicate (`bulk-delete`, `bulk-duplicate`, `duplicate-rows`) under `request/`, the comparison's grid, scenario rail and page state
   under `compare/`, the vendor form's pieces (the rate card among them) under `vendor/`. A draft's
   bids and rows are `pure/request-draft.ts`, its vendor rows `pure/vendor-rows.ts`, what blocks the
   issue `pure/readiness.ts`, the vendor's rates `pure/rate-card.ts`, creating a vendor's Group from its row `pure/group-create.ts`
