@@ -17,6 +17,9 @@
 	a bid adds another. Such a row, like a pasted one, takes a code and a Count: how many shots of a
 	kind it stands for. A row linked to Flow PT is one, and its Count says why on hover.
 
+	One click on a cell edits it, one on a checkbox flips it. A click with Shift, Ctrl or Cmd, or on a
+	row's box or a cell that cannot be edited, selects.
+
 	Each code carries where its row comes from, in the columns' marks: live from Flow PT, or from a
 	breakdown and in this request only. A source filter shows when the request holds both
 	(`$lib/pure/row-source`). A bid with no row of this kind says so under the table, with a way to
@@ -41,6 +44,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Checkbox } from '$lib/components/ui/checkbox/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { liveContext } from '$lib/live';
 	import { cn } from '$lib/utils.js';
@@ -339,9 +343,6 @@
 		if (!cell) return;
 		cell.focus({ preventScroll: true });
 		cell.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-		// The table focuses the editor's first control, which on a number is its minus button
-		// (sg-widgets issue #385): the field is what a person types in.
-		void tick().then(() => cell.querySelector<HTMLElement>('[data-slot=entity-table-editor] input, [data-slot=entity-table-editor] textarea')?.focus({ preventScroll: true }));
 	}
 
 	// The cursor the page asks for: a row just added, or one the issue list points at. Its first cell
@@ -476,6 +477,9 @@
 		<span class="block truncate text-right tabular-nums" title={`${value.toLocaleString()} frames each, ${all.toLocaleString()} in all.`} data-slot="row-frames">
 			{value.toLocaleString()}<span class="text-muted-foreground">&nbsp;·&nbsp;{all.toLocaleString()}</span>
 		</span>
+	{:else if column.dataType === 'checkbox'}
+		<!-- The table flips it on a press or Space on the cell, so the box only shows the value. -->
+		<Checkbox aria-label={column.header} checked={value === true} tabindex={-1} onclick={(event: MouseEvent) => event.preventDefault()} />
 	{:else if value === null || value === undefined || value === ''}
 		<!-- An empty cell stays empty: its hover says it can be filled. -->
 	{:else if column.path === pathOf('sequence')}
@@ -553,7 +557,7 @@
 						<li><span class="font-medium">Live in Flow PT:</span> {requestColumns.filter((c) => c.live).map((c) => c.label).join(', ') || 'no column'}. On a {noun} picked from Flow PT, a change there changes the {type} in Flow PT.</li>
 						<li><span class="font-medium">In this request only:</span> {requestColumns.filter((c) => !c.live).map((c) => c.label).join(', ') || 'no column'}. Flow PT is not changed.</li>
 						<li class="text-muted-foreground">The mark by a code says where the row comes from: Flow PT or a breakdown.</li>
-						<li class="text-muted-foreground">Select rows, then edit a cell to change them all.</li>
+						<li class="text-muted-foreground">One click edits a cell. Select rows by their box, then edit a cell to change them all.</li>
 					</ul>
 				</Popover.Content>
 			</Popover.Root>
@@ -599,6 +603,7 @@
 				selectable
 				bind:selection
 				editable
+				editOn="click"
 				bulkEdit
 				{editLock}
 				confirmBulkEdit={confirmBulk}

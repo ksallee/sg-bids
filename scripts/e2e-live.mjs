@@ -18,7 +18,9 @@
 //   2. on its one page: 4 Shots of the sandbox from Flow PT (`zzsgbids_*` fixtures when it has
 //      fewer) and 2 breakdown Shots with a difficulty into the first bid (the request's name and 01), renamed Seq A; a row typed by hand
 //      into Seq A with Add row, its code then Tab then a count of 120, Enter adding the next row
-//      (taken out again); Add bid, renamed Creature, a breakdown Shot and Asset into it; one Flow PT
+//      (taken out again); at 1920, one click edits a breakdown row's Frames (a bare field, its value
+//      selected, no steppers), Undo puts it back, one click edits a note, one click on Omit flips it
+//      on and off, each read back from the database; Add bid, renamed Creature, a breakdown Shot and Asset into it; one Flow PT
 //      Shot moved from Seq A to Creature; the side panel hidden and shown;
 //   3. two vendors typed in their rows: Vendor A on every bid, Vendor B on Creature alone; then a
 //      third row creates an empty Group `zzsgbids_grp_<stamp>` beside its Group picker, read back
@@ -234,6 +236,79 @@ async function renameBid(from, to) {
 	await page.locator(`[data-slot=bid-chip][data-bid="${to}"]`).waitFor();
 }
 
+/** A breakdown row's stored frames, note and Omit, from the database. */
+async function storedItem(code) {
+	const [item] = await sql`select fields->>'frames' as frames, fields->>'notes' as notes, omitted from public.production_bid_items where request_id = ${state.requestId} and code = ${code}`;
+	return item;
+}
+
+/**
+ * One click edits a cell, at 1920: a number is a bare field, its value selected, no steppers; a text
+ * cell its field. The edit offers Undo. One click on a checkbox flips it. No row gets selected. Each
+ * value is read back from the database.
+ */
+async function cellEdits(table) {
+	const was = page.viewportSize();
+	await page.setViewportSize({ width: 1920, height: 1080 });
+	const row = (code) => table.locator('tr[data-row-key]', { hasText: code });
+	const selected = () => page.locator('[data-slot=bulk-bar]').count();
+
+	// Frames: one click opens the bare field with the value selected.
+	const frames = row('zzsgbids_SQ900').locator('td[data-column=c_frames]');
+	await frames.click();
+	const framesInput = frames.locator('[data-slot=entity-table-editor] input');
+	await framesInput.waitFor({ timeout: 10_000 });
+	const open = await framesInput.evaluate((el) => ({ value: el.value, selected: el.value.length > 0 && el.selectionStart === 0 && el.selectionEnd === el.value.length, focused: document.activeElement === el }));
+	const steppers = await frames.locator('[data-slot=entity-table-editor] button').count();
+	await shoot(page, 'cell-frames-one-click-1920');
+	await page.keyboard.type('75');
+	await page.keyboard.press('Enter');
+	await saved();
+	const afterEdit = await storedItem('zzsgbids_SQ900');
+	const toast = (await page.locator('[data-slot=edit-toast]').innerText()).split('\n')[0];
+	expect(
+		open.value === '60' && open.selected && open.focused && steppers === 0 && afterEdit?.frames === '75' && (await selected()) === 0,
+		`one click on zzsgbids_SQ900's Frames opened a bare field holding ${open.value}, selected and focused, ${steppers} stepper buttons; 75 and Enter stored frames ${afterEdit?.frames}; no row selected; the line said "${toast}"`
+	);
+	await page.locator('[data-slot=edit-undo]').click();
+	await page.locator('[data-slot=edit-toast]', { hasText: 'The old values are back.' }).waitFor({ timeout: 10_000 });
+	await saved();
+	const afterUndo = await storedItem('zzsgbids_SQ900');
+	expect(afterUndo?.frames === '60', `Undo put zzsgbids_SQ900's frames back: stored ${afterUndo?.frames}`);
+
+	// A text cell: one click opens its field.
+	const notes = row('zzsgbids_SQ910').locator('td[data-column=c_notes]');
+	await notes.click();
+	const notesInput = notes.locator('[data-slot=entity-table-editor] input');
+	await notesInput.waitFor({ timeout: 10_000 });
+	const notesFocused = await notesInput.evaluate((el) => document.activeElement === el);
+	await page.keyboard.type('Roof only');
+	await shoot(page, 'cell-text-one-click-1920');
+	await page.keyboard.press('Enter');
+	await saved();
+	const noted = await storedItem('zzsgbids_SQ910');
+	expect(notesFocused && noted?.notes === 'Roof only' && (await selected()) === 0, `one click on zzsgbids_SQ910's Note to vendors opened its field, focused; typed and Enter stored "${noted?.notes}"; no row selected`);
+
+	// Omit: one click flips it on, another off.
+	const omit = row('zzsgbids_SQ910').locator('td[data-column=c_omitted]');
+	const box = omit.getByRole('checkbox');
+	await omit.click();
+	await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
+	await saved();
+	const omitted = await storedItem('zzsgbids_SQ910');
+	const omitEditor = await omit.locator('[data-slot=entity-table-editor]').count();
+	const selectedOn = await selected();
+	await omit.click();
+	await box.and(page.locator('[data-state=unchecked]')).waitFor({ timeout: 10_000 });
+	await saved();
+	const included = await storedItem('zzsgbids_SQ910');
+	expect(
+		omitted?.omitted === true && included?.omitted === false && omitEditor === 0 && selectedOn === 0 && (await selected()) === 0,
+		`one click on zzsgbids_SQ910's Omit box stored omitted ${omitted?.omitted} with no editor and no row selected; a second click stored ${included?.omitted}`
+	);
+	await page.setViewportSize(was);
+}
+
 const stages = {
 	async pre() {
 		const projects = await fpt('GET', '/entity/projects?fields=name&page[size]=500');
@@ -336,6 +411,7 @@ const stages = {
 		await table.locator('tr[data-row-key]', { has: page.locator('[data-slot=row-no-code]') }).getByRole('checkbox').first().click();
 		await page.locator('[data-slot=bulk-remove]').click();
 		await table.locator('[data-slot=row-no-code]').waitFor({ state: 'detached', timeout: 10_000 });
+		await cellEdits(table);
 		// A second bid, Creature: a breakdown Shot and an Asset.
 		await page.locator('[data-slot=add-bid]').click();
 		const rename = page.locator('[data-slot=bid-rename]');

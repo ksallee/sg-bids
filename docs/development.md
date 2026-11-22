@@ -254,8 +254,13 @@ field takes, the edit plan, the read back and the undo: `src/lib/pure/row-edit.t
   When it does, the mapping and the column header suggest a field of the request's own.
 - The draft is stored as it changes, debounced, in one write.
 
+One click on a cell edits it (`editOn="click"`), and a number there is a bare field with its value
+selected; one click or Space on a checkbox flips it. A click with Shift, Ctrl or Cmd, on a row's box,
+or on a cell that cannot be edited selects.
+
 The table's bulk edit, list source and per-cell lock are sg-widgets PR #382 (with #380's width
-fix). Until sg-widgets-core ships them, `src/lib/components/core-next.ts` carries core's part.
+fix), one click to edit is #388. Until sg-widgets-core ships them, `src/lib/components/core-next.ts`
+carries core's part.
 
 ## The vendor link
 
@@ -396,7 +401,8 @@ of the dev key and the Supabase database in `.env.local`. Opt-in, never in CI. P
 the environment) at a throwaway database, not one a running app reads. It writes only to the one
 project named, by exact name: it makes a request from the New request dialog, puts 4 of the project's
 Shots and 2 breakdown Shots in the first bid (renamed Seq A), types a row by hand into it with a count of
-120, hides and shows the side panel, adds a bid (Creature) with a breakdown Shot and
+120, edits cells with one click (a Frames cell, a bare field with its value selected, then Undo; a note;
+Omit on and off) and reads each back from the database, hides and shows the side panel, adds a bid (Creature) with a breakdown Shot and
 Asset, moves a Shot between the two, types two vendors in their rows (B on Creature alone), creates an empty Group
 `zzsgbids_grp_<stamp>` from a third row and reads it back from Flow PT, types its name again in a
 fourth row and checks the warning offers that Group rather than a second, takes both rows off and
