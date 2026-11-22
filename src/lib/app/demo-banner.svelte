@@ -1,18 +1,21 @@
 <!--
-	The strip on every page under the header: this deployment is a demo. Real bids hold prices and
-	shot lists, so a studio runs its own copy (docs/deploy.md).
+	This deployment is a demo: a quiet badge in the header, on every page. Real bids hold prices and
+	shot lists, so a studio runs its own copy (docs/deploy.md). It takes no row of its own, so the
+	work below keeps the height.
 -->
 <script lang="ts">
-	import Info from '@lucide/svelte/icons/info';
-
 	const DEPLOY = 'https://github.com/ksallee/sg-bids/blob/main/docs/deploy.md';
 </script>
 
-<div class="border-border bg-info/10 text-foreground flex shrink-0 items-center justify-center gap-2 border-b px-4 py-1.5 text-xs" role="note" data-slot="demo-banner">
-	<Info class="text-info size-3.5 shrink-0" aria-hidden="true" />
-	<p>
-		Demo instance. For real bids, <a class="underline decoration-current/40 underline-offset-2 hover:decoration-current" href={DEPLOY} target="_blank" rel="noopener"
-			>deploy your own</a
-		>.
-	</p>
-</div>
+<a
+	class="border-info/40 text-foreground hover:bg-info/10 focus-visible:ring-ring inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2 text-xs outline-none focus-visible:ring-2"
+	href={DEPLOY}
+	target="_blank"
+	rel="noopener"
+	title="This copy is a demo. For real bids, deploy your own."
+	data-slot="demo-banner"
+>
+	<span class="bg-info size-1.5 rounded-full" aria-hidden="true"></span>
+	<span class="font-medium">Demo</span>
+	<span class="text-muted-foreground hidden md:inline">Deploy your own for real bids</span>
+</a>

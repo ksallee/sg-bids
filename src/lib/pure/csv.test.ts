@@ -4,7 +4,8 @@ import { bpText, csvField, gridCsv, scenarioCsv, toCsv } from './csv';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
 import { groupRows } from './grid-view';
 import { money, rate } from './money';
-import { setShares, summarize } from './scenario';
+import { pickCell, setShares, summarize } from './scenario';
+import { byPackage, byRow, packed } from './fixtures/packages';
 
 const usd = (minor: number) => money(minor, 'USD');
 const gbp = (minor: number) => money(minor, 'GBP');
@@ -66,7 +67,7 @@ describe('gridCsv', () => {
 
 	it('heads a price in both currencies and a status per vendor', () => {
 		expect(lines[0]).toBe(
-			'Group,Kind,Code,Description,Omitted,"North, Ltd (USD)","North, Ltd (USD)","North, Ltd status",South (GBP),South (USD),South status,Lowest vendor,Spread %'
+			'Group,Kind,Code,Description,Cut this round,"North, Ltd (USD)","North, Ltd (USD)","North, Ltd status",South (GBP),South (USD),South status,Lowest vendor,Spread %'
 		);
 	});
 
@@ -111,5 +112,23 @@ describe('scenarioCsv', () => {
 		expect(lines).toContain('"North, Ltd",2,90.00,20.00,no,90.00,62.50');
 		expect(lines).toContain('Total,144.00');
 		expect(lines).toContain('Rows awarded,2 of 3');
+	});
+});
+
+describe('packages in the CSV', () => {
+	const grid = compareBids(packed, [byPackage, byRow]);
+	const names = ['A Studio', 'B Studio'];
+
+	it('says in package price on a row, and gives the package as a unit', () => {
+		const lines = gridCsv(grid, groupRows(grid, 'package'), names).split('\r\n');
+		expect(lines).toContain("Creature,shot,A,,,,,in the bid's figure,300.00,300.00,lowest,B Studio,");
+		expect(lines).toContain('Bids,bid,Creature,,,1000.00,1000.00,one figure,900.00,900.00,rows summed,B Studio,11.11');
+	});
+
+	it('writes the figure once for a package given whole', () => {
+		const picks = pickCell(grid, new Map(), grid.rows[0], 0);
+		const lines = scenarioCsv(grid, 'Packages', picks, summarize(grid, picks), names).split('\r\n');
+		expect(lines).toContain("shot,A,,A Studio,100,,USD,,in the bid's figure");
+		expect(lines).toContain('bid,Creature,,A Studio,100,1000.00,USD,1000.00,one figure for the bid');
 	});
 });

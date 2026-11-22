@@ -10,12 +10,12 @@
  * custom entity.
  */
 
-import { bidKey, lineKey, type FptSite, type Written } from './fpt-award';
+import { bidKey, GENERAL_COSTS, lineKey, rowBidKey, type FptSite, type MissingOptions, type Written } from './fpt-award';
 import { applyScenario } from './compare';
 import { targetKey, type AwardScenario, type BidRequest, type Id, type VendorBid } from './model';
 import { add, money, type Money } from './money';
 import { percentOf } from './percent';
-import { toBase } from './totals';
+import { lineAmounts, resolvePackages } from './packages';
 
 export interface AwardRow {
 	readonly item_kind: 'shot' | 'asset';
@@ -31,6 +31,7 @@ export function awardRows(request: BidRequest, bids: readonly VendorBid[], scena
 	const byId = new Map(bids.map((b) => [b.id, b]));
 	const bidIds = new Map(written.bids.map((b) => [b.key, b.id]));
 	const lineIds = new Map(written.lines.map((l) => [l.key, l.id]));
+	const packages = resolvePackages(request);
 	const rows: AwardRow[] = [];
 	for (const pick of scenario.picks) {
 		for (const share of pick.shares) {
@@ -38,7 +39,8 @@ export function awardRows(request: BidRequest, bids: readonly VendorBid[], scena
 			if (!bid) throw new Error(`The scenario picks bid ${share.bidId}; it is not among the bids.`);
 			const line = bid.lines.find((l) => targetKey(l.target) === targetKey(pick.target));
 			if (!line) throw new Error(`Bid ${bid.id} has no line for ${pick.target.kind} ${pick.target.id}.`);
-			const key = bidKey(request.id, bid.vendorId, bid.round);
+			// The row's line sits under its package's Bid (`fpt-award.ts`).
+			const key = rowBidKey(packages, bidKey(request.id, bid.vendorId, bid.round), pick.target);
 			rows.push({
 				item_kind: pick.target.kind,
 				item_key: pick.target.id,
@@ -83,6 +85,8 @@ export function awardSummary(request: BidRequest, bids: readonly VendorBid[], sc
 	let shots = 0;
 	let assets = 0;
 	let split = 0;
+	// A row in a package price is worth its part of the figure (`packages.ts`): the parts sum to it exactly.
+	const worth = new Map(bids.map((b) => [b.id, lineAmounts(request, b, base)]));
 	for (const pick of scenario.picks) {
 		if (pick.target.kind === 'shot') shots++;
 		else assets++;
@@ -90,8 +94,9 @@ export function awardSummary(request: BidRequest, bids: readonly VendorBid[], sc
 		if (shared) split++;
 		for (const share of pick.shares) {
 			const bid = byId.get(share.bidId)!;
-			const line = bid.lines.find((l) => targetKey(l.target) === targetKey(pick.target))!;
-			const amount = percentOf(toBase(line.total, bid, base), share.percent);
+			const own = worth.get(bid.id)!.get(targetKey(pick.target));
+			if (!own?.base) throw new Error(`Bid ${bid.id} has no figure in ${base} for ${pick.target.kind} ${pick.target.id}.`);
+			const amount = percentOf(own.base, share.percent);
 			const part = parts.get(bid.vendorId) ?? { shots: 0, assets: 0, split: 0, total: money(0, base) };
 			if (pick.target.kind === 'shot') part.shots++;
 			else part.assets++;
@@ -110,6 +115,8 @@ export function awardSummary(request: BidRequest, bids: readonly VendorBid[], sc
 export interface BidLink {
 	readonly vendorId: Id;
 	readonly name: string;
+	/** The package the Bid is for, `General costs` for the whole-bid figures, or null: the one Bid of a request from before packages. */
+	readonly label: string | null;
 	readonly id: number;
 	readonly url: string;
 }
@@ -119,14 +126,16 @@ export function detailUrl(siteUrl: string, type: string, id: number): string {
 	return `${siteUrl.replace(/\/+$/, '')}/detail/${encodeURIComponent(type)}/${id}`;
 }
 
-/** A link to each Bid the award wrote, by vendor, read from the keys. */
-export function bidLinks(siteUrl: string, site: Pick<FptSite, 'bidType'>, written: Written, request: Pick<BidRequest, 'id' | 'vendors'>): BidLink[] {
+/** A link to each Bid the award wrote, by vendor, with its package, read from the keys. */
+export function bidLinks(siteUrl: string, site: Pick<FptSite, 'bidType'>, written: Written, request: Pick<BidRequest, 'id' | 'vendors' | 'packages'>): BidLink[] {
 	const prefix = `sgbids/${request.id}/`;
+	const packageNames = new Map((request.packages ?? []).map((p) => [p.id, p.name]));
 	return written.bids.flatMap((b) => {
 		if (!b.key.startsWith(prefix)) return [];
-		const vendorId = b.key.slice(prefix.length).split('/')[0];
+		const [vendorId, , part] = b.key.slice(prefix.length).split('/');
 		const name = request.vendors.find((v) => v.id === vendorId)?.name ?? 'A vendor';
-		return [{ vendorId, name, id: b.id, url: detailUrl(siteUrl, site.bidType, b.id) }];
+		const label = part === 'general' ? GENERAL_COSTS : part?.startsWith('p:') ? (packageNames.get(decodeURIComponent(part.slice(2))) ?? 'A bid') : null;
+		return [{ vendorId, name, label, id: b.id, url: detailUrl(siteUrl, site.bidType, b.id) }];
 	});
 }
 
@@ -145,7 +154,7 @@ export interface Publication {
 	readonly scenarioId: Id | null;
 	readonly site: FptSite;
 	readonly written: Written;
-	readonly options: { readonly allLines: boolean; readonly groups: Readonly<Record<Id, number | null>> };
+	readonly options: { readonly allLines: boolean; readonly groups: Readonly<Record<Id, number | null>>; readonly missing?: MissingOptions };
 	readonly problems: readonly string[];
 	readonly error: string | null;
 	readonly exposure: ExposureChoice | null;

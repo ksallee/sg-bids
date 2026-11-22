@@ -129,7 +129,7 @@ export interface SetupReport {
 	readonly vendorField: Readonly<Record<ItemType, VendorFieldCheck>>;
 	readonly statuses: StatusMap;
 	readonly access: VendorAccess;
-	/** Both entities found, every field present with its type, a vendor field on Shot. */
+	/** Both entities found, every field present with its type (an optional one may be missing), a vendor field on Shot. */
 	readonly ready: boolean;
 	/** The Vendor role reads neither Bid nor Bid Line. */
 	readonly safe: boolean;
@@ -386,7 +386,8 @@ export function setupReport(input: SetupInput): SetupReport {
 	}
 
 	const safe = access.bid.state === 'not_allowed' && access.line.state === 'not_allowed';
-	const ready = bidType !== null && lineType !== null && fields.every((f) => f.state === 'present') && vendorField.Shot.field !== null;
+	// An optional field missing leaves the site ready; one of the wrong type does not.
+	const ready = bidType !== null && lineType !== null && fields.every((f) => f.state === 'present' || (f.state === 'missing' && f.spec.optional)) && vendorField.Shot.field !== null;
 	return { entities, fields, vendorField, statuses, access, ready, safe, risks, adminSteps: steps };
 }
 

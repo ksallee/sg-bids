@@ -94,7 +94,7 @@ describe('gate', () => {
 		expect(g.ready).toBe(true);
 		expect(g.needsConfirm).toBe(false);
 		expect(g.exposure).toEqual({ state: 'safe' });
-		expect(g.site).toEqual({ projectId: 1180, bidType: 'CustomEntity14', lineType: 'CustomEntity15', vendorField: { Shot: 'sg_vendor_groups', Asset: 'sg_vendor_groups' }, statuses: { submitted: 'rev', awarded: 'awd', not_awarded: 'omt' } });
+		expect(g.site).toEqual({ projectId: 1180, bidType: 'CustomEntity14', lineType: 'CustomEntity15', vendorField: { Shot: 'sg_vendor_groups', Asset: 'sg_vendor_groups' }, statuses: { submitted: 'rev', awarded: 'awd', not_awarded: 'omt' }, lineCount: true });
 		expect(g.vendors).toEqual([
 			{ vendorId: 'va', name: 'Vendor A', invited: { type: 'Group', id: 38 }, source: 'invitation', group: 38, awarded: true },
 			{ vendorId: 'vb', name: 'Vendor B', invited: null, source: 'picked', group: 39, awarded: true }
@@ -123,18 +123,42 @@ describe('gate', () => {
 		]);
 	});
 
-	it('blocks with no chosen scenario, while reading, and on an item with no Flow PT row', () => {
+	it('blocks with no chosen scenario, and while reading', () => {
 		expect(gate(input({ scenario: null })).blockers).toContain('No scenario is chosen. Mark one as chosen on the compare page.');
 		expect(gate(input({ report: null })).blockers).toEqual(['The Flow PT site is still being read.']);
-		const noRow = { ...REQUEST, shots: [shot('sh010'), REQUEST.shots[1]] };
-		expect(gate(input({ request: noRow })).blockers).toEqual(['The shot sh010 has no Flow PT row. It cannot be awarded in Flow PT.']);
+	});
+
+	it('names the awarded rows with no Flow PT row, per kind, and blocks until a choice is made for the kind', () => {
+		const noRow = { ...REQUEST, shots: [shot('sh010', { code: 'SH900', source: 'breakdown' }), REQUEST.shots[1]] };
+		const g = gate(input({ request: noRow }));
+		expect(g.missing).toEqual({ shot: { labels: ['SH900'], choice: null }, asset: { labels: [], choice: null } });
+		expect(g.blockers).toEqual(['1 shot has no Flow PT Shot: SH900. Create it, publish without it, or match it first.']);
+		expect(g.problems[0]).toMatchObject({ target: 'gate-missing' });
+		const create = gate(input({ request: noRow, missing: { shot: 'create' } }));
+		expect(create.blockers).toEqual([]);
+		expect(create.missing.shot.choice).toBe('create');
+		expect(gate(input({ request: noRow, missing: { shot: 'without' } })).ready).toBe(true);
+	});
+
+	it('points each problem at what fixes it, and names the missing fields', () => {
+		const g = gate(input({ groups: {}, bids: [BID_A, BID_B, BID_C] }));
+		expect(g.problems.map((p) => [p.target, p.href ?? null])).toEqual([
+			['gate-vendor-vb', null],
+			['gate-rates', '/requests/req1/compare']
+		]);
+		const partial = site({ fields: { ...site().fields, CustomEntity15: { code: { dataType: 'text' } } } });
+		const fields = gate(input({ report: setupReport(partial) })).problems.find((p) => p.target === 'gate-site')!;
+		expect(fields.message).toMatch(/^10 fields are missing on Bid Line: sgbids key, Bid, Item, Amount, Currency, Amount Base, Share Percent, Awarded Base, Awarded and Excluded\. Create them here\.$/);
 	});
 
 	it('counts the fields it can create, and says what an admin must do', () => {
 		const partial = site({ fields: { ...site().fields, CustomEntity15: { code: { dataType: 'text' } } } });
 		const g = gate(input({ report: setupReport(partial) }));
+		// Every field but the stock name may be created; the optional Count is offered and blocks nothing.
 		expect(g.missingFields).toBe(LINE_FIELDS.length - 1);
-		expect(g.blockers).toEqual([`${LINE_FIELDS.length - 1} fields are missing on Bid and Bid Line. Create them here.`]);
+		expect(g.blockers).toHaveLength(1);
+		expect(g.blockers[0]).toMatch(new RegExp(`^${LINE_FIELDS.length - 2} fields are missing on Bid Line: `));
+		expect(g.blockers[0]).not.toMatch(/Count/);
 		const noLine = site({ entityTypes: site().entityTypes.filter((t) => t.name !== 'CustomEntity15') });
 		const g2 = gate(input({ report: setupReport(noLine) }));
 		expect(g2.site).toBeNull();

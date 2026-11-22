@@ -6,7 +6,7 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { AdjustmentForm, BidForm } from '$lib/pure/bid-form';
+	import { vendorControlId, type AdjustmentForm, type BidForm } from '$lib/pure/bid-form';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { cn } from '$lib/utils.js';
@@ -21,7 +21,7 @@
 			{#if readOnly}
 				<span class="text-sm tabular-nums">{value.value ? `${value.value}${value.kind === 'percent' ? '%' : ` ${form.currency}`}` : 'None'}</span>
 			{:else}
-				<Input bind:value={value.value} inputmode="decimal" aria-label={label} aria-invalid={!!errors[key]} class="w-32 text-right tabular-nums" />
+				<Input id={vendorControlId(key)} bind:value={value.value} inputmode="decimal" aria-label={label} aria-invalid={!!errors[key]} class="w-32 text-right tabular-nums" />
 				<div class="bg-muted flex items-center gap-0.5 rounded-lg border p-0.5">
 					{#each [{ kind: 'percent', label: '%' }, { kind: 'amount', label: form.currency }] as option (option.kind)}
 						<button
@@ -47,7 +47,7 @@
 			<div class="grid grid-cols-[minmax(0,1fr)_9.5rem] items-start gap-x-3 gap-y-1 border-b px-3 py-1.5 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_9.5rem_9rem_2rem]">
 				<div class="flex min-w-0 flex-col pt-1">
 					{#if cost.kind === 'other' && !readOnly}
-						<Input bind:value={cost.label} placeholder="What it is" aria-label="What the cost is" aria-invalid={!!errors[`cost:${i}:label`]} class="h-7" />
+						<Input id={vendorControlId(`cost:${i}:label`)} bind:value={cost.label} placeholder="What it is" aria-label="What the cost is" aria-invalid={!!errors[`cost:${i}:label`]} class="h-7" />
 						{#if errors[`cost:${i}:label`]}<p class="text-destructive text-xs">{errors[`cost:${i}:label`]}</p>{/if}
 					{:else}
 						<span class="text-sm">{cost.label}</span>
@@ -58,7 +58,7 @@
 					{#if readOnly}
 						<span class="pt-1 text-sm tabular-nums">{cost.amount || 'None'}</span>
 					{:else}
-						<Input bind:value={cost.amount} inputmode="decimal" aria-label={`${cost.label || 'Cost'}, ${form.currency}`} aria-invalid={!!errors[`cost:${i}:amount`]} class="text-right tabular-nums" />
+						<Input id={vendorControlId(`cost:${i}:amount`)} bind:value={cost.amount} inputmode="decimal" aria-label={`${cost.label || 'Cost'}, ${form.currency}`} aria-invalid={!!errors[`cost:${i}:amount`]} class="text-right tabular-nums" />
 						{#if errors[`cost:${i}:amount`]}<p class="text-destructive text-xs">{errors[`cost:${i}:amount`]}</p>{/if}
 					{/if}
 				</div>

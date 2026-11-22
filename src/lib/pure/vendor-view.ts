@@ -7,10 +7,17 @@
  * out: the form shows the name, so a browser switched to another vendor's link shows it, and every
  * write sends the id back to be checked against the cookie.
  *
+ * A vendor invited to some packages gets the rows and packages of those alone: the store reads no
+ * other (`access.ts`), and nothing here adds one. Each row goes out with its package, and the
+ * packages with their names. A request from before packages goes out as one package.
+ *
  * The form's grouping and search over the request live here too.
  */
 
-import type { BidRequest, BidStatus, InvitedVendor, RequestAsset, RequestHeader, RequestShot, Target, VendorBid } from './model';
+import type { BidRequest, BidStatus, Id, InvitedVendor, RequestAsset, RequestHeader, RequestPackage, RequestShot, Target, VendorBid } from './model';
+import { targetKey } from './model';
+import { countOf, unitsLine } from './count';
+import { resolvePackages } from './packages';
 import type { VendorKeys } from './vendor-keys';
 
 export interface VendorRequestView {
@@ -24,8 +31,10 @@ export interface VendorRequestView {
 	/** When the link stops working. */
 	readonly expiresAt: string;
 	readonly header: Omit<RequestHeader, 'projectRef'>;
-	readonly shots: readonly Omit<RequestShot, 'fpt'>[];
-	readonly assets: readonly Omit<RequestAsset, 'fpt'>[];
+	/** The packages the vendor is invited to, in the request's order. Each row names one. */
+	readonly packages: readonly RequestPackage[];
+	readonly shots: readonly (Omit<RequestShot, 'fpt' | 'source' | 'package'> & { readonly package: Id })[];
+	readonly assets: readonly (Omit<RequestAsset, 'fpt' | 'source' | 'package'> & { readonly package: Id })[];
 }
 
 export interface VendorBidRecord {
@@ -67,6 +76,8 @@ export function vendorRequestView(input: {
 }): VendorRequestView {
 	const { projectRef, ...header } = input.request.header;
 	const id = (kind: 'shot' | 'asset', key: string) => input.keys.toVendor({ kind, id: key } as Target)?.id ?? null;
+	const resolved = resolvePackages(input.request);
+	const packageOf = (target: Target) => resolved.of.get(targetKey(target))!;
 	return {
 		invitationId: input.invitation.id,
 		vendorName: input.invitation.name,
@@ -75,14 +86,17 @@ export function vendorRequestView(input: {
 		issuedAt: input.issuedAt,
 		expiresAt: input.expiresAt,
 		header,
-		shots: input.request.shots.flatMap(({ fpt, ...rest }) => {
+		// A bid's id and name: the production bid it came from is production's.
+		packages: resolved.packages.filter((p) => (resolved.rows.get(p.id) ?? []).length > 0).map((p) => ({ id: p.id, name: p.name })),
+		// Where a row came from is production's: a vendor sees no difference.
+		shots: input.request.shots.flatMap(({ fpt, source, package: _, ...rest }) => {
 			const own = id('shot', rest.id);
 			if (own === null) return [];
-			return [{ ...rest, id: own, assetIds: rest.assetIds.map((a) => id('asset', a)).filter((a): a is string => a !== null) }];
+			return [{ ...rest, id: own, assetIds: rest.assetIds.map((a) => id('asset', a)).filter((a): a is string => a !== null), package: packageOf({ kind: 'shot', id: rest.id }) }];
 		}),
-		assets: input.request.assets.flatMap(({ fpt, ...rest }) => {
+		assets: input.request.assets.flatMap(({ fpt, source, package: _, ...rest }) => {
 			const own = id('asset', rest.id);
-			return own === null ? [] : [{ ...rest, id: own }];
+			return own === null ? [] : [{ ...rest, id: own, package: packageOf({ kind: 'asset', id: rest.id }) }];
 		})
 	};
 }
@@ -110,6 +124,18 @@ export type Grouping = 'episode' | 'sequence';
 /** The groupings the shots carry: episode, then sequence. */
 export function groupings(shots: readonly Pick<RequestShot, 'episode' | 'sequence'>[]): Grouping[] {
 	return (['episode', 'sequence'] as const).filter((field) => shots.some((s) => (s[field] ?? '').trim() !== ''));
+}
+
+/** The form's sections by package: each package's name and its row keys, shots then assets, `shot:<id>`. */
+export function packageSections(request: Pick<VendorRequestView, 'packages' | 'shots' | 'assets'>): { id: Id; label: string; keys: string[] }[] {
+	return request.packages.map((p) => ({
+		id: p.id,
+		label: p.name,
+		keys: [
+			...request.shots.filter((s) => s.package === p.id).map((s) => targetKey({ kind: 'shot', id: s.id })),
+			...request.assets.filter((a) => a.package === p.id).map((a) => targetKey({ kind: 'asset', id: a.id }))
+		]
+	}));
 }
 
 /** Shot ids by group, in the order each group first appears; the shots without one last. */
@@ -141,4 +167,41 @@ export function itemMatches(item: Partial<RequestShot> | Partial<RequestAsset>, 
 		.join(' ')
 		.toLowerCase();
 	return words.every((word) => hay.includes(word));
+}
+
+/**
+ * What the vendor's "The request" box lists, label and value, each one set: the bids it answers
+ * with their rows, then who and when. The request's name is the page's title. It always has the bids, so the box is never empty.
+ * `day` writes a `YYYY-MM-DD` day for the reader.
+ */
+/**
+ * What a bid holds, in words: its rows, or where rows stand for several (`count.ts`), its shots and
+ * assets in its rows: `170 shots in 3 rows`.
+ */
+function bidRows(request: Pick<VendorRequestView, 'shots' | 'assets'>, id: Id): string {
+	const shots = request.shots.filter((s) => s.package === id && !s.omitted);
+	const assets = request.assets.filter((a) => a.package === id && !a.omitted);
+	const rows = shots.length + assets.length;
+	if (![...shots, ...assets].some((r) => countOf(r) > 1)) return `${rows} ${rows === 1 ? 'row' : 'rows'}`;
+	const parts: string[] = [];
+	if (shots.length > 0) parts.push(unitsLine(shots.reduce((n, s) => n + countOf(s), 0), shots.length, 'shot'));
+	if (assets.length > 0) parts.push(unitsLine(assets.reduce((n, a) => n + countOf(a), 0), assets.length, 'asset'));
+	return parts.join(', ');
+}
+
+export function requestFacts(request: Pick<VendorRequestView, 'header' | 'packages' | 'shots' | 'assets'>, day: (text: string) => string): [string, string][] {
+	const h = request.header;
+	const bids = request.packages.map((p) => `${p.name} (${bidRows(request, p.id)})`).join(', ');
+	const facts: [string, string | undefined][] = [
+		[request.packages.length === 1 ? 'Bid' : 'Bids', bids || undefined],
+		['Studio', h.studio],
+		['Director', h.director],
+		['Client supervisor', h.clientSupervisor],
+		['Client producer', h.clientProducer],
+		['Cut', h.cutVersion],
+		['Turnover', h.turnoverDate ? day(h.turnoverDate) : h.turnoverWeek],
+		['Delivery', h.deliveryDate ? day(h.deliveryDate) : undefined],
+		['Format', h.deliveryFormat]
+	];
+	return facts.filter((f): f is [string, string] => typeof f[1] === 'string' && f[1].trim() !== '');
 }

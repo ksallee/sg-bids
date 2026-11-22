@@ -44,6 +44,16 @@ describe('readDraft', () => {
 		expect(result.draft.rebate[0].base).toEqual({ kind: 'contract', percent: '65' });
 	});
 
+	it('reads a counted line with its unit price, and refuses a unit that is not an amount', () => {
+		const input = good();
+		const lines = input.lines as Record<string, unknown>[];
+		lines[0] = { target: { kind: 'shot', id: 'bd-1' }, total: usd(18_000_000), unit: usd(150_000), excluded: false, fromRate: true };
+		const result = readDraft(input);
+		expect(result.ok && result.draft.lines[0]).toEqual({ target: { kind: 'shot', id: 'bd-1' }, total: usd(18_000_000), unit: usd(150_000), excluded: false, fromRate: true });
+		lines[0] = { ...lines[0], unit: { minor: 1.5, currency: 'USD' } };
+		expect(readDraft(input).ok).toBe(false);
+	});
+
 	it('drops keys it does not know, ids included: the server owns them', () => {
 		const input = good();
 		input.id = 'other-bid';
@@ -112,5 +122,18 @@ describe('readDraft', () => {
 	it('refuses more lines than any request holds', () => {
 		const line = { target: { kind: 'shot', id: 'a' }, total: usd(1), excluded: false };
 		expect(readDraft({ ...good(), lines: Array.from({ length: 10_001 }, () => line) }).ok).toBe(false);
+	});
+
+	it('takes a package figure and the lines it covers, and refuses a bad one', () => {
+		const covered = { target: { kind: 'shot', id: 'a' }, total: usd(0), excluded: false, inPackage: true };
+		const result = readDraft({ ...good(), lines: [covered], packages: [{ package: 'p1', total: usd(5000), notes: 'all in', extra: 1 }] });
+		expect(result.ok && result.draft.packages).toEqual([{ package: 'p1', total: usd(5000), notes: 'all in' }]);
+		expect(result.ok && result.draft.lines[0].inPackage).toBe(true);
+		expect(readDraft({ ...good(), packages: [{ package: 'p1', total: { minor: -1, currency: 'USD' } }] }).ok).toBe(false);
+		expect(readDraft({ ...good(), packages: [{ total: usd(1) }] }).ok).toBe(false);
+		expect(readDraft({ ...good(), lines: [{ ...covered, inPackage: 'yes' }] }).ok).toBe(false);
+		const declined = readDraft({ ...good(), declined: ['p2'] });
+		expect(declined.ok && declined.draft.declined).toEqual(['p2']);
+		expect(readDraft({ ...good(), declined: [3] }).ok).toBe(false);
 	});
 });

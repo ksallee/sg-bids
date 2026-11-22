@@ -78,10 +78,11 @@
 			<Dialog.Header>
 				<Dialog.Title class="flex items-center gap-2">
 					<span class="font-mono">{row.label}</span>
-					{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-xs font-normal">omitted</span>{/if}
+					{#if row.count > 1}<span class="rounded border px-1 text-xs font-normal tabular-nums" data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
+					{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-xs font-normal">cut this round</span>{/if}
 				</Dialog.Title>
 				<Dialog.Description class="flex flex-wrap gap-x-3">
-					{#each [row.target.kind === 'shot' ? row.sequence : 'Asset', item?.description, item && 'frames' in item && item.frames ? `${item.frames} frames` : '', item?.difficulty].filter(Boolean) as part, i (i)}
+					{#each [row.count > 1 ? `${row.count.toLocaleString()} ${row.target.kind === 'shot' ? 'shots' : 'assets'} in this row` : '', row.target.kind === 'shot' ? row.sequence : 'Asset', item?.description, item && 'frames' in item && item.frames ? (row.count > 1 ? `${item.frames} frames each, ${(item.frames * row.count).toLocaleString()} in all` : `${item.frames} frames`) : '', item?.difficulty].filter(Boolean) as part, i (i)}
 						<span>{part}</span>
 					{/each}
 				</Dialog.Description>
@@ -100,9 +101,21 @@
 										{cell.amount.base ? formatAmount(cell.amount.base, undefined, false) : formatAmount(cell.amount.bid, undefined, false)}
 									</span>
 									<span class="text-muted-foreground text-xs tabular-nums">
+										{#if cell.unit}<span data-slot="cell-unit">{formatAmount(cell.unit.base ?? cell.unit.bid, undefined, false)} each, times {row.count.toLocaleString()}. </span>{/if}
 										{#if !cell.amount.base}<span class="text-warning-foreground dark:text-warning">Needs a rate. </span>{:else if cell.amount.bid.currency !== grid.baseCurrency}{formatAmount(cell.amount.bid, undefined, false)} in {cell.amount.bid.currency}. {/if}
 										{#if cell.lowest}<span class="text-success font-medium">Lowest.</span>{:else if cell.spreadBp !== null}{formatSpread(cell.spreadBp)} over the lowest.{/if}
 									</span>
+								{:else if cell.kind === 'package'}
+									{@const unit = grid.packages.find((p) => p.id === cell.package)}
+									{@const figure = unit?.cells[c]}
+									<span class="text-sm">In the figure for {unit?.name ?? 'its bid'}.</span>
+									{#if figure && figure.kind === 'package'}
+										<span class="text-muted-foreground text-xs tabular-nums">
+											One figure for the bid: {figure.amount.base ? formatAmount(figure.amount.base, undefined, false) : formatAmount(figure.amount.bid, undefined, false)}. Awarded whole or not at all.
+										</span>
+									{/if}
+								{:else if cell.kind === 'declined'}
+									<span class="text-muted-foreground text-sm">Not bidding on this bid.</span>
 								{:else if cell.kind === 'excluded'}
 									<span class="text-muted-foreground text-sm">Excluded. The vendor will not do it.</span>
 								{:else}
@@ -154,7 +167,7 @@
 				>
 					<div class="flex flex-wrap items-baseline gap-x-2">
 						<h3 class="text-sm font-semibold">Split between vendors</h3>
-						<span class="text-muted-foreground text-xs">A share per vendor, in percent, summing to 100. Leave a vendor empty to leave it out.</span>
+						<span class="text-muted-foreground text-xs">A share per vendor, in percent, summing to 100. Leave a vendor empty to leave it out. A vendor that priced the row's bid as one figure takes no share: click its cell to give it the whole bid.</span>
 					</div>
 					<div class="flex flex-wrap items-end gap-3">
 						{#each grid.columns as column, c (column.bidId)}

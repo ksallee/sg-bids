@@ -98,6 +98,18 @@ export async function withdraw(store: Store, token: unknown, body: unknown): Pro
 	return loadBid(store, token);
 }
 
+/**
+ * Discards the open draft the page shows: a first draft, and the vendor starts from empty; a
+ * revision, and the last submitted or withdrawn version is the latest again. A submitted bid is
+ * never discarded: withdraw it.
+ */
+export async function discard(store: Store, token: unknown, body: unknown): Promise<VendorBidView> {
+	const want = binding(body, true);
+	await checked(store, token, want, true);
+	await store.discardDraftBid(token, want.bidId!);
+	return loadBid(store, token);
+}
+
 /** The bid as a draft to start the next version from. */
 export function asDraft(bid: VendorBid): BidDraft {
 	const { id, requestId, vendorId, round, status, lines, ...rest } = bid;

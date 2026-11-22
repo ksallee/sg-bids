@@ -91,11 +91,11 @@
 			>
 				<div class="flex flex-col gap-1">
 					<p class="text-sm font-semibold">Rate to {base}</p>
-					<p class="text-muted-foreground text-xs">Every {currency} figure of this bid converts at this rate. You can change it until the award.</p>
+					<p class="text-muted-foreground text-xs">Every {currency} figure of this answer converts at this rate. You can change it until the award.</p>
 				</div>
 				<label class="flex flex-col gap-1 text-xs" for={`${uid}-rate`}>
 					<span class="text-muted-foreground">1 {currency} in {base}</span>
-					<Input id={`${uid}-rate`} inputmode="decimal" autocomplete="off" placeholder="1.2712" bind:value class="tabular-nums" />
+					<Input id={`${uid}-rate`} inputmode="decimal" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" placeholder="1.2712" bind:value class="tabular-nums" />
 				</label>
 				<label class="flex flex-col gap-1 text-xs" for={`${uid}-day`}>
 					<span class="text-muted-foreground">Day of the rate</span>

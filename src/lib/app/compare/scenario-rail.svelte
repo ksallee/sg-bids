@@ -160,8 +160,14 @@
 						<div class="bg-primary h-full" style:width="{awardedPct}%"></div>
 					</div>
 				</div>
-				{#if summary.invalid.length > 0}
-					<Notice tone="warning">{summary.invalid.length} {summary.invalid.length === 1 ? 'pick no longer fits' : 'picks no longer fit'} the bids shown. They count as unawarded.</Notice>
+				{#each summary.partial as part (`${part.bidId}|${part.package}`)}
+					{@const column = grid.columns.findIndex((c) => c.bidId === part.bidId)}
+					<Notice tone="warning" title={`Part of ${part.name}.`}>
+						{' '}{s.names[column] ?? 'A vendor'} priced {part.name} as one figure. It is awarded whole or not at all, so these rows count as unawarded. Give it the whole bid, or none of it.
+					</Notice>
+				{/each}
+				{#if summary.invalid.length > summary.partial.length && summary.partial.length === 0}
+					<Notice tone="warning">{summary.invalid.length} {summary.invalid.length === 1 ? 'pick no longer fits' : 'picks no longer fit'} the answers shown. They count as unawarded.</Notice>
 				{/if}
 				{#if summary.needsRate.length > 0}
 					<Notice tone="warning">A vendor in this scenario needs a rate. The total waits for it.</Notice>
@@ -197,7 +203,7 @@
 							</li>
 						{/each}
 					</ul>
-					<p class="text-muted-foreground text-xs">A vendor's non-shot costs count once it has a row, unless you switch them off. Discount and tax stay with each bid's grand total.</p>
+					<p class="text-muted-foreground text-xs">A vendor's non-shot costs count once it has a row, unless you switch them off. Discount and tax stay with each answer's grand total.</p>
 				</section>
 			{/if}
 
@@ -255,7 +261,7 @@
 			</Button>
 		{/if}
 		{#if PUBLISH_CONNECTED && chosen}
-			<Button href={`/bids/${s.requestId}/publish`} title={line} data-slot="publish">
+			<Button href={`/requests/${s.requestId}/publish`} title={line} data-slot="publish">
 				<Send class="size-3.5" />{s.data?.publication ? 'Publish again' : 'Publish the award'}
 			</Button>
 		{:else}

@@ -22,6 +22,19 @@ describe('parseWritten', () => {
 		expect(parseWritten(WRITTEN)).toEqual(WRITTEN);
 	});
 
+	it('takes the Bid of a package and the general Bid, with their lines', () => {
+		const packaged = {
+			...WRITTEN,
+			bids: [
+				{ key: `${KEY}/p:seq%3ASQ%20A`, id: 5002, created: true },
+				{ key: `${KEY}/general`, id: 5003, created: true }
+			],
+			lines: [{ key: `${KEY}/p:seq%3ASQ%20A/shot:shot-101`, id: 6002, created: true }]
+		};
+		expect(parseWritten(packaged)).toEqual(packaged);
+		expect(parseWritten({ ...WRITTEN, bids: [{ key: `${KEY}/p:seq:raw space`, id: 1, created: true }] })).toBeNull();
+	});
+
 	it('refuses a foreign key, a bad id, a field name that is not one, an empty Group list', () => {
 		expect(parseWritten({ ...WRITTEN, bids: [{ key: 'other/1', id: 1, created: true }] })).toBeNull();
 		expect(parseWritten({ ...WRITTEN, lines: [{ key: KEY, id: -1, created: true }] })).toBeNull();
@@ -29,6 +42,33 @@ describe('parseWritten', () => {
 		expect(parseWritten({ ...WRITTEN, groups: [{ itemType: 'Shot', id: 1, field: 'f', groups: [] }] })).toBeNull();
 		expect(parseWritten({ ...WRITTEN, groups: [{ itemType: 'Task', id: 1, field: 'f', groups: [1] }] })).toBeNull();
 		expect(parseWritten(null)).toBeNull();
+	});
+});
+
+describe('parseWritten, the rows a publish created', () => {
+	it('takes Shots, Assets and Sequences keyed as the app keys them', () => {
+		const items = [
+			{ key: 'shot:shot-bd-1f2e', type: 'Shot', id: 9001 },
+			{ key: 'asset:asset-bd-9', type: 'Asset', id: 9002 },
+			{ key: 'sequence:sq new', type: 'Sequence', id: 300 }
+		];
+		expect(parseWritten({ ...WRITTEN, items })).toEqual({ ...WRITTEN, items });
+	});
+
+	it('refuses another type, a bad key or id', () => {
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Task', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'task:a', type: 'Shot', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Shot', id: 0 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: [{ key: 'shot:a', type: 'Sequence', id: 1 }] })).toBeNull();
+		expect(parseWritten({ ...WRITTEN, items: 'x' })).toBeNull();
+	});
+});
+
+describe('parseAwardRecord, the choice for rows with no Flow PT row', () => {
+	it('keeps the choice per kind and the Sequence switch, and refuses another', () => {
+		const out = parseAwardRecord(body({ options: { allLines: false, groups: {}, missing: { shot: 'create', asset: 'without', sequences: true } } }), 1180);
+		expect(out.ok && out.value.options.missing).toEqual({ shot: 'create', asset: 'without', sequences: true });
+		expect(parseAwardRecord(body({ options: { allLines: false, groups: {}, missing: { shot: 'maybe' } } }), 1180).ok).toBe(false);
 	});
 });
 

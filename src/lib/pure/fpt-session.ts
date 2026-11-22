@@ -12,7 +12,9 @@
  *   for a person, `ApiUser` for a script key (027). Read, never verified: the site verifies it.
  * - A bearer the site refuses is 401 code 102 (133).
  * - `GET /entity/projects/<id>` answers the row to a person who may see the project, and 404 to one
- *   who may not (159).
+ *   who may not (159). `GET /entity/projects` read with a person's bearer lists only the projects
+ *   they may see: an Artist read 8 of 22 (027). Paged: `links.next` is there on every page, so the
+ *   list ends at the first empty page (006); a page holds up to 5000 rows (082).
  * - A person's permission group: `GET /schema/permission_groups?permission_rule_set_entity_type=HumanUser`
  *   lists each group's `code`. A person without `set_permissions` sees only their own group (an
  *   Artist and a Vendor, 132 and 162); an Admin sees every group. `GET /entity/human_users/<id>`
@@ -125,6 +127,24 @@ export function projectAnswer(status: number, body: unknown, projectId: number):
 	if (status === 404) return 'hidden';
 	if (status === 401 && errorCode(body) === 102) return 'bearer';
 	return 'site';
+}
+
+export interface ProjectRow {
+	readonly id: number;
+	readonly name: string;
+}
+
+/** One page of `GET /entity/projects`: its Project rows, a bad bearer, or the site failing. An empty page ends the list (006). */
+export function projectsPage(status: number, body: unknown): { projects: ProjectRow[] } | 'bearer' | 'site' {
+	if (status === 401 && errorCode(body) === 102) return 'bearer';
+	const data = (body as { data?: unknown } | null)?.data;
+	if (status !== 200 || !Array.isArray(data)) return 'site';
+	const projects = data.flatMap((row: { type?: unknown; id?: unknown; attributes?: { name?: unknown } } | null) =>
+		row?.type === 'Project' && Number.isSafeInteger(row.id) && (row.id as number) > 0
+			? [{ id: row.id as number, name: typeof row.attributes?.name === 'string' && row.attributes.name !== '' ? row.attributes.name : `Project ${row.id}` }]
+			: []
+	);
+	return { projects };
 }
 
 /** The permission group codes that may run bids as production, when the env names none. */

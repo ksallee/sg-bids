@@ -13,6 +13,7 @@
 		tone = 'default',
 		busy = false,
 		error = null,
+		disabled = false,
 		onconfirm,
 		oncancel,
 		children
@@ -23,6 +24,8 @@
 		tone?: 'default' | 'destructive';
 		busy?: boolean;
 		error?: string | null;
+		/** The confirm stays off: something must be fixed first, said in the body. */
+		disabled?: boolean;
 		onconfirm: () => void;
 		/** Closed without confirming: the Back button, Escape. */
 		oncancel: () => void;
@@ -50,8 +53,8 @@
 		<div class="flex flex-col gap-3 text-sm">{@render children()}</div>
 		{#if error}<p class="text-destructive text-sm" role="alert">{error}</p>{/if}
 		<div class="flex flex-wrap justify-end gap-2">
-			<Button variant="outline" onclick={oncancel} disabled={busy}>Back to the bid</Button>
-			<Button variant={tone === 'destructive' ? 'destructive' : 'default'} onclick={onconfirm} disabled={busy}>{busy ? 'Working' : confirm}</Button>
+			<Button variant="outline" onclick={oncancel} disabled={busy}>Back to your answer</Button>
+			<Button variant={tone === 'destructive' ? 'destructive' : 'default'} onclick={onconfirm} disabled={busy || disabled}>{busy ? 'Working' : confirm}</Button>
 		</div>
 	</div>
 </dialog>

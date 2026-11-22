@@ -8,6 +8,8 @@ import {
 	headerToColumns,
 	itemsFromRows,
 	itemsToRows,
+	packagesFromRows,
+	packagesToRows,
 	requestFromRows,
 	scenarioFromRows,
 	scenarioToRows,
@@ -98,6 +100,40 @@ describe('items', () => {
 	it('refuses two items with one key', () => {
 		expect(() => itemsToRows([shot('a'), shot('a')], [])).toThrow();
 	});
+
+	it('writes where a row came from as its own column, fpt by default, and reads it back', () => {
+		const rows = itemsToRows([shot('sh010', { fpt: { type: 'Shot', id: 1 } }), shot('bd-1', { source: 'breakdown', frames: 48 })], [asset('bd-2', { source: 'breakdown' })]);
+		expect(rows.map((r) => r.source)).toEqual(['fpt', 'breakdown', 'breakdown']);
+		for (const row of rows) expect(row.fields).not.toHaveProperty('source');
+		expect(rows[1]).toMatchObject({ fpt_type: null, fpt_id: null });
+		const back = itemsFromRows(rows);
+		expect(back.shots[0]).not.toHaveProperty('source');
+		expect(back.shots[1]).toEqual(shot('bd-1', { source: 'breakdown', frames: 48 }));
+		expect(back.assets[0]).toEqual(asset('bd-2', { source: 'breakdown' }));
+	});
+
+	it('writes a row count as its own column, 1 by default and for a Flow PT row, and reads it back', () => {
+		const rows = itemsToRows([shot('sh010', { fpt: { type: 'Shot', id: 1 } }), shot('bd-1', { source: 'breakdown', frames: 80, count: 120 })], [asset('bd-2', { source: 'breakdown', count: 12 }), asset('bd-3', { source: 'breakdown' })]);
+		expect(rows.map((r) => r.unit_count)).toEqual([1, 120, 12, 1]);
+		for (const row of rows) expect(row.fields).not.toHaveProperty('count');
+		const back = itemsFromRows(rows);
+		expect(back.shots[1]).toEqual(shot('bd-1', { source: 'breakdown', frames: 80, count: 120 }));
+		expect(back.shots[0]).not.toHaveProperty('count');
+		expect(back.assets[0].count).toBe(12);
+		expect(back.assets[1]).not.toHaveProperty('count');
+	});
+
+	it('reads a row stored before counts as 1', () => {
+		const [row] = itemsToRows([shot('bd-1', { source: 'breakdown' })], []);
+		const { unit_count: _, ...old } = row;
+		expect(itemsFromRows([old]).shots[0]).toEqual(shot('bd-1', { source: 'breakdown' }));
+	});
+
+	it('reads a breakdown row linked later with its Flow PT row', () => {
+		const [row] = itemsToRows([shot('bd-1', { source: 'breakdown' })], []);
+		const back = itemsFromRows([{ ...row, fpt_type: 'Shot', fpt_id: 77 }]);
+		expect(back.shots[0]).toEqual(shot('bd-1', { source: 'breakdown', fpt: { type: 'Shot', id: 77 } }));
+	});
 });
 
 describe('request', () => {
@@ -120,7 +156,8 @@ describe('vendor', () => {
 			vendor_name: 'Vendor A',
 			vendor_group_id: 12,
 			contact_email: 'a@example.com',
-			details: { ndaExecuted: true, tpn: 'Gold', capacity: '40 shots' }
+			details: { ndaExecuted: true, tpn: 'Gold', capacity: '40 shots' },
+			package_keys: null
 		});
 		const row: InvitationRow = {
 			id: 'inv-a',
@@ -203,7 +240,8 @@ describe('bid', () => {
 			item_key: 'sh010',
 			total_minor: 1_000_000,
 			excluded: false,
-			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers', assumptions: 'clean plate given' }
+			detail: { departments: [{ department: 'comp', days: '4.5', cost: money(900_000, 'EUR') }], compute: money(100_000, 'EUR'), notes: 'two layers', assumptions: 'clean plate given' },
+			in_package: false
 		});
 		expect(lines[1]).toMatchObject({ item_kind: 'asset', item_key: 'hero', total_minor: 0, excluded: true });
 	});
@@ -239,6 +277,23 @@ describe('bid', () => {
 	});
 });
 
+describe('a counted line', () => {
+	it('keeps its unit price in the detail and reads it back', () => {
+		const draft = bid({ currency: 'USD', lines: [line('l1', onShot('bd-1'), money(18_000_000, 'USD'), { unit: money(150_000, 'USD'), fromRate: true })] });
+		const { bid: columns, lines } = bidToRows(draft, 'USD');
+		expect(lines[0]).toMatchObject({ total_minor: 18_000_000, detail: { unit: { minor: 150_000, currency: 'USD' }, fromRate: true } });
+		const row = { ...tenant, id: 'b', invitation_id: 'v1', request_id: 'req1', version: 1, status: 'submitted', submitted_at: null, withdrawn_at: null, created_at: '', updated_at: '', ...columns } as BidRow;
+		const back = bidFromRows(row, [{ ...tenant, id: 'l1', bid_id: 'b', invitation_id: 'v1', request_id: 'req1', ...lines[0] }], { round: 1, baseCurrency: 'USD' });
+		expect(back.lines[0].unit).toEqual(money(150_000, 'USD'));
+		expect(back.lines[0].total).toEqual(money(18_000_000, 'USD'));
+	});
+
+	it('refuses a unit price in another currency', () => {
+		const draft = bid({ currency: 'USD', lines: [line('l1', onShot('bd-1'), money(200, 'USD'), { unit: money(100, 'EUR') })] });
+		expect(() => bidToRows(draft, 'USD')).toThrow('unit price');
+	});
+});
+
 describe('scenario', () => {
 	const scenario: AwardScenario = {
 		id: 'sc-1',
@@ -268,5 +323,69 @@ describe('scenario', () => {
 
 	it('refuses a share that is not a percent', () => {
 		expect(() => scenarioToRows([{ target: onShot('a'), shares: [{ bidId: 'b', percent: '-5' }] }])).toThrow();
+	});
+});
+
+describe('packages in the rows', () => {
+	it('writes each row package in its own column and reads it back', () => {
+		const rows = itemsToRows([{ id: 'a', code: 'A', omitted: false, assetIds: [], package: 'p1' }], [{ id: 'x', name: 'X', package: 'p2' }]);
+		expect(rows.map((r) => [r.key, r.package_key, 'package' in r.fields])).toEqual([
+			['a', 'p1', false],
+			['x', 'p2', false]
+		]);
+		const back = itemsFromRows(rows);
+		expect(back.shots[0].package).toBe('p1');
+		expect(back.assets[0].package).toBe('p2');
+		expect(itemsFromRows(itemsToRows([{ id: 'b', code: 'B', omitted: false, assetIds: [] }], [])).shots[0]).not.toHaveProperty('package');
+	});
+
+	it('writes the packages in order and refuses two with one id or one name', () => {
+		expect(packagesToRows([{ id: 'p1', name: ' Creature ' }, { id: 'p2', name: 'Comp' }])).toEqual([
+			{ key: 'p1', name: 'Creature' },
+			{ key: 'p2', name: 'Comp' }
+		]);
+		expect(() => packagesToRows([{ id: 'p1', name: 'A' }, { id: 'p1', name: 'B' }])).toThrow(/Two packages have the id/);
+		expect(() => packagesToRows([{ id: 'p1', name: 'A' }, { id: 'p2', name: 'a' }])).toThrow(/Two packages are named/);
+		expect(packagesFromRows([{ key: 'p2', name: 'B', position: 1 }, { key: 'p1', name: 'A', position: 0 }])).toEqual([
+			{ id: 'p1', name: 'A' },
+			{ id: 'p2', name: 'B' }
+		]);
+	});
+
+	it('round-trips an invitation to some packages', () => {
+		const columns = vendorToColumns({ name: 'V', email: 'v@example.com', ndaExecuted: false, packages: ['p1'] });
+		expect(columns.package_keys).toEqual(['p1']);
+		expect(vendorFromRow({ id: 'i', ...columns }).packages).toEqual(['p1']);
+		expect(vendorFromRow({ id: 'i', ...columns, package_keys: null })).not.toHaveProperty('packages');
+	});
+
+	it('round-trips a bid with a package priced as one figure', () => {
+		const draft = {
+			number: '1',
+			date: '2026-11-25',
+			currency: 'USD',
+			rate: null,
+			assumptions: [],
+			exclusions: [],
+			milestones: [],
+			lines: [{ target: { kind: 'shot' as const, id: 'a' }, total: money(0, 'USD'), excluded: false, inPackage: true }],
+			costs: [],
+			discount: null,
+			tax: null,
+			rebate: [],
+			packages: [{ package: 'p1', total: money(5000, 'USD'), notes: 'all in' }],
+			declined: ['p2']
+		};
+		const rows = bidToRows(draft, 'USD');
+		expect(rows.bid.packages).toEqual([{ package: 'p1', total: money(5000, 'USD'), notes: 'all in' }]);
+		expect(rows.lines[0].in_package).toBe(true);
+		const back = bidFromRows(
+			{ ...rows.bid, id: 'b', invitation_id: 'i', request_id: 'r', site_host: 'h', project_id: 1, version: 1, status: 'draft', submitted_at: null, withdrawn_at: null, created_at: '', updated_at: '' },
+			rows.lines.map((l, i) => ({ ...l, id: `l${i}`, bid_id: 'b', invitation_id: 'i', request_id: 'r', site_host: 'h', project_id: 1 })),
+			{ round: 1, baseCurrency: 'USD' }
+		);
+		expect(back.packages).toEqual(draft.packages);
+		expect(back.declined).toEqual(['p2']);
+		expect(back.lines[0].inPackage).toBe(true);
 	});
 });

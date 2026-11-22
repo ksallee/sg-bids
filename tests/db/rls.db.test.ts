@@ -6,17 +6,21 @@
  */
 import type { TransactionSql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TABLES, type Table } from '$lib/pure/access';
+import { ALL_TABLES } from '$lib/pure/access';
 import { createComparison } from '$lib/server/comparison';
-import { draft, draftIn, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
+import { draft, draftIn, header, issuedWithTwoVendors, rest, superuser, type Role } from './helpers';
 
 const sql = superuser();
 const PUBLIC_ROLES: Role[] = ['anon', 'authenticated'];
 
 /** A row's worth of plausible values per table, for the insert attempts. */
+type Table = (typeof ALL_TABLES)[number];
 const SAMPLE: Record<Table, Record<string, unknown>> = {
+	production_bids: { site_host: 'x.example.com', project_id: 1, name: 'B' },
+	production_bid_items: { bid_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, kind: 'shot', key: 'k', code: 'K' },
 	bid_requests: { site_host: 'x.example.com', project_id: 1, code: 'X', base_currency: 'USD' },
 	request_items: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, kind: 'shot', key: 'k', code: 'K' },
+	request_packages: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, key: 'p', name: 'P' },
 	invitations: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, vendor_name: 'V', contact_email: 'v@example.com', token_hash: 'a'.repeat(64), expires_at: '2099-01-01' },
 	bids: { invitation_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, currency: 'USD' },
 	bid_lines: { bid_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', total_minor: 1 },
@@ -24,12 +28,13 @@ const SAMPLE: Record<Table, Record<string, unknown>> = {
 	award_scenario_items: { scenario_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
 	awards: { request_id: '00000000-0000-0000-0000-000000000000', item_kind: 'shot', item_key: 'k', bid_line_id: '00000000-0000-0000-0000-000000000000', share_percent: '100' },
 	award_publications: { request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, state: 'published', site: {}, written: {}, published_by: {} },
-	bid_rates: { bid_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, rate: '1.2', rate_date: '2026-11-20' }
+	bid_rates: { bid_id: '00000000-0000-0000-0000-000000000000', request_id: '00000000-0000-0000-0000-000000000000', site_host: 'x.example.com', project_id: 1, rate: '1.2', rate_date: '2026-11-20' },
+	withdrawn_links: { token_hash: 'b'.repeat(64) }
 };
 
 async function snapshot(): Promise<Record<string, string>> {
 	const out: Record<string, string> = {};
-	for (const table of TABLES) {
+	for (const table of ALL_TABLES) {
 		const rows = await sql.unsafe(`select md5(coalesce(string_agg(t::text, '|' order by t::text), '')) as h, count(*)::int as n from public.${table} t`);
 		out[table] = `${rows[0].n}:${rows[0].h}`;
 	}
@@ -53,6 +58,11 @@ beforeAll(async () => {
 	const pounds = await other.s.saveDraftBid(other.a.token, draftIn('GBP', 80_000));
 	await other.s.submitBid(other.a.token, pounds.id);
 	await createComparison(rest('service_role')).setRate(other.production, other.request.id, pounds.id, { rate: '1.27', date: '2026-11-20' });
+	// A deleted request, so a withdrawn link is kept.
+	const gone = await issuedWithTwoVendors();
+	await gone.s.deleteRequest(gone.production, gone.request.id, 'BR-1');
+	// A draft request, whose bid holds a row.
+	await s.createDraftRequest(production, { code: 'BR-BIDS', header: header(), items: { shots: [{ id: 'sh900', code: 'SH900', omitted: false, assetIds: [] }], assets: [] } });
 });
 
 afterAll(async () => {
@@ -62,7 +72,7 @@ afterAll(async () => {
 type Sql = ReturnType<typeof superuser> | TransactionSql;
 
 /**
- * What the catalog says is wrong with `public`, from the catalog alone, not from `TABLES`: a table
+ * What the catalog says is wrong with `public`, from the catalog alone, not from `ALL_TABLES`: a table
  * that a later migration adds and forgets fails here. Every table (plain or partitioned) has row
  * level security; no table, view, sequence or function is granted to `anon` or `authenticated`.
  */
@@ -90,7 +100,7 @@ describe('the schema', () => {
 	it('has row level security on every table and not one policy', async () => {
 		const tables = await sql`select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
 			where n.nspname = 'public' and c.relkind = 'r' order by c.relname`;
-		expect(tables.map((t) => t.relname)).toEqual([...TABLES].sort());
+		expect(tables.map((t) => t.relname)).toEqual([...ALL_TABLES].sort());
 		expect(tables.every((t) => t.relrowsecurity)).toBe(true);
 		const policies = await sql`select policyname from pg_policies where schemaname = 'public'`;
 		expect(policies).toHaveLength(0);
@@ -111,7 +121,7 @@ describe('the schema', () => {
 		// The guard reads the catalog, so it covers every table there, bid_rates included.
 		const seen = (await sql`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
 			where n.nspname = 'public' and c.relkind in ('r', 'p') and c.relrowsecurity`).map((r) => r.relname);
-		for (const table of TABLES) expect(seen, table).toContain(table);
+		for (const table of ALL_TABLES) expect(seen, table).toContain(table);
 		expect(seen).toContain('bid_rates');
 	});
 
@@ -138,7 +148,7 @@ describe('the schema', () => {
 	});
 
 	it('every table has rows to protect', async () => {
-		for (const table of TABLES) {
+		for (const table of ALL_TABLES) {
 			const [{ n }] = await sql.unsafe(`select count(*)::int as n from public.${table}`);
 			expect(n, table).toBeGreaterThan(0);
 		}
@@ -149,7 +159,7 @@ describe.each(PUBLIC_ROLES)('through PostgREST as %s', (role) => {
 	const client = rest(role);
 
 	it('reads nothing from any table', async () => {
-		for (const table of TABLES) {
+		for (const table of ALL_TABLES) {
 			const { data, error } = await client.from(table).select('*');
 			expect(error !== null || (Array.isArray(data) && data.length === 0), table).toBe(true);
 		}
@@ -157,7 +167,7 @@ describe.each(PUBLIC_ROLES)('through PostgREST as %s', (role) => {
 
 	it('inserts, updates and deletes nothing in any table', async () => {
 		const before = await snapshot();
-		for (const table of TABLES) {
+		for (const table of ALL_TABLES) {
 			const inserted = await client.from(table).insert(SAMPLE[table]).select();
 			expect(inserted.error, `insert ${table}`).not.toBeNull();
 			const updated = await client.from(table).update({ id: '00000000-0000-0000-0000-000000000001' }).not('id', 'is', null).select();
@@ -198,7 +208,15 @@ describe.each(PUBLIC_ROLES)('through PostgREST as %s', (role) => {
 				p_items: [],
 				p_costs_left_out: []
 			}),
-			client.rpc('sg_choose_scenario', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_scenario_id: null })
+			client.rpc('sg_choose_scenario', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_scenario_id: null }),
+			client.rpc('sg_delete_request', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_save_production_bid', { p_bid_id: null, p_site_host: 'x.example.com', p_project_id: 1, p_name: 'x', p_items: [] }),
+			client.rpc('sg_clone_production_bid', { p_bid_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_delete_production_bid', { p_bid_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1 }),
+			client.rpc('sg_move_bid_rows', { p_from: '00000000-0000-0000-0000-000000000000', p_to: '00000000-0000-0000-0000-000000000001', p_site_host: 'x', p_project_id: 1, p_rows: [], p_move: false }),
+			client.rpc('sg_set_request_bids', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_bid_ids: [] }),
+			client.rpc('sg_issue_request', { p_request_id: '00000000-0000-0000-0000-000000000000', p_site_host: 'x', p_project_id: 1, p_links: [] }),
+			client.rpc('sg_bids_first_convert', {})
 		];
 		for (const call of await Promise.all(calls)) expect(call.error).not.toBeNull();
 		expect(await snapshot()).toEqual(before);
@@ -212,7 +230,7 @@ describe('row level security alone', () => {
 			.begin(async (tx) => {
 				await tx.unsafe(`grant select, insert, update, delete on all tables in schema public to ${role}`);
 				await tx.unsafe(`set local role ${role}`);
-				for (const table of TABLES) {
+				for (const table of ALL_TABLES) {
 					const [{ n }] = await tx.unsafe(`select count(*)::int as n from public.${table}`);
 					expect(n, table).toBe(0);
 					const updated = await tx.unsafe(`update public.${table} set id = id`);

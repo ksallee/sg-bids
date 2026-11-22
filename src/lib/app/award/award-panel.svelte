@@ -62,7 +62,7 @@
 	}
 </script>
 
-<section class="flex flex-col gap-4 rounded-lg border p-4" data-slot="award-panel" data-state={publication.state} aria-label="The award">
+<section id="award" class="flex scroll-mt-4 flex-col gap-4 rounded-lg border p-4" data-slot="award-panel" data-state={publication.state} aria-label="The award">
 	<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
 		<h2 class="text-base font-semibold">{title}</h2>
 		<p class="text-muted-foreground text-sm">
@@ -120,7 +120,7 @@
 			<span class="text-muted-foreground">Bids in Flow PT:</span>
 			{#each links as link (link.id)}
 				<a class="hover:text-foreground text-info inline-flex items-center gap-1 underline-offset-4 hover:underline" href={link.url} target="_blank" rel="noreferrer">
-					{link.name}<ExternalLink class="size-3" aria-hidden="true" />
+					{link.name}{link.label ? `, ${link.label}` : ""}<ExternalLink class="size-3" aria-hidden="true" />
 				</a>
 			{/each}
 		</div>
@@ -150,7 +150,7 @@
 				<Undo2 class="size-3.5" />{publication.state === 'undo_partial' ? 'Undo again' : 'Undo award'}
 			</Button>
 			{#if resume && publication.state === 'partial'}
-				<Button size="sm" href={`/bids/${request.id}/publish`}>Publish again</Button>
+				<Button size="sm" href={`/requests/${request.id}/publish`}>Publish again</Button>
 			{/if}
 		</div>
 	{/if}

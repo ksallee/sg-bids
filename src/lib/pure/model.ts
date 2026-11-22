@@ -1,5 +1,6 @@
 /**
- * The data the app rests on: a bid request, the vendors' bids, the award and the change orders.
+ * The data the app rests on: production's bids, a bid request made from them, the vendors' answers,
+ * the award and the change orders.
  * There is no industry standard. The fields follow the existing bid tools; `docs/data-model.md`
  * lists each one with the tools it appears in.
  *
@@ -17,6 +18,12 @@ export type Day = string;
 
 /** A percent as typed, a plain non-negative decimal: `65` is 65%. */
 export type Percent = string;
+
+/**
+ * Where a shot or asset came from. Absent: picked from Flow PT. `breakdown`: pasted, imported or
+ * typed, with no Flow PT row until it is matched or created at the award.
+ */
+export type ItemSource = 'breakdown';
 
 /** A Flow Production Tracking entity: `{ type: 'Shot', id: 1234 }`. */
 export interface EntityRef {
@@ -38,6 +45,21 @@ export function targetKey(target: Target): string {
 	return `${target.kind}:${target.id}`;
 }
 
+// Production's bid: a named set of rows, built and edited on its own, sent in one or several requests.
+
+/**
+ * A bid production builds in a project: its Shots, Assets and breakdown rows, with the request-only
+ * columns (omit, note to vendors) and the live Flow PT ones. Always editable. A request references it
+ * while a draft and copies its rows at the issue (`request-bids.ts`). In the code it is a production
+ * bid; a vendor's answer is a `VendorBid`.
+ */
+export interface ProductionBid {
+	readonly id: Id;
+	readonly name: string;
+	readonly shots: readonly RequestShot[];
+	readonly assets: readonly RequestAsset[];
+}
+
 // The bid request: what production sends.
 
 export interface BidRequest {
@@ -46,6 +68,21 @@ export interface BidRequest {
 	readonly shots: readonly RequestShot[];
 	readonly assets: readonly RequestAsset[];
 	readonly vendors: readonly InvitedVendor[];
+	/**
+	 * The request's bids, as packages: named groups of rows. Every row sits in one, named by its
+	 * `package`. Absent or empty: a request from before packages, read as one holding every row
+	 * (`packages.ts`). In the app a package is a bid of the request; the code keeps the word.
+	 */
+	readonly packages?: readonly RequestPackage[];
+}
+
+/** A bid of a request: a named group of rows a vendor is invited to, and may price as one figure. */
+export interface RequestPackage {
+	/** Stable: `bid:<id>` for a bid sent from the Bids page, or a key from before (`seq:SEQ010`, `pkg:<random>`). */
+	readonly id: Id;
+	readonly name: string;
+	/** The production bid it comes from, while that bid exists. Production's alone: never sent to a vendor. */
+	readonly bid?: Id;
 }
 
 export interface RequestHeader {
@@ -79,6 +116,8 @@ export interface RequestShot {
 	readonly id: Id;
 	readonly code: string;
 	readonly fpt?: EntityRef;
+	/** Absent for a row picked from Flow PT. Never shown to a vendor. */
+	readonly source?: ItemSource;
 	readonly description?: string;
 	readonly episode?: string;
 	readonly sequence?: string;
@@ -97,12 +136,21 @@ export interface RequestShot {
 	readonly notes?: string;
 	/** Tech requirements by department name. */
 	readonly techRequirements?: Readonly<Record<string, string>>;
+	/** The package the shot sits in. Absent: the default (`packages.ts`). */
+	readonly package?: Id;
+	/**
+	 * How many shots of its kind the row stands for, for a row with no Flow PT Shot (`count.ts`).
+	 * Absent: 1. Its frames are per unit.
+	 */
+	readonly count?: number;
 }
 
 export interface RequestAsset {
 	readonly id: Id;
 	readonly name: string;
 	readonly fpt?: EntityRef;
+	/** Absent for a row picked from Flow PT. Never shown to a vendor. */
+	readonly source?: ItemSource;
 	readonly description?: string;
 	readonly type?: string;
 	readonly difficulty?: string;
@@ -111,6 +159,10 @@ export interface RequestAsset {
 	readonly omitted?: boolean;
 	/** Production's note to the vendors on this asset. */
 	readonly notes?: string;
+	/** The package the asset sits in. Absent: the default (`packages.ts`). */
+	readonly package?: Id;
+	/** How many assets of its kind the row stands for, for a row with no Flow PT Asset. Absent: 1. */
+	readonly count?: number;
 }
 
 export interface InvitedVendor {
@@ -118,12 +170,16 @@ export interface InvitedVendor {
 	readonly name: string;
 	/** The vendor's Group in FPT, written to the shot at award. */
 	readonly fpt?: EntityRef;
+	/** The Group's name as production picked it, for production's page. Never sent to a vendor. */
+	readonly groupName?: string;
 	readonly email: string;
 	readonly ndaFile?: string;
 	readonly ndaExecuted: boolean;
 	/** Trusted Partner Network status, as typed. */
 	readonly tpn?: string;
 	readonly capacity?: string;
+	/** The packages the vendor is invited to. Absent: every package. */
+	readonly packages?: readonly Id[];
 }
 
 // The vendor bid: what a vendor answers, once per round.
@@ -156,6 +212,28 @@ export interface VendorBid {
 	readonly discount: Adjustment | null;
 	readonly tax: Adjustment | null;
 	readonly rebate: readonly RebateSplit[];
+	/** Packages priced as one figure. Their rows carry lines marked `inPackage`. Absent: none. */
+	readonly packages?: readonly PackagePrice[];
+	/** Packages the vendor is not bidding on: no line, no figure. Absent: it bids on every one. */
+	readonly declined?: readonly Id[];
+	/** The vendor's rates, which fill its lines. The lines carry the amounts every total reads. */
+	readonly rateCard?: RateCard;
+}
+
+/**
+ * A vendor's rates: a price per difficulty that appears in its rows, and one for a row with none.
+ * A line that follows a rate is marked `fromRate`; one the vendor typed is its own.
+ */
+export interface RateCard {
+	readonly rates: readonly { readonly difficulty: string; readonly amount: Money }[];
+	readonly fallback?: Money;
+}
+
+/** One figure for a whole package: every row of it not omitted, all in. */
+export interface PackagePrice {
+	readonly package: Id;
+	readonly total: Money;
+	readonly notes?: string;
 }
 
 export interface PaymentMilestone {
@@ -186,6 +264,15 @@ export interface BidLine {
 	readonly startWeek?: string;
 	/** The vendor will not do this shot or asset. */
 	readonly excluded: boolean;
+	/** Covered by its package's one figure (`VendorBid.packages`). Its total is zero, never its price. */
+	readonly inPackage?: boolean;
+	/** Its total came from the vendor's rate card. Absent: the vendor typed it. */
+	readonly fromRate?: boolean;
+	/**
+	 * The price of one, on a row that stands for several (`count.ts`): the total is exactly this
+	 * times the row's count. Absent on a row of count 1.
+	 */
+	readonly unit?: Money;
 }
 
 export interface DepartmentCost {

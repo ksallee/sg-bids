@@ -23,7 +23,8 @@ export default defineConfig(({ mode }) => ({
 		})
 	],
 	// 5173 and 5191 up belong to the siblings (docs/development.md). sg-bids takes 5181.
-	server: { port: 5181, strictPort: true },
+	// Agents work in git worktrees under `.claude/`. Watching them reloads the page on every write.
+	server: { port: 5181, strictPort: true, watch: { ignored: ['**/.claude/**'] } },
 	preview: { port: 5181, strictPort: true },
 	test: {
 		expect: { requireAssertions: true },

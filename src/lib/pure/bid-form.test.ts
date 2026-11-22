@@ -1,6 +1,8 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { emptyForm, formFromBid, formToDraft, formTotals, lineDetailTotal, type BidForm } from './bid-form';
+import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, lineDetailTotal, setBidding, switchMode, typedFor, type BidForm } from './bid-form';
 import { asset, bid, line, onAsset, onShot, request, shot } from './fixtures';
+import { applyRates, typePrice } from './rate-card';
 import { money } from './money';
 
 const req = request({ shots: [shot('sh010'), shot('sh020'), shot('sh030')], assets: [asset('hero', { name: 'Hero' })] });
@@ -46,7 +48,7 @@ describe('formToDraft', () => {
 			{ target: onShot('sh010'), total: money(1_250_050, 'USD'), excluded: false },
 			{ target: onAsset('hero'), total: money(0, 'USD'), excluded: false }
 		]);
-		expect(counts).toEqual({ priced: 2, excluded: 0, open: 2 });
+		expect(counts).toEqual({ priced: 2, excluded: 0, open: 2, packaged: 0, declined: 0 });
 	});
 
 	it('keeps an excluded item apart from a zero price, its typed price kept', () => {
@@ -60,7 +62,7 @@ describe('formToDraft', () => {
 			{ target: onShot('sh020'), total: money(0, 'USD'), excluded: true },
 			{ target: onShot('sh030'), total: money(90_000, 'USD'), excluded: true }
 		]);
-		expect(counts).toEqual({ priced: 0, excluded: 2, open: 2 });
+		expect(counts).toEqual({ priced: 0, excluded: 2, open: 2, packaged: 0, declined: 0 });
 	});
 
 	it('reads prices with a comma for a decimal in a comma locale', () => {
@@ -210,9 +212,36 @@ describe('formToDraft', () => {
 			lineOf(f, 'shot:sh020').price = 'y';
 			lineOf(f, 'shot:sh030').price = '1';
 		});
-		expect(formToDraft(bad, '.').blockers).toEqual(['2 fields need a fix.']);
+		expect(formToDraft(bad, '.', itemNames(req)).blockers).toEqual(['Price for SH010: Not a number.', 'Price for SH020: Not a number.']);
 		const one = filled((f) => (lineOf(f, 'shot:sh010').price = '1'));
 		expect(formToDraft(one, '.').blockers).toEqual([]);
+	});
+
+	it('names each problem by its field, in the order of the form, with the control that fixes it', () => {
+		const bad = filled((f) => {
+			f.date = '2026-02-30';
+			lineOf(f, 'shot:sh020').price = '12,345.678';
+			lineOf(f, 'asset:hero').price = '10';
+			lineOf(f, 'asset:hero').departments = [{ department: '', days: 'two', cost: '5' }];
+			f.costs[1].amount = 'lots';
+			f.discount = { kind: 'percent', value: '120' };
+			f.rebate = [{ jurisdiction: '', workPercent: '50', rate: 'x', base: 'all', contractPercent: '' }];
+			f.milestones = [{ label: '', percent: '50', due: '' }];
+		});
+		const { problems } = formToDraft(bad, '.', itemNames(req));
+		expect(problems.map((p) => [p.label, p.message, p.control, p.line ?? null])).toEqual([
+			['Bid date', 'Use a real day.', 'vf-date', null],
+			['Price for SH020', 'USD takes 2 decimals.', 'vf-line:shot:sh020:price', 'shot:sh020'],
+			['Hero, department 1, days', 'Not a number of days.', 'vf-line:asset:hero:dept:0:days', 'asset:hero'],
+			['Hero, department 1', 'Name the department.', 'vf-line:asset:hero:dept:0:department', 'asset:hero'],
+			['Supervision', 'Not a number.', 'vf-cost:1:amount', null],
+			['Discount', 'A discount is 100% at most.', 'vf-discount', null],
+			['Rebate split 1, where', 'Pick where the work is done.', 'vf-split:0:jurisdiction', null],
+			['Rebate split 1, rate', 'Not a percent.', 'vf-split:0:rate', null],
+			['Milestone 1, name', 'Name the milestone.', 'vf-milestone:0:label', null]
+		]);
+		const empty = formToDraft(emptyForm(req, TODAY), '.', itemNames(req));
+		expect(empty.problems).toEqual([{ key: 'priced', label: 'Shots and assets', message: 'Price at least one shot or asset.', control: 'vf-line:shot:sh010:price', line: 'shot:sh010' }]);
 	});
 
 	it('blocks a submit whose total is not above zero, or whose discount is more than the subtotal', () => {
@@ -347,5 +376,244 @@ describe('lineDetailTotal', () => {
 		});
 		expect(lineDetailTotal(lineOf(form, 'shot:sh010'), 'USD', ',')).toEqual(money(100_050, 'USD'));
 		expect(lineDetailTotal(lineOf(form, 'shot:sh020'), 'USD', '.')).toBeNull();
+	});
+});
+
+describe('a package priced as one figure', () => {
+	const packed = {
+		header: req.header,
+		packages: [
+			{ id: 'p1', name: 'Creature' },
+			{ id: 'p2', name: 'Comp' }
+		],
+		shots: [
+			{ id: 'a', package: 'p1' },
+			{ id: 'b', package: 'p1' },
+			{ id: 'c', package: 'p1', omitted: true },
+			{ id: 'd', package: 'p2' }
+		],
+		assets: []
+	};
+	const names = itemNames({ shots: packed.shots.map((s) => ({ id: s.id, code: s.id.toUpperCase() })), assets: [], packages: packed.packages });
+
+	it('sends no line for a row omitted in a later round when the bid is priced row by row, and does not count it open', () => {
+		const form = emptyForm(packed, TODAY);
+		form.lines.find((l) => l.key === 'shot:a')!.price = '100';
+		form.lines.find((l) => l.key === 'shot:b')!.price = '200';
+		form.lines.find((l) => l.key === 'shot:c')!.price = '300';
+		form.lines.find((l) => l.key === 'shot:d')!.price = '400';
+		const { draft, counts } = formToDraft(form, '.', names);
+		expect(draft.lines.map((l) => l.target.id)).toEqual(['a', 'b', 'd']);
+		expect(counts).toEqual({ priced: 3, excluded: 0, open: 0, packaged: 0, declined: 0 });
+		const blank = emptyForm(packed, TODAY);
+		expect(formToDraft(blank, '.', names).counts.open).toBe(3);
+	});
+
+	it('starts every package row by row', () => {
+		expect(emptyForm(packed, TODAY).packages).toEqual([
+			{ id: 'p1', name: 'Creature', bidding: true, mode: 'rows', price: '', notes: '' },
+			{ id: 'p2', name: 'Comp', bidding: true, mode: 'rows', price: '', notes: '' }
+		]);
+	});
+
+	it('sends the figure and a line in the package price for each row not omitted', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		form.packages[0].price = '5,000.00';
+		form.packages[0].notes = ' all in ';
+		form.lines.find((l) => l.key === 'shot:d')!.price = '100';
+		const { draft, counts, problems } = formToDraft(form, '.', names);
+		expect(draft.packages).toEqual([{ package: 'p1', total: money(500_000, 'USD'), notes: 'all in' }]);
+		expect(draft.lines).toEqual([
+			{ target: onShot('a'), total: money(0, 'USD'), excluded: false, inPackage: true },
+			{ target: onShot('b'), total: money(0, 'USD'), excluded: false, inPackage: true },
+			{ target: onShot('d'), total: money(10_000, 'USD'), excluded: false }
+		]);
+		expect(counts).toEqual({ priced: 1, excluded: 0, open: 0, packaged: 2, declined: 0 });
+		expect(problems).toEqual([]);
+		expect(formTotals(draft).totals.grand.bid).toEqual(money(510_000, 'USD'));
+	});
+
+	it('leaves a package with a blank figure not bid, and names a figure it cannot read', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		expect(formToDraft(form, '.', names).counts).toEqual({ priced: 0, excluded: 0, open: 3, packaged: 0, declined: 0 });
+		form.packages[0].price = 'lots';
+		const { problems } = formToDraft(form, '.', names);
+		expect(problems[0]).toMatchObject({ key: 'package:p1:price', label: 'Price for Creature', control: 'vf-package:p1:price' });
+	});
+
+	it('counts a figure alone as a price for the submit', () => {
+		const form = switchMode(emptyForm(packed, TODAY), 'p1', 'package');
+		form.packages[0].price = '10';
+		expect(formToDraft(form, '.', names).problems.some((p) => p.key === 'priced')).toBe(false);
+	});
+
+	it('reads a saved figure back as the package priced as one figure, its rows blank', () => {
+		const form = formFromBid(
+			{
+				number: '1',
+				date: TODAY,
+				currency: 'USD',
+				assumptions: [],
+				exclusions: [],
+				milestones: [],
+				costs: [],
+				discount: null,
+				tax: null,
+				rebate: [],
+				lines: [line('l1', onShot('a'), money(0, 'USD'), { inPackage: true }), line('l2', onShot('b'), money(0, 'USD'), { inPackage: true })],
+				packages: [{ package: 'p1', total: money(250_000, 'USD') }]
+			},
+			packed,
+			'.'
+		);
+		expect(form.packages[0]).toMatchObject({ mode: 'package', price: '2500' });
+		expect(form.lines.find((l) => l.key === 'shot:a')).toMatchObject({ price: '', excluded: false });
+		expect(formToDraft(form, '.').draft.packages).toEqual([{ package: 'p1', total: money(250_000, 'USD') }]);
+	});
+
+	it('says what a switch would clear, and clears it only when switched', () => {
+		// Prices the vendor typed (`rate-card.typePrice` marks them so).
+		const form = typePrice(typePrice(emptyForm(packed, TODAY), 'shot:a', '10'), 'shot:d', '7');
+		form.lines.find((l) => l.key === 'shot:b')!.excluded = true;
+		expect(typedFor(form, 'p1', 'package')).toEqual({ rows: 2, figure: false });
+		const switched = switchMode(form, 'p1', 'package');
+		expect(switched.lines.filter((l) => l.package === 'p1').every((l) => l.price === '' && !l.excluded)).toBe(true);
+		expect(switched.lines.find((l) => l.key === 'shot:d')!.price).toBe('7');
+		switched.packages[0].price = '99';
+		expect(typedFor(switched, 'p1', 'rows')).toEqual({ rows: 0, figure: true });
+		expect(switchMode(switched, 'p1', 'rows').packages[0]).toMatchObject({ mode: 'rows', price: '' });
+	});
+
+	it('sends no line for a package the vendor is not bidding on, and does not count its rows as open', () => {
+		const form = setBidding(emptyForm(packed, TODAY), 'p1', false);
+		form.lines.find((l) => l.key === 'shot:d')!.price = '100';
+		const { draft, counts, problems } = formToDraft(form, '.', names);
+		expect(draft.declined).toEqual(['p1']);
+		expect(draft.lines).toEqual([{ target: onShot('d'), total: money(10_000, 'USD'), excluded: false }]);
+		expect(counts).toEqual({ priced: 1, excluded: 0, open: 0, packaged: 0, declined: 2 });
+		expect(problems).toEqual([]);
+	});
+
+	it('wants one package bid on at least', () => {
+		const form = setBidding(setBidding(emptyForm(packed, TODAY), 'p1', false), 'p2', false);
+		const { problems, blockers } = formToDraft(form, '.', names);
+		expect(problems.map((p) => p.key)).toEqual(['bidding']);
+		expect(blockers).toEqual(['Answer one bid at least.']);
+	});
+
+	it('says what not bidding would clear, clears it, and reads a declined package back', () => {
+		const form = emptyForm(packed, TODAY);
+		form.lines.find((l) => l.key === 'shot:a')!.price = '10';
+		expect(typedFor(form, 'p1', 'declined')).toEqual({ rows: 1, figure: false });
+		const off = setBidding(form, 'p1', false);
+		expect(off.lines.find((l) => l.key === 'shot:a')!.price).toBe('');
+		expect(setBidding(off, 'p1', true).packages[0]).toMatchObject({ bidding: true, mode: 'rows' });
+		const back = formFromBid({ ...formToDraft(off, '.').draft }, packed, '.');
+		expect(back.packages.map((p) => p.bidding)).toEqual([false, true]);
+	});
+});
+
+
+describe('a counted row in the vendor form', () => {
+	const counted = request({ shots: [shot('simple', { source: 'breakdown', count: 120, difficulty: 'Simple' }), shot('sh010')], assets: [asset('props', { source: 'breakdown', count: 12 })] });
+
+	it('carries its count; the price typed is per unit, the line total is unit times count, the unit kept', () => {
+		const form = emptyForm(counted, TODAY);
+		expect(form.lines.map((l) => l.count)).toEqual([120, undefined, 12]);
+		form.lines[0].price = '1,500';
+		form.lines[1].price = '900';
+		form.lines[2].price = '250.25';
+		const { draft, errors } = formToDraft(form, '.');
+		expect(errors).toEqual({});
+		expect(draft.lines).toEqual([
+			{ target: onShot('simple'), total: money(18_000_000, 'USD'), unit: money(150_000, 'USD'), excluded: false },
+			{ target: onShot('sh010'), total: money(90_000, 'USD'), excluded: false },
+			{ target: onAsset('props'), total: money(300_300, 'USD'), unit: money(25_025, 'USD'), excluded: false }
+		]);
+		expect(formTotals(draft).totals.lines.bid).toEqual(money(18_390_300, 'USD'));
+	});
+
+	it('takes its unit price from the rate card', () => {
+		const form = { ...emptyForm(counted, TODAY) };
+		form.rates = { tiers: [{ difficulty: 'Simple', price: '1500' }], fallback: '' };
+		const { draft } = formToDraft(applyRates(form), '.');
+		expect(draft.lines[0]).toEqual({ target: onShot('simple'), total: money(18_000_000, 'USD'), unit: money(150_000, 'USD'), excluded: false, fromRate: true });
+	});
+
+	it('reads a saved counted line back as its unit price', () => {
+		const saved = bid({ currency: 'USD', lines: [line('l1', onShot('simple'), money(18_000_000, 'USD'), { unit: money(150_000, 'USD') })] });
+		expect(formFromBid(saved, counted, '.').lines[0].price).toBe('1500');
+	});
+
+	it('names a unit price whose total would not hold exactly', () => {
+		const form = emptyForm(counted, TODAY);
+		form.lines[0].price = '1000000000000';
+		const { errors, draft } = formToDraft(form, '.');
+		expect(errors['line:shot:simple:price']).toMatch(/Too large/);
+		expect(draft.lines).toEqual([]);
+	});
+
+	it('lets an excluded counted row go with no price as a zero, and with one as unit times count', () => {
+		const form = emptyForm(counted, TODAY);
+		form.lines[0].excluded = true;
+		form.lines[2].excluded = true;
+		form.lines[2].price = '10';
+		expect(formToDraft(form, '.').draft.lines).toEqual([
+			{ target: onShot('simple'), total: money(0, 'USD'), excluded: true },
+			{ target: onAsset('props'), total: money(12_000, 'USD'), unit: money(1000, 'USD'), excluded: true }
+		]);
+	});
+});
+
+describe('count 1 is the form as before (properties)', () => {
+	const priceArb = fc.oneof(
+		fc.constant(''),
+		fc.integer({ min: 0, max: 9_999_999 }).map(String),
+		fc.tuple(fc.integer({ min: 0, max: 99_999 }), fc.integer({ min: 0, max: 99 })).map(([u, c]) => `${u}.${String(c).padStart(2, '0')}`)
+	);
+	const rowsArb = fc.array(fc.record({ price: priceArb, excluded: fc.boolean(), count: fc.integer({ min: 1, max: 5000 }) }), { minLength: 1, maxLength: 10 });
+	const build = (rows: { price: string; excluded: boolean; count: number }[], counts: 'absent' | 'one' | 'own') => {
+		const r = request({ shots: rows.map((row, i) => shot(`s${i}`, { source: 'breakdown', ...(counts === 'one' ? { count: 1 } : counts === 'own' ? { count: row.count } : {}) })) });
+		const form = emptyForm(r, TODAY);
+		rows.forEach((row, i) => {
+			form.lines[i].price = row.price;
+			form.lines[i].excluded = row.excluded;
+		});
+		return formToDraft(form, '.');
+	};
+
+	it('a count of 1 makes the same draft as a row with no count (differential)', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				expect(build(rows, 'one')).toEqual(build(rows, 'absent'));
+				expect(build(rows, 'absent').draft.lines.every((l) => l.unit === undefined)).toBe(true);
+			})
+		);
+	});
+
+	it('a count scales each line: the total is the count-1 total times the count, the unit is that total', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				const one = build(rows, 'absent').draft.lines;
+				const own = build(rows, 'own').draft.lines;
+				expect(own.map((l) => l.target)).toEqual(one.map((l) => l.target));
+				own.forEach((l, i) => {
+					const row = rows[Number(l.target.id.slice(1))];
+					expect(BigInt(l.total.minor)).toBe(BigInt(one[i].total.minor) * BigInt(row.count));
+					if (row.count > 1 && row.price !== '') expect(l.unit).toEqual(one[i].total);
+					else expect(l.unit).toBeUndefined();
+				});
+			})
+		);
+	});
+
+	it('the line totals sum to the subtotal of lines', () => {
+		fc.assert(
+			fc.property(rowsArb, (rows) => {
+				const { draft } = build(rows, 'own');
+				const live = draft.lines.filter((l) => !l.excluded).reduce((n, l) => n + BigInt(l.total.minor), 0n);
+				expect(BigInt(formTotals(draft).totals.lines.bid.minor)).toBe(live);
+			})
+		);
 	});
 });

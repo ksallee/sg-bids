@@ -7,10 +7,13 @@
  * and the shares add up to 100 at most (`bid-limits.ts`).
  *
  * Whether every amount is in the bid's currency is `totals.checkBid`'s job, in the store. Whether
- * the total is above zero is checked at submit (`bid-limits.submitProblems`).
+ * the total is above zero is checked at submit (`bid-limits.submitProblems`). Whether the package
+ * figures hold together, and stay within the vendor's packages, is `packages.packageProblems`'s,
+ * in the store; whether a counted row's total is its unit price times its count is
+ * `count.countProblems`'s, there too.
  */
 
-import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PaymentMilestone, RebateSplit } from './model';
+import type { Adjustment, BidLine, DepartmentCost, NonShotCost, NonShotCostKind, PackagePrice, PaymentMilestone, RateCard, RebateSplit } from './model';
 import type { Money } from './money';
 import { MAX_DISCOUNT_PERCENT, MAX_TAX_PERCENT } from './bid-limits';
 import { isCurrency } from './currencies';
@@ -102,9 +105,37 @@ function line(value: unknown, where: string): BidDraft['lines'][number] {
 		methodology: optionalText(o.methodology, `${where}.methodology`),
 		assumptions: optionalText(o.assumptions, `${where}.assumptions`),
 		elementsNeeded: optionalText(o.elementsNeeded, `${where}.elementsNeeded`),
-		startWeek: optionalText(o.startWeek, `${where}.startWeek`)
+		startWeek: optionalText(o.startWeek, `${where}.startWeek`),
+		inPackage: o.inPackage === undefined || o.inPackage === false ? undefined : bool(o.inPackage, `${where}.inPackage`),
+		fromRate: o.fromRate === undefined || o.fromRate === false ? undefined : bool(o.fromRate, `${where}.fromRate`),
+		unit: o.unit === undefined ? undefined : amount(o.unit, `${where}.unit`)
 	});
 	return result;
+}
+
+/** A package priced as one figure: the package's id, the figure, a note. */
+function packagePrice(value: unknown, where: string): PackagePrice {
+	const o = object(value, where);
+	return defined({
+		package: text(o.package, `${where}.package`, 200),
+		total: amount(o.total, `${where}.total`),
+		notes: optionalText(o.notes, `${where}.notes`)
+	});
+}
+
+/** The vendor's rates: a price per difficulty, one for a row with none. */
+function rateCard(value: unknown): RateCard {
+	const o = object(value, 'rateCard');
+	const seen = new Set<string>();
+	const rates = list(o.rates ?? [], 'rateCard.rates', 200).map((r, i) => {
+		const at = `rateCard.rates[${i}]`;
+		const row = object(r, at);
+		const difficulty = text(row.difficulty, `${at}.difficulty`, 200);
+		if (difficulty.trim() === '' || seen.has(difficulty)) throw new Wrong(`${at}.difficulty`);
+		seen.add(difficulty);
+		return { difficulty, amount: amount(row.amount, `${at}.amount`) };
+	});
+	return defined({ rates, fallback: o.fallback === undefined ? undefined : amount(o.fallback, 'rateCard.fallback') });
 }
 
 function adjustment(value: unknown, where: string, max: string): Adjustment | null {
@@ -162,7 +193,10 @@ export function readDraft(value: unknown): DraftInput {
 			}),
 			discount: adjustment(o.discount, 'discount', MAX_DISCOUNT_PERCENT),
 			tax: adjustment(o.tax, 'tax', MAX_TAX_PERCENT),
-			rebate: splits(o.rebate)
+			rebate: splits(o.rebate),
+			packages: o.packages === undefined ? undefined : list(o.packages, 'packages', 500).map((p, i) => packagePrice(p, `packages[${i}]`)),
+			declined: o.declined === undefined ? undefined : list(o.declined, 'declined', 500).map((d, i) => text(d, `declined[${i}]`, 200)),
+			rateCard: o.rateCard === undefined ? undefined : rateCard(o.rateCard)
 		});
 		return { ok: true, draft };
 	} catch (error) {

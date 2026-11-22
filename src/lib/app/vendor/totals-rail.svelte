@@ -11,7 +11,8 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CloudOff from '@lucide/svelte/icons/cloud-off';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
-	import type { FormResult, FormTotals } from '$lib/pure/bid-form';
+	import type { FormProblem, FormResult, FormTotals } from '$lib/pure/bid-form';
+	import ProblemList from './problem-list.svelte';
 	import { format, type Money } from '$lib/pure/money';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
@@ -28,6 +29,9 @@
 		onsubmit,
 		onrevise,
 		onwithdraw,
+		ondiscard,
+		canDiscard = false,
+		onproblem,
 		class: className
 	}: {
 		totals: FormTotals;
@@ -42,12 +46,18 @@
 		onsubmit: () => void;
 		onrevise: () => void;
 		onwithdraw: () => void;
+		/** Discard the open draft: back to empty, or to the last submitted version. */
+		ondiscard?: () => void;
+		/** A draft is saved, so there is one to discard. */
+		canDiscard?: boolean;
+		/** Take the vendor to the control a problem names. */
+		onproblem: (problem: FormProblem) => void;
 		class?: string;
 	} = $props();
 
 	const money = (amount: Money) => format(amount, locale);
-	const all = $derived(result.counts.priced + result.counts.excluded + result.counts.open);
-	const done = $derived(all === 0 ? 0 : Math.round(((result.counts.priced + result.counts.excluded) / all) * 100));
+	const all = $derived(result.counts.priced + result.counts.excluded + result.counts.open + result.counts.packaged);
+	const done = $derived(all === 0 ? 0 : Math.round(((result.counts.priced + result.counts.excluded + result.counts.packaged) / all) * 100));
 	const rows = $derived([
 		{ label: 'Shots and assets', amount: totals.totals.lines.bid },
 		{ label: 'Other costs', amount: totals.totals.costs.bid },
@@ -87,7 +97,7 @@
 			<div class="bg-primary h-full rounded-full transition-[width] motion-reduce:transition-none" style:width={`${done}%`}></div>
 		</div>
 		<p class="text-muted-foreground text-xs">
-			{result.counts.priced} of {all} priced{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
+			{result.counts.priced + result.counts.packaged} of {all} priced{#if result.counts.packaged > 0}, {result.counts.packaged} in a bid's figure{/if}{#if result.counts.excluded > 0}, {result.counts.excluded} excluded{/if}.
 		</p>
 	</div>
 
@@ -120,18 +130,21 @@
 
 	<div class="flex flex-col gap-2">
 		{#if stage === 'draft'}
-			<Button size="lg" class="w-full" disabled={busy || result.blockers.length > 0} onclick={onsubmit}>Review and submit</Button>
-			{#each result.blockers as blocker (blocker)}<p class="text-muted-foreground text-xs">{blocker}</p>{/each}
+			<Button size="lg" class="w-full" disabled={busy} onclick={onsubmit}>Review and submit</Button>
+			<ProblemList problems={result.problems} onPick={onproblem} />
+			{#if canDiscard && ondiscard}
+				<Button variant="ghost" size="sm" class="text-muted-foreground hover:text-destructive w-full" disabled={busy} onclick={ondiscard} data-slot="discard-draft">Discard this draft</Button>
+			{/if}
 		{:else if stage === 'submitted'}
 			<p class="text-sm"><span class="font-medium">Submitted</span>{stamp ? ` ${stamp}` : ''}. Production can see it.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Revise</Button>
-			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw}>Withdraw</Button>
-			<p class="text-muted-foreground text-xs">Revise opens a copy to change. Production sees this one until you submit the next.</p>
+			<Button variant="outline" class="w-full" disabled={busy} onclick={onwithdraw} data-slot="withdraw">Withdraw your answer</Button>
+			<p class="text-muted-foreground text-xs">Revise opens a copy to change. Production sees this one until you submit the next. Withdraw if you no longer stand by it.</p>
 		{:else if stage === 'withdrawn'}
 			<p class="text-sm"><span class="font-medium">Withdrawn</span>{stamp ? ` ${stamp}` : ''}. Production sees it as withdrawn.</p>
 			<Button size="lg" class="w-full" disabled={busy} onclick={onrevise}>Start a new version</Button>
 		{:else}
-			<p class="text-sm">This request is closed. The bid can no longer change.</p>
+			<p class="text-sm">This request is closed. Your answer can no longer change.</p>
 		{/if}
 	</div>
 </div>

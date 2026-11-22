@@ -132,3 +132,31 @@ describe('openInvitation', () => {
 		expect(view.expiresAt).toBe(a.expiresAt);
 	});
 });
+
+describe('discardDraftBid', () => {
+	it('deletes the vendor’s own draft and its lines, never a submitted bid, never another vendor’s', async () => {
+		const { s, a, b } = await issuedWithTwoVendors();
+		const first = await s.saveDraftBid(a.token, draft(100));
+		await s.discardDraftBid(a.token, first.id);
+		expect(await sql`select id from public.bids where id = ${first.id}`).toHaveLength(0);
+		expect(await sql`select id from public.bid_lines where bid_id = ${first.id}`).toHaveLength(0);
+
+		const submitted = await s.saveDraftBid(a.token, draft(100));
+		await s.submitBid(a.token, submitted.id);
+		expect((await refusal(() => s.discardDraftBid(a.token, submitted.id))).status).toBe(404);
+		const revision = await s.saveDraftBid(a.token, draft(90));
+		await s.discardDraftBid(a.token, revision.id);
+		expect((await s.vendorBidRecords(a.token)).map((r) => [r.version, r.bid.status])).toEqual([[1, 'submitted']]);
+
+		const theirs = await s.saveDraftBid(b.token, draft(80));
+		expect((await refusal(() => s.discardDraftBid(a.token, theirs.id))).status).toBe(404);
+		expect(await sql`select id from public.bids where id = ${theirs.id}`).toHaveLength(1);
+	});
+
+	it('refuses once the request no longer takes bids', async () => {
+		const { s, a, request } = await issuedWithTwoVendors();
+		const saved = await s.saveDraftBid(a.token, draft(100));
+		await sql`update public.bid_requests set status = 'closed' where id = ${request.id}`;
+		expect((await refusal(() => s.discardDraftBid(a.token, saved.id))).status).toBe(409);
+	});
+});

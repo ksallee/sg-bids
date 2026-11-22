@@ -1,8 +1,8 @@
 # sg-bids
 
-VFX bidding for Flow Production Tracking. Production signs in to FPT as a person, builds a bid
-request from Shots and Assets, vendors answer through a hosted link with no FPT account, production
-compares and awards, and the award is written to FPT.
+VFX bidding for Flow Production Tracking. Production signs in to FPT as a person, makes a request
+on one page (its bids of Shots and Assets, its vendors, its details), vendors answer through a
+hosted link with no FPT account, production compares and awards, and the award is written to FPT.
 
 The plan lives in a local `BRIEF.md`: the research, the decisions, what is still open. It is
 gitignored and never committed. Nothing from it that names a site goes in the repo.
@@ -25,7 +25,7 @@ gitignored and never committed. Nothing from it that names a site goes in the re
   grows there, issue and PR there, never a private extension here.
 - Default theme only (`src/app.css`, sg-widgets' default). Light and dark switch in the navbar,
   following the system preference at first.
-- Supabase holds requests and bids. Only server code touches it, with the secret key; row level
+- Supabase holds requests, their bids and the answers. Only server code touches it, with the secret key; row level
   security is on with no policy. Every query carries the filter `src/lib/pure/access.ts` gives
   the verified principal: production's site host and project id, or a vendor's invitation.
   Freezes live in the database too. `docs/development.md` says how.
@@ -40,13 +40,21 @@ metaphors, no "not X, Y", no filler.
 ## Layout
 
 - Pure modules in `src/lib/pure/`, each with its test beside it as `<module>.test.ts`.
-- `src/lib/app/`: the app's own components (shell, banner, page header), and the request
-  builder's steps and page state under `builder/` and `builder.svelte.ts`, the comparison's grid,
-  scenario rail and page state under `compare/`.
+- `src/lib/app/`: the app's own components (shell, page header and body on one measure rule in
+  `measure.ts`, page state, the shared form label with its required mark, the site setup notice),
+  a draft request's one page under `builder/` (the page, the bids bar, the one table grouped by bid,
+  the add dialogs, the details and vendors panels, the Issue bar, the fields setting) with its page
+  state in `builder.svelte.ts`, an issued request's page, its vendor links, the new request,
+  duplicate and delete dialogs and the list's bulk delete and duplicate (`bulk-delete`, `bulk-duplicate`, `duplicate-rows`) under `request/`, the comparison's grid, scenario rail and page state
+  under `compare/`, the vendor form's pieces (the rate card among them) under `vendor/`. A draft's
+  bids and rows are `pure/request-draft.ts`, its vendor rows `pure/vendor-rows.ts`, what blocks the
+  issue `pure/readiness.ts`, the vendor's rates `pure/rate-card.ts`, creating a vendor's Group from its row `pure/group-create.ts`
+  with its calls in `io/fpt-group.ts`.
 - `src/lib/io/`: reads from Flow PT, thin, paging and request shapes only.
 - `src/lib/drafts.ts`: the one place a draft request is stored. Storage plugs in there.
 - `src/lib/components/`: registry copies from sg-widgets and shadcn-svelte.
-- `docs/data-model.md`: the bid request, vendor bid, award and change order, field by field.
+- `docs/data-model.md`: the request and its bids, the vendor's answer and rate card, award and
+  change order, field by field.
 - `src/lib/server/`: the data layer and the production check. Server only.
 - `supabase/migrations/`: the schema, timestamped plain SQL, idempotent.
 - `tests/db/`: database tests, run by `pnpm test:db` against a throwaway Postgres in Docker.
@@ -62,4 +70,7 @@ metaphors, no "not X, Y", no filler.
 
 ## Commands
 
-    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build / pnpm test:db / pnpm seed:dev
+    pnpm install / pnpm dev / pnpm check / pnpm test / pnpm build / pnpm test:db / pnpm seed:dev / pnpm e2e:live
+
+The live drive (`scripts/e2e-live.mjs`, `.claude/skills/verify`) runs once per feature PR, at the
+end, and the report says what it read back.

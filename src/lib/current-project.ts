@@ -1,9 +1,10 @@
 /**
- * The project the requests list and a request's page work in, kept per site in this browser. The
- * builder sets it when a project is picked. Blocked storage is a fallback, never a throw.
+ * The project a request's pages work in, kept per site in this browser, and the default for a new
+ * request. The builder and the requests list set it. Blocked storage is a fallback, never a throw.
  */
 
 import type { ProjectPick } from '$lib/pure/header';
+import { projectParam } from '$lib/pure/routes';
 
 const key = (siteUrl: string) => `sg-bids:project:${siteUrl}`;
 
@@ -14,6 +15,25 @@ export function currentProject(siteUrl: string): ProjectPick | null {
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The project a request's page works in: the one its address names (`?project=`, as the requests
+ * list links), else the one kept in this browser. An address that names another project makes it
+ * the kept one, so the request's other pages follow.
+ */
+export function workingProject(siteUrl: string, url: URL): ProjectPick | null {
+	const kept = currentProject(siteUrl);
+	const named = projectParam(url.searchParams);
+	if (named === null || kept?.id === named) return kept;
+	const next = { id: named, name: `Project ${named}` };
+	setCurrentProject(siteUrl, next);
+	return next;
+}
+
+/** A project named only by its id, from an address: its name is still to read. */
+export function unnamed(project: ProjectPick): boolean {
+	return project.name === `Project ${project.id}`;
 }
 
 export function setCurrentProject(siteUrl: string, project: ProjectPick | null): void {

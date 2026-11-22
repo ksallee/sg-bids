@@ -30,22 +30,22 @@ export const PUBLIC_PAGES: readonly PublicPage[] = [
 		path: '/',
 		title: `VFX bidding for Flow Production Tracking · ${NAME}`,
 		description:
-			'Free, open source VFX bidding for Flow Production Tracking (ShotGrid). Vendors bid through a link with no account. Production compares and awards to Flow PT.',
+			'Free, open source VFX bidding for Flow Production Tracking (ShotGrid). Build bids, send them to vendors, who answer through a link. Award to Flow PT.',
 		label: 'Home',
-		lastmod: '2026-11-20'
+		lastmod: '2026-11-26'
 	},
 	{
 		path: '/how',
-		title: `How it works: vendor bids, awards, Flow PT setup · ${NAME}`,
+		title: `How it works: bids, answers, Flow PT setup · ${NAME}`,
 		description:
 			'How a VFX bid round runs in SG Bids: what it reads from and writes to Flow PT, what vendors can see, and the site setup a Flow PT admin does once.',
 		label: 'How it works',
-		lastmod: '2026-11-20'
+		lastmod: '2026-11-26'
 	}
 ];
 
 /** The paths crawlers are kept out of: the vendor's side, the app, its endpoints. */
-export const PRIVATE_PREFIXES = ['/v/', '/bids/', '/api/', '/live/', '/dev/'] as const;
+export const PRIVATE_PREFIXES = ['/v/', '/bids/', '/requests/', '/api/', '/live/', '/dev/'] as const;
 
 /** The AI crawlers named in robots.txt, so it is plain they are welcome on the public pages. */
 export const AI_CRAWLERS = ['GPTBot', 'ClaudeBot', 'PerplexityBot', 'Google-Extended'] as const;

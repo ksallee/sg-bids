@@ -6,14 +6,18 @@
  * A group's subtotals count every row of the group, whatever the filter hides: a sequence's
  * subtotal is the sequence's. A subtotal's base figure is null while a priced cell in it has no
  * rate. Assets come last, in their own group.
+ *
+ * Grouped by package, each group is a package in the request's order, shots and assets together,
+ * and carries the package compared as a unit (`compare.ts`, `PackageView`): a figure for a vendor
+ * that priced it as one, else the sum of its row prices, the lowest marked.
  */
 
-import type { Cell, Grid, Row } from './compare';
+import type { Cell, Grid, PackageView, Row } from './compare';
 import { targetKey } from './model';
 import { add, money, type Money } from './money';
 import { isPercent } from './percent';
 
-export type GroupBy = 'sequence' | 'episode' | 'none';
+export type GroupBy = 'package' | 'sequence' | 'episode' | 'none';
 
 export interface Subtotal {
 	/** Priced cells, in the column's bid currency. */
@@ -23,19 +27,25 @@ export interface Subtotal {
 	readonly priced: number;
 	readonly excluded: number;
 	readonly missing: number;
+	/** Cells in a package price. */
+	readonly inPackage: number;
+	/** Cells of a package the vendor is not bidding on. */
+	readonly declined: number;
 }
 
 export interface Group {
-	/** Stable across filters: `seq:SEQ010`, `assets`. */
+	/** Stable across filters: `seq:SEQ010`, `assets`, `pkg:<id>`. */
 	readonly key: string;
 	readonly label: string;
-	readonly kind: 'sequence' | 'episode' | 'shots' | 'assets' | 'unset';
+	readonly kind: 'package' | 'sequence' | 'episode' | 'shots' | 'assets' | 'unset';
 	readonly rows: readonly Row[];
 	/** One per column. */
 	readonly subtotals: readonly Subtotal[];
+	/** Grouped by package: the package as a unit. */
+	readonly unit?: PackageView;
 }
 
-const UNSET: Record<GroupBy, string> = { sequence: 'No sequence', episode: 'No episode', none: 'Shots' };
+const UNSET: Record<Exclude<GroupBy, 'package'>, string> = { sequence: 'No sequence', episode: 'No episode', none: 'Shots' };
 
 function subtotals(grid: Grid, rows: readonly Row[]): Subtotal[] {
 	return grid.columns.map((column, index) => {
@@ -44,22 +54,35 @@ function subtotals(grid: Grid, rows: readonly Row[]): Subtotal[] {
 		let priced = 0;
 		let excluded = 0;
 		let missing = 0;
+		let inPackage = 0;
+		let declined = 0;
 		for (const row of rows) {
 			const cell = row.cells[index];
 			if (cell.kind === 'excluded') excluded++;
 			else if (cell.kind === 'missing') missing++;
+			else if (cell.kind === 'package') inPackage++;
+			else if (cell.kind === 'declined') declined++;
 			else {
 				priced++;
 				bid = add(bid, cell.amount.bid);
 				base = base && cell.amount.base ? add(base, cell.amount.base) : null;
 			}
 		}
-		return { bid, base, priced, excluded, missing };
+		return { bid, base, priced, excluded, missing, inPackage, declined };
+	});
+}
+
+/** The grid's rows by package, in the request's order. A package with no row is left out. */
+function byPackage(grid: Grid): Group[] {
+	return grid.packages.flatMap((unit) => {
+		const rows = grid.rows.filter((r) => r.package === unit.id);
+		return rows.length === 0 ? [] : [{ key: `pkg:${unit.id}`, label: unit.name, kind: 'package' as const, rows, subtotals: subtotals(grid, rows), unit }];
 	});
 }
 
 /** The grid's rows in groups, in the order each group first appears, unset shots then assets last. */
 export function groupRows(grid: Grid, by: GroupBy): Group[] {
+	if (by === 'package') return byPackage(grid);
 	const shots = new Map<string, { label: string; kind: Group['kind']; rows: Row[] }>();
 	const unset: Row[] = [];
 	const assets: Row[] = [];

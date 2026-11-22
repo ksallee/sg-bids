@@ -38,6 +38,22 @@ describe('parseAmount', () => {
 		expect(en("1'234.50", 'CHF')).toEqual({ kind: 'amount', decimal: '1234.50' });
 	});
 
+	// Found by the round trip in money.property.test.ts: the app's own figures, pasted back.
+	it('drops a sign with letters of its currency code on it, as the app formats them', () => {
+		expect(fr('0,00 US$', 'USD')).toEqual({ kind: 'amount', decimal: '0.00' });
+		expect(fr('0,24 NZ$', 'NZD')).toEqual({ kind: 'amount', decimal: '0.24' });
+		expect(en('CA$1,234.50', 'CAD')).toEqual({ kind: 'amount', decimal: '1234.50' });
+		expect(fr('1 234,50 $ US', 'USD')).toEqual({ kind: 'amount', decimal: '1234.50' });
+		expect(fr('1 234,50 R$', 'BRL')).toEqual({ kind: 'amount', decimal: '1234.50' });
+		expect(en('JP¥1,235', 'JPY')).toEqual({ kind: 'amount', decimal: '1235' });
+		expect(fr('1 234,50 £GB', 'GBP')).toEqual({ kind: 'amount', decimal: '1234.50' });
+	});
+
+	it('keeps letters on a sign that are not of the currency’s code, and refuses them', () => {
+		expect(fr('12 M$', 'USD')).toEqual({ kind: 'error', message: 'Not a number.' });
+		expect(en('CA$12', 'USD')).toEqual({ kind: 'error', message: 'Not a number.' });
+	});
+
 	it('takes the last mark as the decimal when both appear', () => {
 		expect(en('1.234,56')).toEqual({ kind: 'amount', decimal: '1234.56' });
 		expect(fr('1,234.56')).toEqual({ kind: 'amount', decimal: '1234.56' });

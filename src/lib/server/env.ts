@@ -15,7 +15,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { allowedHosts, productionRoles } from '$lib/pure/fpt-session';
 import { StoreError } from './errors';
-import { verifyProduction, type ProductionClaim, type VerifiedProduction } from './production';
+import { verifyProduction, verifyProductionSite, type ProductionClaim, type SiteClaim, type VerifiedProduction, type VerifiedSite } from './production';
 import { createStore, type Store } from './store';
 
 let client: SupabaseClient | null = null;
@@ -55,6 +55,16 @@ export function browserSiteHosts(): string[] {
 		}
 	}
 	return hosts;
+}
+
+/** The check across a site, for the requests list: the same allowlists, no project. */
+export function verifyProductionSiteClaim(claim: SiteClaim): Promise<VerifiedSite> {
+	return verifyProductionSite(claim, {
+		fetch,
+		allowedHosts: fptSiteHosts(),
+		allowScript: dev,
+		productionRoles: productionRoles(env.FPT_PRODUCTION_ROLES)
+	});
 }
 
 export function verifyProductionClaim(claim: ProductionClaim): Promise<VerifiedProduction> {

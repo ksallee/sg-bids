@@ -46,6 +46,7 @@
 			label="Group rows by"
 			value={s.by}
 			options={[
+				{ value: 'package', label: 'Bid' },
 				{ value: 'sequence', label: 'Sequence' },
 				{ value: 'episode', label: 'Episode' },
 				{ value: 'none', label: 'No groups' }
@@ -57,7 +58,7 @@
 			<select class={field} bind:value={() => s.sort, (v) => (s.sort = v as SortKey)}>
 				<option value="order">Request order</option>
 				<option value="code">Code</option>
-				<option value="spread">Spread between bids</option>
+				<option value="spread">Spread between answers</option>
 				<option value="lowest">Lowest price</option>
 				<option value="lowestVendor">Lowest vendor</option>
 			</select>
@@ -81,9 +82,9 @@
 			</select>
 		</label>
 		<label class="flex items-center gap-1.5 text-xs">
-			<span class="text-muted-foreground">Bids differ by over</span>
+			<span class="text-muted-foreground">Answers differ by over</span>
 			<span class="relative">
-				<input class="{field} w-16 pr-5 tabular-nums" inputmode="decimal" placeholder="0" bind:value={s.differsOver} aria-label="Bids differ by over, percent" />
+				<input class="{field} w-16 pr-5 tabular-nums" inputmode="decimal" placeholder="0" bind:value={s.differsOver} aria-label="Answers differ by over, percent" />
 				<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">%</span>
 			</span>
 		</label>
@@ -96,7 +97,7 @@
 		</label>
 		<label class="flex items-center gap-1.5 text-xs">
 			<input type="checkbox" class="accent-primary" bind:checked={s.hideOmitted} />
-			<span>Hide omitted</span>
+			<span>Hide cut rows</span>
 		</label>
 		<div class="relative ml-auto">
 			<Search class="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" aria-hidden="true" />

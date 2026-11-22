@@ -5,10 +5,12 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { scope, type ProductionPrincipal, type Table } from '$lib/pure/access';
+import { scope, siteScope, type ProductionPrincipal, type SitePrincipal, type Table } from '$lib/pure/access';
 import { invitationState, requestCounts, type BidFacts, type InvitationFacts, type InvitationState } from '$lib/pure/invitations';
 import type { InvitedVendor, RequestHeader } from '$lib/pure/model';
 import { vendorFromRow, type RequestRow, type VendorColumns } from '$lib/pure/rows';
+import type { AwardState, DeletionFacts } from '$lib/pure/request-delete';
+import { listTotals, type TotalsInput } from '$lib/pure/list-totals';
 import { encodeToken, hashToken, TOKEN_BYTES } from '$lib/pure/token';
 import { fromDatabase, StoreError } from './errors';
 import { DEFAULT_INVITATION_DAYS } from './store';
@@ -23,6 +25,16 @@ export interface RequestOverview {
 	readonly issuedAt: string | null;
 	readonly invited: number;
 	readonly submitted: number;
+	/** Its bids by name, in order. */
+	readonly bids: readonly string[];
+	/** Shots and assets in it, by unit, omitted rows left out (`$lib/pure/list-totals`). */
+	readonly shots: number;
+	readonly assets: number;
+}
+
+/** A request in the list across a site: the overview and its project. */
+export interface SiteRequestOverview extends RequestOverview {
+	readonly projectId: number;
 }
 
 export interface InvitationView {
@@ -32,8 +44,8 @@ export interface InvitationView {
 	readonly createdAt: string;
 }
 
-const INVITATION_FACTS = 'id, request_id, expires_at, revoked_at, last_opened_at';
-const INVITATION_COLUMNS = `${INVITATION_FACTS}, vendor_name, vendor_group_id, contact_email, details, created_at`;
+const INVITATION_FACTS = 'id, request_id, expires_at, revoked_at, last_opened_at, link_pending';
+const INVITATION_COLUMNS = `${INVITATION_FACTS}, vendor_name, vendor_group_id, contact_email, details, package_keys, created_at`;
 const BID_FACTS = 'invitation_id, request_id, version, status, submitted_at, withdrawn_at';
 
 type Query = any;
@@ -42,6 +54,18 @@ async function run<T>(query: PromiseLike<{ data: T | null; error: { code?: strin
 	const { data, error } = await query;
 	if (error) throw fromDatabase(error);
 	return data as T;
+}
+
+/** Rows per page of a long read. Supabase answers 1000 at most. */
+const PAGE = 1000;
+
+async function paged<T>(make: () => Query): Promise<T[]> {
+	const out: T[] = [];
+	for (let from = 0; ; from += PAGE) {
+		const page = await run<T[]>(make().order('id').range(from, from + PAGE - 1));
+		out.push(...page);
+		if (page.length < PAGE) return out;
+	}
 }
 
 export interface RequestsOptions {
@@ -60,27 +84,62 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 		return query;
 	}
 
-	/** The project's requests, newest first, with how many vendors are invited and have submitted. */
-	async function listOverview(principal: ProductionPrincipal): Promise<RequestOverview[]> {
-		const rows = await run<RequestRow[]>(read(principal, 'bid_requests', '*').order('created_at', { ascending: false }));
+	/**
+	 * Requests newest first, with how many vendors are invited and have submitted, their bids by name
+	 * and their shots and assets, read through `scoped`: one read per table for every request at once.
+	 */
+	async function overview(scoped: (table: Table, columns: string) => Query): Promise<(RequestOverview & { projectId: number })[]> {
+		const rows = await run<RequestRow[]>(scoped('bid_requests', '*').order('created_at', { ascending: false }));
 		if (rows.length === 0) return [];
 		const ids = rows.map((row) => row.id);
-		const invitations = await run<InvitationFacts[]>(read(principal, 'invitations', INVITATION_FACTS).in('request_id', ids));
-		const bids = await run<BidFacts[]>(read(principal, 'bids', BID_FACTS).in('request_id', ids));
+		const drafts = rows.filter((row) => row.status === 'draft').map((row) => row.id);
+		const sent = rows.filter((row) => row.status !== 'draft').map((row) => row.id);
+		const [invitations, bids, packages, draftBids, items] = await Promise.all([
+			run<InvitationFacts[]>(scoped('invitations', INVITATION_FACTS).in('request_id', ids)),
+			run<BidFacts[]>(scoped('bids', BID_FACTS).in('request_id', ids)),
+			paged<TotalsInput['packages'][number]>(() => scoped('request_packages', 'request_id, name, position').in('request_id', ids)),
+			drafts.length === 0 ? [] : paged<TotalsInput['draftBids'][number]>(() => scoped('production_bids', 'request_id, shot_count, asset_count').in('request_id', drafts)),
+			sent.length === 0 ? [] : paged<TotalsInput['items'][number]>(() => scoped('request_items', 'request_id, kind, unit_count, omitted').in('request_id', sent).eq('omitted', false))
+		]);
 		const counts = requestCounts(invitations, bids, now());
+		const totals = listTotals(rows, { packages, draftBids, items });
 		return rows.map((row) => {
 			const header = row.header as Partial<RequestHeader>;
 			const count = counts.get(row.id) ?? { invited: 0, submitted: 0 };
+			const total = totals.get(row.id) ?? { bids: [], shots: 0, assets: 0 };
 			return {
 				id: row.id,
+				projectId: row.project_id,
 				code: row.code,
 				title: typeof header.title === 'string' ? header.title : null,
 				round: row.round,
 				status: row.status,
 				dueDate: row.due_on,
 				issuedAt: row.issued_at,
-				...count
+				...count,
+				...total
 			};
+		});
+	}
+
+	/** The project's requests, newest first, with how many vendors are invited and have submitted. */
+	async function listOverview(principal: ProductionPrincipal): Promise<RequestOverview[]> {
+		const rows = await overview((table, columns) => read(principal, table, columns));
+		return rows.map(({ projectId: _, ...row }) => row);
+	}
+
+	/**
+	 * The requests of every project the server verified for the person on the site (`siteScope`),
+	 * newest first, each with its project. No project, no read.
+	 */
+	async function listAcross(principal: SitePrincipal): Promise<SiteRequestOverview[]> {
+		siteScope(principal, 'bid_requests');
+		if (principal.projectIds.length === 0) return [];
+		return overview((table, columns) => {
+			const given = siteScope(principal, table);
+			let query: Query = db.from(table).select(columns).match(given.eq);
+			for (const [column, values] of Object.entries(given.in ?? {})) query = query.in(column, [...values]);
+			return query;
 		});
 	}
 
@@ -123,13 +182,61 @@ export function createRequests(db: SupabaseClient, options: RequestsOptions = {}
 	}
 
 	/** A request's status and stamps, which `store.getRequest`'s model does not carry. */
-	async function requestMeta(principal: ProductionPrincipal, requestId: string): Promise<Pick<RequestOverview, 'status' | 'issuedAt'>> {
-		const row = await run<Pick<RequestRow, 'status' | 'issued_at'> | null>(read(principal, 'bid_requests', 'status, issued_at').eq('id', requestId).maybeSingle());
+	async function requestMeta(principal: ProductionPrincipal, requestId: string): Promise<Pick<RequestOverview, 'status' | 'issuedAt' | 'code'>> {
+		const row = await run<Pick<RequestRow, 'status' | 'issued_at' | 'code'> | null>(read(principal, 'bid_requests', 'status, issued_at, code').eq('id', requestId).maybeSingle());
 		if (!row) throw new StoreError(404, 'No such request.');
-		return { status: row.status, issuedAt: row.issued_at };
+		return { status: row.status, issuedAt: row.issued_at, code: row.code };
 	}
 
-	return { listOverview, listInvitations, reissueInvitation, requestMeta };
+	/** How many rows of `table` the request has, in the principal's tenant. */
+	async function count(principal: ProductionPrincipal, table: Table, requestId: string, extra: Record<string, string> = {}): Promise<number> {
+		const given = scope(principal, table, 'read');
+		let query: Query = db.from(table).select('id', { count: 'exact', head: true }).match(given.eq).match(extra).eq('request_id', requestId);
+		for (const [column, values] of Object.entries(given.in ?? {})) query = query.in(column, [...values]);
+		const { count: n, error } = await query;
+		if (error) throw fromDatabase(error);
+		return n ?? 0;
+	}
+
+	/**
+	 * What deleting the request would take with it, for the confirm (`$lib/pure/request-delete`):
+	 * its rows (a draft's are its bids'), invitations, the submitted and withdrawn bids and their vendors, scenarios, rates,
+	 * and the award record while one is in Flow PT. A vendor's draft is not read: it is the vendor's.
+	 */
+	async function deletionFacts(principal: ProductionPrincipal, requestId: string): Promise<DeletionFacts> {
+		const row = await run<RequestRow | null>(read(principal, 'bid_requests', '*').eq('id', requestId).maybeSingle());
+		if (!row) throw new StoreError(404, 'No such request.');
+		// A draft's rows are its bids'; an issued request's are its own.
+		const rows: Table = row.status === 'draft' ? 'production_bid_items' : 'request_items';
+		const [shots, assets, scenarios, rates, invitations, bids, publication] = await Promise.all([
+			count(principal, rows, requestId, { kind: 'shot' }),
+			count(principal, rows, requestId, { kind: 'asset' }),
+			count(principal, 'award_scenarios', requestId),
+			count(principal, 'bid_rates', requestId),
+			run<{ id: string; vendor_name: string }[]>(read(principal, 'invitations', 'id, vendor_name').eq('request_id', requestId).order('created_at')),
+			run<{ invitation_id: string }[]>(read(principal, 'bids', 'invitation_id').eq('request_id', requestId)),
+			run<{ state: AwardState } | null>(read(principal, 'award_publications', 'state').eq('request_id', requestId).maybeSingle())
+		]);
+		const bidding = new Set(bids.map((b) => b.invitation_id));
+		const header = row.header as Partial<RequestHeader>;
+		return {
+			id: row.id,
+			code: row.code,
+			title: typeof header.title === 'string' ? header.title : null,
+			round: row.round,
+			status: row.status,
+			shots,
+			assets,
+			invitations: invitations.length,
+			bids: bids.length,
+			vendors: invitations.filter((i) => bidding.has(i.id)).map((i) => i.vendor_name),
+			scenarios,
+			rates,
+			award: publication?.state ?? null
+		};
+	}
+
+	return { listOverview, listAcross, listInvitations, reissueInvitation, requestMeta, deletionFacts };
 }
 
 export type Requests = ReturnType<typeof createRequests>;

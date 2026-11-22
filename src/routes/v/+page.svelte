@@ -1,8 +1,10 @@
 <!--
 	The vendor's bid, reached through the link production sent. No sign-in: the link cookie is the
 	key. The request as production froze it, a price per shot and asset, the other costs, the
-	rebate estimate and the terms, with live totals beside. Drafts save on their own. After a submit
-	the bid is read only, and Revise opens the next version.
+	rebate estimate and the terms, with live totals beside. Drafts save on their own, and Discard
+	this draft drops one: back to empty, or to the last submitted version. After a submit the bid is
+	read only, and Revise opens the next version. A link whose request production deleted says so,
+	and nothing more.
 
 	The form logic is `$lib/pure/bid-form`; the calls are `$lib/vendor-client`.
 -->
@@ -22,7 +24,10 @@
 	import TotalsRail, { type SaveState, type Stage } from '$lib/app/vendor/totals-rail.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { decimalSeparator } from '$lib/pure/amount';
-	import { emptyForm, formFromBid, formToDraft, formTotals, type BidForm } from '$lib/pure/bid-form';
+	import { emptyForm, formFromBid, formToDraft, formTotals, itemNames, vendorControlId, type BidForm, type FormProblem } from '$lib/pure/bid-form';
+	import ProblemList from '$lib/app/vendor/problem-list.svelte';
+	import { focusById } from '$lib/app/focus-by-id';
+	import { tick } from 'svelte';
 	import { targetKey } from '$lib/pure/model';
 	import { format, minorDigits } from '$lib/pure/money';
 	import type { VendorBidView, VendorRequestView } from '$lib/pure/vendor-view';
@@ -47,10 +52,21 @@
 	let form = $state<BidForm | null>(null);
 	let problem = $state<{ title: string; line: string; link: boolean } | null>(null);
 
-	const result = $derived(form ? formToDraft(form, mark) : null);
+	const names = $derived(request ? itemNames(request) : new Map<string, string>());
+	const result = $derived(form ? formToDraft(form, mark, names) : null);
+	let grid = $state<{ reveal: (key: string, detail: boolean) => void } | null>(null);
+
+	/** Take the vendor to the control a problem names: its row shown, its detail open, focused. */
+	async function goTo(problem: FormProblem): Promise<void> {
+		confirming = null;
+		if (problem.line) grid?.reveal(problem.line, /:(dept|compute)/.test(problem.key));
+		await tick();
+		await focusById(problem.control);
+	}
 	const totals = $derived(result ? formTotals(result.draft) : null);
 	const snapshot = $derived(result ? JSON.stringify(result.draft) : '');
-	const prices = $derived(new Map(result ? result.draft.lines.filter((l) => !l.excluded).map((l) => [targetKey(l.target), l.total]) : []));
+	const prices = $derived(new Map(result ? result.draft.lines.filter((l) => !l.excluded && !l.inPackage).map((l) => [targetKey(l.target), l.total]) : []));
+	const figures = $derived(new Map(result ? (result.draft.packages ?? []).map((p) => [p.package, p.total]) : []));
 	const stage = $derived<Stage>(
 		request?.status === 'closed' ? 'closed' : view?.bid?.status === 'submitted' ? 'submitted' : view?.bid?.status === 'withdrawn' ? 'withdrawn' : 'draft'
 	);
@@ -75,8 +91,14 @@
 		saved = JSON.stringify(formToDraft(form, mark).draft);
 	}
 
+	const WITHDRAWN = { title: 'This request was withdrawn by the production', line: 'There is nothing to bid on. Nothing is needed from you.', link: true };
+
 	async function load(): Promise<void> {
 		const link = page.url.searchParams.get('link');
+		if (link === 'withdrawn') {
+			problem = WITHDRAWN;
+			return;
+		}
 		if (link === 'invalid') {
 			problem = { title: 'This link does not work', line: 'Check the link in your invitation, or ask production for a new one.', link: true };
 			return;
@@ -92,17 +114,22 @@
 		} catch (error) {
 			const status = error instanceof VendorError ? error.status : 0;
 			const line = error instanceof Error ? error.message : String(error);
-			if (status === 410) problem = { title: 'This link was replaced', line, link: true };
+			if (status === 410 && error instanceof VendorError && error.reason === 'withdrawn') problem = WITHDRAWN;
+			else if (status === 410) problem = { title: 'This link was replaced', line, link: true };
 			else if (status === 401 || status === 403) problem = { title: status === 401 ? 'This link does not work' : 'This link is closed', line, link: true };
-			else problem = { title: 'The bid could not load', line, link: false };
+			else problem = { title: 'Your answer could not load', line, link: false };
 		}
 	}
 	void load();
 
 	/** The browser now holds another vendor's link: this page stops, and says so. */
 	function otherSession(error: unknown): boolean {
+		if (error instanceof VendorError && error.reason === 'withdrawn') {
+			problem = WITHDRAWN;
+			return true;
+		}
 		if (!(error instanceof VendorError) || error.reason !== 'session') return false;
-		problem = { title: 'Another bid is open in this browser', line: 'Reload the page to see whose.', link: false };
+		problem = { title: 'Another answer is open in this browser', line: 'Reload the page to see whose.', link: false };
 		return true;
 	}
 
@@ -151,8 +178,8 @@
 		};
 	});
 
-	// Submit, withdraw, revise.
-	let confirming = $state<'submit' | 'withdraw' | null>(null);
+	// Submit, withdraw, revise, discard.
+	let confirming = $state<'submit' | 'withdraw' | 'discard' | null>(null);
 	let busy = $state(false);
 	let moveError = $state<string | null>(null);
 
@@ -178,6 +205,20 @@
 		}
 	}
 
+	/** Drop the open draft. The page refills from what is left: nothing, or the last submitted version. */
+	async function discardDraft(): Promise<void> {
+		if (!loaded?.bidId) return;
+		const named = loaded;
+		await move(() => vendorApi.discard(named));
+	}
+
+	const canDiscard = $derived(view?.bid?.status === 'draft');
+	const discardLine = $derived(
+		earlier
+			? `Your changes since version ${earlier.version} go. Production still sees version ${earlier.version}.`
+			: 'Your prices and answers go, and the form is empty again. Production never saw this draft.'
+	);
+
 	const stamp = $derived.by(() => {
 		const at = view?.bid?.withdrawnAt ?? view?.bid?.submittedAt;
 		return at ? `on ${stampFormat.format(new Date(at))}` : null;
@@ -191,7 +232,7 @@
 </script>
 
 <svelte:head>
-	<title>{request ? `Bid for ${request.header.project}` : 'Your bid'} · SG Bids</title>
+	<title>{request ? `Bid request for ${request.header.project}` : 'Your answer'} · SG Bids</title>
 	<meta name="referrer" content="no-referrer" />
 	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
@@ -206,11 +247,11 @@
 	<PageState state="loading" title="Opening the bid request" />
 {:else}
 	{@const header = request.header}
-	<PageHeader title={`Bid for ${header.project}`}>
+	<PageHeader title={header.title?.trim() || `Bid request for ${header.project}`}>
 		{#snippet context()}
 			<span>
 				<span class="text-foreground font-semibold" data-slot="vendor-name">{request?.vendorName}</span>.
-				Request {request?.code}, round {header.round}.
+				{header.project}{header.round > 1 ? `, round ${header.round}` : ''}.
 				{#if header.dueDate}Due <span class="text-foreground font-medium">{day(header.dueDate)}</span>.{/if}
 				{#if view?.bid}Version {view.bid.version}.{/if}
 			</span>
@@ -222,6 +263,7 @@
 					<span class="text-foreground font-medium">{form?.currency}</span>
 				{:else}
 					<select
+						id={vendorControlId('currency')}
 						class="border-input dark:bg-input/30 text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-8 rounded-lg border bg-transparent px-2 text-sm outline-none focus-visible:ring-3"
 						value={form?.currency}
 						onchange={(e) => changeCurrency(e.currentTarget.value)}
@@ -232,11 +274,11 @@
 			</label>
 		{/snippet}
 		{#if stage === 'submitted'}
-			<Notice tone="info" title="Submitted. ">Production can see this bid. To change it, revise it and submit again.</Notice>
+			<Notice tone="info" title="Submitted. ">Production can see your answer. To change it, revise it and submit again.</Notice>
 		{:else if stage === 'withdrawn'}
-			<Notice tone="warning" title="Withdrawn. ">Production sees this bid as withdrawn. Start a new version to bid again.</Notice>
+			<Notice tone="warning" title="Withdrawn. ">Production sees your answer as withdrawn. Start a new version to answer again.</Notice>
 		{:else if stage === 'closed'}
-			<Notice tone="info" title="Closed. ">This request no longer takes bids.</Notice>
+			<Notice tone="info" title="Closed. ">This request no longer takes answers.</Notice>
 		{:else if earlier}
 			<Notice tone="info">Production sees version {earlier.version} until you submit this one.</Notice>
 		{/if}
@@ -244,7 +286,7 @@
 
 	<div class="flex min-h-0 flex-1">
 		<div class="min-w-0 flex-1 overflow-y-auto" data-slot="vendor-scroll">
-			<div class="mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-6 pb-28 sm:px-6 lg:pb-10">
+			<div class="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-6 pb-28 sm:px-6 lg:pb-10">
 				<Section id="request" title="The request" note="As production sent it.">
 					<RequestSummary {request} {day} />
 				</Section>
@@ -252,9 +294,9 @@
 				<Section
 					id="items"
 					title="Shots and assets"
-					note={readOnly ? undefined : 'A price for each, all in. Leave one blank to not bid it, or exclude what you will not do.'}
+					note={readOnly ? undefined : 'A price for each, all in, or one figure for a whole bid. Leave one blank to not bid it, or exclude what you will not do.'}
 				>
-					<ItemGrid bind:form {request} errors={result.errors} {prices} {mark} {locale} {readOnly} />
+					<ItemGrid bind:this={grid} bind:form {request} errors={result.errors} {prices} {figures} {mark} {locale} {readOnly} />
 				</Section>
 
 				<Section id="costs" title="Other costs, discount and tax" note="Costs that sit outside the shots and assets.">
@@ -282,6 +324,9 @@
 					onsubmit={openSubmit}
 					onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 					onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+					ondiscard={() => ((moveError = null), (confirming = 'discard'))}
+					{canDiscard}
+					onproblem={(p) => void goTo(p)}
 				/>
 			</div>
 		</div>
@@ -299,6 +344,9 @@
 				onsubmit={openSubmit}
 				onrevise={() => loaded && move(() => vendorApi.revise(loaded))}
 				onwithdraw={() => ((moveError = null), (confirming = 'withdraw'))}
+				ondiscard={() => ((moveError = null), (confirming = 'discard'))}
+				{canDiscard}
+				onproblem={(p) => void goTo(p)}
 			/>
 		</aside>
 	</div>
@@ -313,15 +361,19 @@
 
 	<ConfirmDialog
 		open={confirming === 'submit'}
-		title="Submit your bid"
-		confirm="Submit bid"
+		title="Submit your answer"
+		confirm="Submit answer"
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
-		onconfirm={() => loaded?.bidId && move(() => vendorApi.submit(loaded))}
+		onconfirm={() => loaded?.bidId && result.problems.length === 0 && move(() => vendorApi.submit(loaded))}
+		disabled={result.problems.length > 0}
 	>
+		<ProblemList problems={result.problems} onPick={(p) => void goTo(p)} />
 		<dl class="flex flex-col">
 			<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Priced</dt><dd class="tabular-nums">{result.counts.priced}</dd></div>
+			{#if result.counts.packaged > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">In a bid's figure</dt><dd class="tabular-nums">{result.counts.packaged}</dd></div>{/if}
+			{#if result.counts.declined > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bidding</dt><dd class="tabular-nums">{result.counts.declined}</dd></div>{/if}
 			{#if result.counts.excluded > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Excluded</dt><dd class="tabular-nums">{result.counts.excluded}</dd></div>{/if}
 			{#if result.counts.open > 0}<div class="flex justify-between gap-3 py-1"><dt class="text-muted-foreground">Not bid</dt><dd class="tabular-nums">{result.counts.open}</dd></div>{/if}
 			<div class="flex justify-between gap-3 border-t pt-2 font-semibold"><dt>Total</dt><dd class="tabular-nums">{format(totals.totals.grand.bid, locale)}</dd></div>
@@ -329,20 +381,33 @@
 		{#each result.warnings as warning (warning)}<Notice tone="warning">{warning}</Notice>{/each}
 		<div class="flex flex-col gap-1">
 			<p class="font-medium">What happens next</p>
-			<p class="text-muted-foreground">Production sees your bid and its total. It is final once sent. To change it later, revise it and submit again. Production then sees the new version.</p>
+			<p class="text-muted-foreground">Production sees your answer and its total. It is final once sent. To change it later, revise it and submit again. Production then sees the new version.</p>
 		</div>
 	</ConfirmDialog>
 
 	<ConfirmDialog
 		open={confirming === 'withdraw'}
-		title="Withdraw your bid"
-		confirm="Withdraw bid"
+		title="Withdraw your answer"
+		confirm="Withdraw answer"
 		tone="destructive"
 		{busy}
 		error={moveError}
 		oncancel={() => (confirming = null)}
 		onconfirm={() => loaded?.bidId && move(() => vendorApi.withdraw(loaded))}
 	>
-		<p>Production will see this bid as withdrawn. You can start a new version after.</p>
+		<p>Production will see your answer as withdrawn. You can start a new version after.</p>
+	</ConfirmDialog>
+
+	<ConfirmDialog
+		open={confirming === 'discard'}
+		title={earlier ? `Discard version ${view?.bid?.version}` : 'Discard this draft'}
+		confirm="Discard draft"
+		tone="destructive"
+		{busy}
+		error={moveError}
+		oncancel={() => (confirming = null)}
+		onconfirm={() => void discardDraft()}
+	>
+		<p>{discardLine} This cannot be undone.</p>
 	</ConfirmDialog>
 {/if}

@@ -209,6 +209,15 @@ describe('applyScenario', () => {
 	it('refuses a scenario for another request', () => {
 		expect(() => applyScenario(req, [bidA], { id: 's', requestId: 'other', name: 'x', picks: [] })).toThrow();
 	});
+
+	// Found by fpt-award.property.test.ts: a package id made from a sequence code holds any character.
+	it('counts a one-figure bid whose package id holds a bar', () => {
+		const pkg = 'seq:SQ|010';
+		const r = request({ shots: [shot('sh010', { package: pkg })], packages: [{ id: pkg, name: 'SQ|010' }] });
+		const b = bid({ id: 'bidA', vendorId: 'vA', currency: 'USD', lines: [line('a1', onShot('sh010'), usd(0), { inPackage: true })], packages: [{ package: pkg, total: usd(1) }] });
+		const result = applyScenario(r, [b], scenario([pick(onShot('sh010'), ['bidA', '100'])]));
+		expect(result.total).toEqual(usd(1));
+	});
 });
 
 describe('compareBids, rows', () => {
@@ -313,5 +322,35 @@ describe('shownVersions', () => {
 	});
 	it('ignores an unknown id', () => {
 		expect(shownVersions(records, ['zz'])).toEqual(['a2', 'b1']);
+	});
+});
+
+describe('a counted row in the comparison', () => {
+	const counted = request({ shots: [shot('simple', { source: 'breakdown', count: 120 }), shot('sh010')] });
+	const a = bid({ id: 'bidA', vendorId: 'vA', currency: 'USD', lines: [line('a1', onShot('simple'), usd(18_000_000), { unit: usd(150_000) }), line('a2', onShot('sh010'), usd(90_000))] });
+	const b = bid({
+		id: 'bidB',
+		vendorId: 'vB',
+		currency: 'JPY',
+		rate: rate('JPY', 'USD', '0.0066', '2026-11-20'),
+		lines: [line('b1', onShot('simple'), jpy(24_000_000), { unit: jpy(200_000) })]
+	});
+
+	it('carries its count, compares the line totals and shows the unit price beside each', () => {
+		const grid = compareBids(counted, [a, b]);
+		const row = grid.rows[0];
+		expect(row.count).toBe(120);
+		expect(grid.rows[1].count).toBe(1);
+		expect(row.cells[0]).toMatchObject({ kind: 'price', amount: { bid: usd(18_000_000), base: usd(18_000_000) }, unit: { bid: usd(150_000), base: usd(150_000) }, lowest: false });
+		expect(row.cells[1]).toMatchObject({ kind: 'price', amount: { bid: jpy(24_000_000), base: usd(15_840_000) }, unit: { bid: jpy(200_000), base: usd(132_000) }, lowest: true });
+		expect(grid.rows[1].cells[0]).not.toHaveProperty('unit');
+		expect(grid.totals[0].items.bid).toEqual(usd(18_090_000));
+	});
+
+	it('awards a counted row whole by its total, or split by the existing shares', () => {
+		const whole: AwardScenario = { id: 's', requestId: 'req1', name: 'S', picks: [{ target: onShot('simple'), shares: [{ bidId: 'bidA', percent: '100' }] }] };
+		expect(applyScenario(counted, [a, b], whole).total).toEqual(usd(18_000_000));
+		const split: AwardScenario = { ...whole, picks: [{ target: onShot('simple'), shares: [{ bidId: 'bidA', percent: '50' }, { bidId: 'bidB', percent: '50' }] }] };
+		expect(applyScenario(counted, [a, b], split).total).toEqual(usd(9_000_000 + 7_920_000));
 	});
 });

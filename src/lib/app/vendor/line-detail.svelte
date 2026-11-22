@@ -8,7 +8,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import X from '@lucide/svelte/icons/x';
 	import type { DecimalMark } from '$lib/pure/amount';
-	import { lineDetailTotal, type LineForm } from '$lib/pure/bid-form';
+	import { lineDetailTotal, vendorControlId, type LineForm } from '$lib/pure/bid-form';
 	import { format, type Money } from '$lib/pure/money';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
@@ -48,7 +48,7 @@
 	<div class="flex flex-col gap-2">
 		<div class="flex flex-wrap items-baseline gap-x-2">
 			<p class="text-xs font-medium">Days and cost by department</p>
-			<p class="text-muted-foreground text-xs">Optional. Your price stays the price.</p>
+			<p class="text-muted-foreground text-xs">Optional. {#if (line.count ?? 1) > 1}For the whole row, all {line.count?.toLocaleString()}. {/if}Your price stays the price.</p>
 		</div>
 		{#if line.departments.length > 0}
 			<div class="grid max-w-xl grid-cols-[minmax(0,1fr)_5rem_8rem_2rem] items-start gap-x-2 gap-y-1.5">
@@ -64,15 +64,15 @@
 						<span></span>
 					{:else}
 						<div class="flex flex-col">
-							<Input bind:value={row.department} list={listId} aria-label="Department" aria-invalid={!!errors[`${at}:dept:${i}:department`]} class="h-7" />
+							<Input id={vendorControlId(`${at}:dept:${i}:department`)} bind:value={row.department} list={listId} aria-label="Department" aria-invalid={!!errors[`${at}:dept:${i}:department`]} class="h-7" />
 							{#if errors[`${at}:dept:${i}:department`]}<p class="text-destructive text-xs">{errors[`${at}:dept:${i}:department`]}</p>{/if}
 						</div>
 						<div class="flex flex-col">
-							<Input bind:value={row.days} inputmode="decimal" aria-label="Days" aria-invalid={!!errors[`${at}:dept:${i}:days`]} class="h-7 text-right tabular-nums" />
+							<Input id={vendorControlId(`${at}:dept:${i}:days`)} bind:value={row.days} inputmode="decimal" aria-label="Days" aria-invalid={!!errors[`${at}:dept:${i}:days`]} class="h-7 text-right tabular-nums" />
 							{#if errors[`${at}:dept:${i}:days`]}<p class="text-destructive text-xs">{errors[`${at}:dept:${i}:days`]}</p>{/if}
 						</div>
 						<div class="flex flex-col">
-							<Input bind:value={row.cost} inputmode="decimal" aria-label="Cost" aria-invalid={!!errors[`${at}:dept:${i}:cost`]} class="h-7 text-right tabular-nums" />
+							<Input id={vendorControlId(`${at}:dept:${i}:cost`)} bind:value={row.cost} inputmode="decimal" aria-label="Cost" aria-invalid={!!errors[`${at}:dept:${i}:cost`]} class="h-7 text-right tabular-nums" />
 							{#if errors[`${at}:dept:${i}:cost`]}<p class="text-destructive text-xs">{errors[`${at}:dept:${i}:cost`]}</p>{/if}
 						</div>
 						<Button variant="ghost" size="icon-sm" aria-label="Remove this department" onclick={() => line.departments.splice(i, 1)}><X aria-hidden="true" /></Button>
@@ -91,7 +91,7 @@
 			{#if readOnly}
 				<span class="text-sm tabular-nums">{line.compute || 'None'}</span>
 			{:else}
-				<Input bind:value={line.compute} inputmode="decimal" aria-invalid={!!errors[`${at}:compute`]} class="h-7 text-right tabular-nums" />
+				<Input id={vendorControlId(`${at}:compute`)} bind:value={line.compute} inputmode="decimal" aria-invalid={!!errors[`${at}:compute`]} class="h-7 text-right tabular-nums" />
 			{/if}
 		</label>
 		<p class="text-muted-foreground pb-1 text-xs">Render and cloud cost. Part of the price, not labour.</p>

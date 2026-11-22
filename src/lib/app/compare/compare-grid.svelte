@@ -7,6 +7,10 @@
 	A cell is a price in the base currency over the vendor's own, the lowest marked, a thin bar for how
 	far it sits over the lowest. Excluded is hatched; not bid is an empty dashed box; a price waiting
 	for a rate shows in its currency and says so. A pick in the scenario is outlined in the primary.
+	A row of a package the vendor priced as one figure says "In package price", never a zero or a
+	gap; a click on it picks, or takes off, the whole package. Grouped by package, each group's row
+	compares the package as a unit: each vendor's one figure, or its row prices summed, the lowest
+	marked (`$lib/pure/compare`, `PackageView`).
 
 	Keyboard: the grid is one tab stop. Arrows move, Home and End go to the row's ends, Page Up and
 	Page Down move a screen. Space picks the vendor of the cell. Enter opens the row's detail, or folds
@@ -16,11 +20,12 @@
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
 	import Check from '@lucide/svelte/icons/check';
+	import Layers from '@lucide/svelte/icons/layers';
 	import PanelRightOpen from '@lucide/svelte/icons/panel-right-open';
 	import Info from '@lucide/svelte/icons/info';
 	import UserRoundCheck from '@lucide/svelte/icons/user-round-check';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
-	import type { Cell, Row } from '$lib/pure/compare';
+	import type { Cell, PackageCell, Row } from '$lib/pure/compare';
 	import { formatAmount, formatDay, formatSpread } from '$lib/pure/display';
 	import { offsetsOf, scrollToShow, visibleRange, type DisplayRow, type Subtotal } from '$lib/pure/grid-view';
 	import type { Money } from '$lib/pure/money';
@@ -38,13 +43,15 @@
 	const GROUP = 40;
 	const LABEL_W = 264;
 	const COL_W = 184;
+	/** A vendor column grows to this, so a price stays near its shot on a wide screen; the item column takes the rest. */
+	const COL_MAX = 360;
 
 	const grid = $derived(s.grid!);
 	const data = $derived(s.data!);
 	const display = $derived(s.view?.display ?? []);
 	const offsets = $derived(offsetsOf(display, { group: GROUP, row: ROW }));
 	const columns = $derived(grid.columns);
-	const template = $derived(`${LABEL_W}px repeat(${columns.length}, minmax(${COL_W}px, 1fr))`);
+	const template = $derived(`minmax(${LABEL_W}px, 1fr) repeat(${columns.length}, minmax(${COL_W}px, ${COL_MAX}px))`);
 	const minWidth = $derived(LABEL_W + columns.length * COL_W);
 
 	let scroller = $state<HTMLDivElement | null>(null);
@@ -147,8 +154,11 @@
 		const picked = share ? `, picked${share !== '100' ? ` at ${share}%` : ''}` : '';
 		if (cell.kind === 'excluded') return `${row.label}, ${vendor}: excluded`;
 		if (cell.kind === 'missing') return `${row.label}, ${vendor}: not bid`;
-		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}, needs a rate${picked}`;
-		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
+		if (cell.kind === 'package') return `${row.label}, ${vendor}: in the package price${picked}`;
+		if (cell.kind === 'declined') return `${row.label}, ${vendor}: not bidding on this bid`;
+		const each = cell.unit ? `, ${money(cell.unit.base ?? cell.unit.bid)} each times ${row.count}` : '';
+		if (!cell.amount.base) return `${row.label}, ${vendor}: ${money(cell.amount.bid)}${each}, needs a rate${picked}`;
+		return `${row.label}, ${vendor}: ${money(cell.amount.base)}${each}${cell.lowest ? ', lowest' : cell.spreadBp !== null ? `, ${formatSpread(cell.spreadBp)} over the lowest` : ''}${picked}`;
 	}
 
 	type TotalKey = 'items' | 'costs' | 'discount' | 'tax' | 'grand' | 'rebate' | 'afterRebate';
@@ -167,6 +177,17 @@
 		if (sub.base) return { main: money(sub.base), warn: false };
 		return { main: money(sub.bid), warn: true };
 	}
+
+	/** A package as a unit: the figure or the rows summed, in the base currency once known. */
+	function unitText(cell: PackageCell): { main: string; warn: boolean; note: string } {
+		if (cell.kind === 'none') return { main: '', warn: false, note: 'Not bid' };
+		if (cell.kind === 'declined') return { main: '', warn: false, note: 'Not bidding' };
+		const main = cell.amount.base ? money(cell.amount.base) : money(cell.amount.bid);
+		const warn = cell.amount.base === null;
+		if (cell.kind === 'package') return { main, warn, note: 'One figure' };
+		if (!cell.complete) return { main, warn, note: `${cell.priced} of ${cell.priced + cell.excluded + cell.missing} priced` };
+		return { main, warn, note: 'Rows summed' };
+	}
 </script>
 
 <div
@@ -175,7 +196,7 @@
 	class="group/grid relative min-h-0 flex-1 overflow-auto outline-none"
 	role="grid"
 	tabindex="0"
-	aria-label="Bids side by side"
+	aria-label="Answers side by side"
 	aria-rowcount={display.length}
 	aria-colcount={columns.length + 1}
 	aria-activedescendant={display.length ? cellId(cursor.r, cursor.c) : undefined}
@@ -314,19 +335,45 @@
 						</DropdownMenu.Root>
 					</div>
 					{#each g.subtotals as sub, c (c)}
-						{@const text = subtotalText(sub)}
-						<div
-							id={cellId(r, c)}
-							class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
-							role="gridcell"
-						>
-							<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
-							{#if sub.excluded || sub.missing}
-								<span class="text-muted-foreground text-[11px] tabular-nums">
-									{[sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
+						{@const unit = g.unit?.cells[c]}
+						{#if unit}
+							{@const text = unitText(unit)}
+							{@const lowest = (unit.kind === 'package' || unit.kind === 'rows') && unit.lowest}
+							<div
+								id={cellId(r, c)}
+								class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
+								role="gridcell"
+								aria-label={`${g.label}, ${s.names[c]}: ${text.main || 'not bid'}${text.note ? `, ${text.note.toLowerCase()}` : ''}${lowest ? ', lowest' : ''}`}
+								data-slot="package-unit"
+								data-kind={unit.kind}
+								data-lowest={lowest ? '' : undefined}
+							>
+								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
+								<span class="text-muted-foreground flex items-center gap-1.5 text-[11px] tabular-nums">
+									{#if unit.kind === 'package'}<Layers class="size-3" aria-hidden="true" />{/if}
+									<span>{text.note}</span>
+									{#if lowest}
+										<span class="text-success inline-flex items-center gap-1 font-medium"><span class="bg-success size-1.5 rounded-full"></span>Lowest</span>
+									{:else if (unit.kind === 'package' || unit.kind === 'rows') && unit.spreadBp !== null}
+										<span>{formatSpread(unit.spreadBp)}</span>
+									{/if}
 								</span>
-							{/if}
-						</div>
+							</div>
+						{:else}
+							{@const text = subtotalText(sub)}
+							<div
+								id={cellId(r, c)}
+								class={cn('flex flex-col items-end justify-center border-r px-3 last:border-r-0', cursor.r === r && cursor.c === c && CURSOR)}
+								role="gridcell"
+							>
+								<span class={cn('text-xs font-semibold tabular-nums', text.warn && 'text-warning-foreground dark:text-warning')} title={text.warn ? 'Needs a rate' : undefined}>{text.main}</span>
+								{#if sub.excluded || sub.missing || sub.inPackage || sub.declined}
+									<span class="text-muted-foreground text-[11px] tabular-nums">
+										{[sub.inPackage ? `${sub.inPackage} in a bid's figure` : '', sub.declined ? `${sub.declined} not bidding` : '', sub.excluded ? `${sub.excluded} excluded` : '', sub.missing ? `${sub.missing} not bid` : ''].filter(Boolean).join(', ')}
+									</span>
+								{/if}
+							</div>
+						{/if}
 					{/each}
 				</div>
 			{:else}
@@ -349,7 +396,8 @@
 						<button type="button" class="flex min-w-0 flex-1 flex-col items-start text-left" tabindex="-1" onclick={() => onDetail(row)} title="Open the detail">
 							<span class="flex items-center gap-1.5">
 								<span class="font-mono text-xs font-medium">{row.label}</span>
-								{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-[10px]">omitted</span>{/if}
+								{#if row.count > 1}<span class="rounded border px-1 text-[10px] font-medium tabular-nums" title={`This row stands for ${row.count.toLocaleString()}. Prices are for all of them.`} data-slot="row-count">×{row.count.toLocaleString()}</span>{/if}
+								{#if row.omitted}<span class="text-muted-foreground rounded border px-1 text-[10px]" title="Cut this round. It takes no price." data-slot="row-cut">cut</span>{/if}
 							</span>
 							{#if row.description}<span class="text-muted-foreground w-full truncate text-xs">{row.description}</span>{/if}
 						</button>
@@ -366,7 +414,7 @@
 					{#each row.cells as cell, c (c)}
 						{@const share = shares.get(c)}
 						{@const active = cursor.r === r && cursor.c === c}
-						{@const clickable = cell.kind === 'price' && !row.omitted}
+						{@const clickable = (cell.kind === 'price' || cell.kind === 'package') && !row.omitted}
 						<!-- The grid takes the keys (Space picks); a click is the pointer's way to the same pick. -->
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
@@ -394,7 +442,7 @@
 								{#if cell.amount.base}
 									<span class={cn('text-sm tabular-nums', cell.lowest && 'font-semibold')}>{money(cell.amount.base)}</span>
 									<span class="text-muted-foreground flex items-center gap-1.5 text-[11px] tabular-nums">
-										{#if cell.amount.bid.currency !== grid.baseCurrency}<span>{money(cell.amount.bid)}</span>{/if}
+										{#if cell.unit}<span data-slot="cell-unit" title={`${money(cell.unit.base ?? cell.unit.bid)} each, times ${row.count.toLocaleString()}`}>{money(cell.unit.base ?? cell.unit.bid)} × {row.count.toLocaleString()}</span>{:else if cell.amount.bid.currency !== grid.baseCurrency}<span>{money(cell.amount.bid)}</span>{/if}
 										{#if cell.lowest}
 											<span class="text-success inline-flex items-center gap-1 font-medium"><span class="bg-success size-1.5 rounded-full"></span>Lowest</span>
 										{:else if cell.spreadBp !== null}
@@ -411,6 +459,7 @@
 									{/if}
 								{:else}
 									<span class="text-muted-foreground text-sm tabular-nums">{money(cell.amount.bid)}</span>
+									{#if cell.unit}<span class="text-muted-foreground text-[11px] tabular-nums" data-slot="cell-unit">{money(cell.unit.bid)} × {row.count.toLocaleString()}</span>{/if}
 									<span class="text-warning-foreground dark:text-warning text-[11px]">needs a rate</span>
 								{/if}
 								{#if share !== undefined}
@@ -418,6 +467,17 @@
 										<Check class="size-2.5" />{share !== '100' ? `${share}%` : ''}
 									</span>
 								{/if}
+							{:else if cell.kind === 'package'}
+								<span class="text-muted-foreground flex items-center gap-1.5 text-xs" title="This vendor priced the whole bid as one figure. It is awarded whole or not at all.">
+									<Layers class="size-3.5" aria-hidden="true" />In the bid's figure
+								</span>
+								{#if share !== undefined}
+									<span class="bg-primary text-primary-foreground absolute top-1 left-1.5 inline-flex h-4 items-center gap-0.5 rounded px-1 text-[10px] font-medium">
+										<Check class="size-2.5" />
+									</span>
+								{/if}
+							{:else if cell.kind === 'declined'}
+								<span class="text-muted-foreground text-xs" title="This vendor is not bidding on this bid. It cannot be awarded to it.">Not bidding</span>
 							{:else if cell.kind === 'excluded'}
 								<span class="bg-card/80 text-muted-foreground rounded px-1 text-xs">Excluded</span>
 							{:else}

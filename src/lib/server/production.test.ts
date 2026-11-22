@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { StoreError } from './errors';
-import { verifyProduction } from './production';
+import { verifyProduction, verifyProductionSite } from './production';
 
 const SITE = 'https://studio.example.com';
 const hosts = ['studio.example.com'];
@@ -45,6 +45,8 @@ const notFound = () => json(404, { errors: [{ status: 404, code: 104, title: 'No
 interface Answers {
 	token?: Response;
 	project?: Response;
+	/** `GET /entity/projects?...&page[number]=n`: the rows the bearer may see, a page at a time. */
+	projects?: (page: number) => Response;
 	groups?: Response;
 	user?: Response;
 }
@@ -56,6 +58,7 @@ function site(answers: Answers) {
 		const url = String(input);
 		calls.push({ url, init });
 		if (url.endsWith('/api/v1/auth/access_token')) return answers.token ?? json(500, null);
+		if (url.includes('/api/v1/entity/projects?')) return answers.projects?.(Number(new URL(url).searchParams.get('page[number]'))) ?? json(500, null);
 		if (url.includes('/api/v1/entity/projects/')) return answers.project ?? json(500, null);
 		if (url.includes('/api/v1/schema/permission_groups')) return answers.groups ?? everyGroup();
 		if (url.includes('/api/v1/entity/human_users/')) return answers.user ?? row(253, { id: 8, name: 'Admin' });
@@ -210,5 +213,90 @@ describe('verifyProduction', () => {
 			throw new TypeError('fetch failed');
 		}) as typeof fetch;
 		expect((await refusal(verifyProduction({ siteUrl: SITE, projectId: 70, bearer: person }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(502);
+	});
+});
+
+/** A page of `GET /entity/projects` as the site answers it: `links.next` on every page, empty ones too (006). */
+const projectPage = (rows: { id: number; name: string }[], page: number) =>
+	json(200, {
+		data: rows.map((r) => ({ type: 'Project', attributes: { name: r.name }, relationships: {}, id: r.id, links: { self: `/api/v1/entity/projects/${r.id}` } })),
+		links: { self: `/api/v1/entity/projects?page[number]=${page}`, next: `/api/v1/entity/projects?page[number]=${page + 1}` }
+	});
+/** The projects this person may read, in pages of `size`, then empty pages forever. */
+const readable = (rows: { id: number; name: string }[], size = 500) => (page: number) => projectPage(rows.slice((page - 1) * size, page * size), page);
+
+describe('verifyProductionSite', () => {
+	const show = { id: 70, name: 'Show' };
+	const kids = { id: 91, name: 'Kids Room' };
+
+	it('verifies the person and lists the projects their own bearer may read, every page until an empty one (006, 027)', async () => {
+		const rows = Array.from({ length: 1100 }, (_, i) => ({ id: i + 1, name: `P${i + 1}` }));
+		const { fetcher, calls } = site({ token: json(200, { access_token: person }), projects: readable(rows) });
+		const principal = await verifyProductionSite({ siteUrl: SITE, sessionToken: 'sess' }, { fetch: fetcher, allowedHosts: hosts });
+		expect(principal.kind).toBe('production-site');
+		expect(principal.siteHost).toBe('studio.example.com');
+		expect(principal.role).toBe('admin');
+		expect(principal.projectIds).toHaveLength(1100);
+		expect(principal.projects[1099]).toEqual({ id: 1100, name: 'P1100' });
+		const lists = calls.filter((call) => call.url.includes('/entity/projects?'));
+		expect(lists.map((call) => new URL(call.url).searchParams.get('page[number]'))).toEqual(['1', '2', '3', '4']);
+		expect(new URL(lists[0].url).searchParams.get('page[size]')).toBe('500');
+		for (const call of calls) {
+			expect(call.init?.redirect, call.url).toBe('error');
+			if (!call.url.endsWith('/auth/access_token')) expect(new Headers(call.init?.headers).get('authorization')).toBe(`Bearer ${person}`);
+		}
+	});
+
+	it('ignores any project the client names: only what the site listed counts', async () => {
+		const { fetcher } = site({ projects: readable([show, kids]) });
+		const claim = { siteUrl: SITE, bearer: person, projectId: 99, projectIds: [99, 70], projects: [{ id: 99, name: 'Not theirs' }] };
+		const principal = await verifyProductionSite(claim, { fetch: fetcher, allowedHosts: hosts });
+		expect(principal.projectIds).toEqual([70, 91]);
+		expect(principal.projects).toEqual([show, kids]);
+	});
+
+	it('answers no project at all when the person may read none', async () => {
+		const { fetcher } = site({ projects: readable([]) });
+		expect((await verifyProductionSite({ siteUrl: SITE, bearer: person }, { fetch: fetcher, allowedHosts: hosts })).projectIds).toEqual([]);
+	});
+
+	it('holds the role allowlist as the project check does: a Vendor or an Artist is refused before any project is listed', async () => {
+		for (const answers of [
+			{ groups: onlyGroup('11', 'vendor', 'Vendor'), user: row(253, { id: 11, name: 'Vendor' }) },
+			{ groups: onlyGroup('10', 'artist', 'Artist'), user: row(253, { id: 10, name: 'Artist' }) }
+		]) {
+			const { fetcher, calls } = site({ projects: readable([show]), ...answers });
+			expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: person }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(403);
+			expect(calls.some((call) => call.url.includes('/entity/projects?'))).toBe(false);
+		}
+	});
+
+	it('calls no site that is not allowlisted, and refuses a missing or garbage credential before any call', async () => {
+		const { fetcher, calls } = site({ projects: readable([show]) });
+		expect((await refusal(verifyProductionSite({ siteUrl: 'https://evil.example.com', bearer: person }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(403);
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(401);
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: 'garbage' }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(401);
+		expect(calls).toHaveLength(0);
+	});
+
+	it('refuses a script key unless dev allows it, and then skips the role reads (027, 162)', async () => {
+		const { fetcher, calls } = site({ projects: readable([show]) });
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: script }, { fetch: fetcher, allowedHosts: hosts }))).status).toBe(403);
+		const principal = await verifyProductionSite({ siteUrl: SITE, bearer: script }, { fetch: fetcher, allowedHosts: hosts, allowScript: true });
+		expect(principal.role).toBe('script');
+		expect(calls.some((call) => call.url.includes('permission_groups'))).toBe(false);
+	});
+
+	it('refuses an expired bearer on the list (133), and answers 502 when the site fails part way', async () => {
+		const expiredSite = site({ projects: () => json(401, { errors: [{ id: 'u', status: 401, code: 102, title: 'Unauthorized', source: null, detail: 'Token Expired', meta: null }] }) });
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: person }, { fetch: expiredSite.fetcher, allowedHosts: hosts }))).status).toBe(401);
+		const failing = site({ projects: (page) => (page === 1 ? projectPage([show], 1) : json(500, null)) });
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: person }, { fetch: failing.fetcher, allowedHosts: hosts }))).status).toBe(502);
+	});
+
+	it('stops at its page cap rather than trusting an endless list', async () => {
+		const { fetcher, calls } = site({ projects: (page) => projectPage([{ id: page, name: `P${page}` }], page) });
+		expect((await refusal(verifyProductionSite({ siteUrl: SITE, bearer: person }, { fetch: fetcher, allowedHosts: hosts, maxProjectPages: 3 }))).status).toBe(502);
+		expect(calls.filter((call) => call.url.includes('/entity/projects?'))).toHaveLength(3);
 	});
 });

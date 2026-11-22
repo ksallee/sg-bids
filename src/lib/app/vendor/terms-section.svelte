@@ -5,9 +5,11 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
 	import X from '@lucide/svelte/icons/x';
-	import type { BidForm } from '$lib/pure/bid-form';
+	import { vendorControlId, type BidForm } from '$lib/pure/bid-form';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import FieldLabel from '$lib/app/field-label.svelte';
+	import RequiredLegend from '$lib/app/required-legend.svelte';
 
 	let { form = $bindable(), errors, readOnly, day }: { form: BidForm; errors: Readonly<Record<string, string>>; readOnly: boolean; day: (text: string) => string } = $props();
 
@@ -16,26 +18,27 @@
 </script>
 
 <div class="flex flex-col gap-6">
+	{#if !readOnly}<RequiredLegend />{/if}
 	<div class="grid max-w-2xl gap-4 sm:grid-cols-3">
-		<label class="flex flex-col gap-1">
-			<span class="text-xs font-medium">Your reference</span>
-			{#if readOnly}<span class="text-sm">{form.number || 'None'}</span>{:else}<Input bind:value={form.number} placeholder="Quote number" />{/if}
-		</label>
-		<label class="flex flex-col gap-1">
-			<span class="text-xs font-medium">Bid date</span>
-			{#if readOnly}<span class="text-sm">{form.date ? day(form.date) : 'None'}</span>{:else}<Input type="date" bind:value={form.date} aria-invalid={!!errors.date} />{/if}
+		<div class="flex flex-col gap-1.5">
+			<FieldLabel for={readOnly ? undefined : 'terms-number'}>Your reference</FieldLabel>
+			{#if readOnly}<span class="text-sm">{form.number || 'None'}</span>{:else}<Input id="terms-number" bind:value={form.number} placeholder="Quote number" />{/if}
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<FieldLabel for={readOnly ? undefined : vendorControlId('date')} required={!readOnly}>Date</FieldLabel>
+			{#if readOnly}<span class="text-sm">{form.date ? day(form.date) : 'None'}</span>{:else}<Input id={vendorControlId('date')} type="date" bind:value={form.date} aria-required="true" aria-invalid={!!errors.date} />{/if}
 			{#if errors.date}<p class="text-destructive text-xs">{errors.date}</p>{/if}
-		</label>
-		<label class="flex flex-col gap-1">
-			<span class="text-xs font-medium">Price holds until</span>
-			{#if readOnly}<span class="text-sm">{form.validUntil ? day(form.validUntil) : 'Not given'}</span>{:else}<Input type="date" bind:value={form.validUntil} aria-invalid={!!errors.validUntil} />{/if}
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<FieldLabel for={readOnly ? undefined : vendorControlId('validUntil')}>Price holds until</FieldLabel>
+			{#if readOnly}<span class="text-sm">{form.validUntil ? day(form.validUntil) : 'Not given'}</span>{:else}<Input id={vendorControlId('validUntil')} type="date" bind:value={form.validUntil} aria-invalid={!!errors.validUntil} />{/if}
 			{#if errors.validUntil}<p class="text-destructive text-xs">{errors.validUntil}</p>{/if}
-		</label>
+		</div>
 	</div>
 
 	<div class="flex flex-col gap-2">
 		<div class="flex flex-wrap items-baseline gap-x-2">
-			<p class="text-xs font-medium">Payment milestones</p>
+			<p class="text-sm">Payment milestones</p>
 			<p class="text-muted-foreground text-xs">A share of the total each, 100% in all.</p>
 		</div>
 		{#if form.milestones.length > 0}
@@ -52,12 +55,12 @@
 						<span></span>
 					{:else}
 						<div class="flex flex-col">
-							<Input bind:value={row.label} placeholder="On award" aria-label="Milestone" aria-invalid={!!errors[`milestone:${i}:label`]} />
+							<Input id={vendorControlId(`milestone:${i}:label`)} bind:value={row.label} placeholder="On award" aria-label="Milestone" aria-invalid={!!errors[`milestone:${i}:label`]} />
 							{#if errors[`milestone:${i}:label`]}<p class="text-destructive text-xs">{errors[`milestone:${i}:label`]}</p>{/if}
 						</div>
 						<div class="flex flex-col">
 							<div class="relative">
-								<Input bind:value={row.percent} inputmode="decimal" aria-label="Share" aria-invalid={!!errors[`milestone:${i}:percent`]} class="pr-6 text-right tabular-nums" />
+								<Input id={vendorControlId(`milestone:${i}:percent`)} bind:value={row.percent} inputmode="decimal" aria-label="Share" aria-invalid={!!errors[`milestone:${i}:percent`]} class="pr-6 text-right tabular-nums" />
 								<span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs">%</span>
 							</div>
 							{#if errors[`milestone:${i}:percent`]}<p class="text-destructive text-xs">{errors[`milestone:${i}:percent`]}</p>{/if}
@@ -77,15 +80,13 @@
 	</div>
 
 	<div class="grid gap-4 md:grid-cols-2">
-		<label class="flex flex-col gap-1">
-			<span class="text-xs font-medium">What the bid assumes</span>
-			<span class="text-muted-foreground text-xs">One per line.</span>
-			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.assumptions || 'Nothing written.'}</p>{:else}<textarea bind:value={form.assumptions} rows="4" class={area}></textarea>{/if}
-		</label>
-		<label class="flex flex-col gap-1">
-			<span class="text-xs font-medium">What the bid leaves out</span>
-			<span class="text-muted-foreground text-xs">One per line.</span>
-			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.exclusions || 'Nothing written.'}</p>{:else}<textarea bind:value={form.exclusions} rows="4" class={area}></textarea>{/if}
-		</label>
+		<div class="flex flex-col gap-1.5">
+			<FieldLabel for={readOnly ? undefined : 'terms-assumes'}>What your answer assumes</FieldLabel>
+			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.assumptions || 'Nothing written.'}</p>{:else}<textarea id="terms-assumes" bind:value={form.assumptions} rows="4" class={area} aria-describedby="terms-assumes-hint"></textarea><span id="terms-assumes-hint" class="text-muted-foreground text-xs">One per line.</span>{/if}
+		</div>
+		<div class="flex flex-col gap-1.5">
+			<FieldLabel for={readOnly ? undefined : 'terms-leaves'}>What your answer leaves out</FieldLabel>
+			{#if readOnly}<p class="text-sm whitespace-pre-wrap">{form.exclusions || 'Nothing written.'}</p>{:else}<textarea id="terms-leaves" bind:value={form.exclusions} rows="4" class={area} aria-describedby="terms-leaves-hint"></textarea><span id="terms-leaves-hint" class="text-muted-foreground text-xs">One per line.</span>{/if}
+		</div>
 	</div>
 </div>

@@ -39,10 +39,12 @@ describe('listOverview', () => {
 });
 
 describe('requestMeta', () => {
-	it('gives the status and issue stamp, to its own tenant only', async () => {
+	it('gives the status, the code and the issue stamp, to its own tenant only', async () => {
 		const { production, request } = await issuedWithTwoVendors();
 		const meta = await requests().requestMeta(production, request.id);
 		expect(meta.status).toBe('issued');
+		// The next round keeps the code: it is on the row, never in the stored header.
+		expect(meta.code).toBe('BR-1');
 		expect(meta.issuedAt).not.toBeNull();
 		expect((await refusal(() => requests().requestMeta(tenant(production.siteHost), request.id))).status).toBe(404);
 	});

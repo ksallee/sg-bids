@@ -5,7 +5,7 @@
  * Flow PT answered (`written`), the site's names, the options, and the choices made on the page.
  */
 
-import type { FptSite, Written } from './fpt-award';
+import type { CreatedType, FptSite, MissingOptions, Written } from './fpt-award';
 import type { AppStatus, ItemType } from './fpt-setup';
 import { parseId, type Parsed } from './wire';
 
@@ -15,7 +15,8 @@ const isObject = (value: unknown): value is Json => typeof value === 'object' &&
 const isId = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 const FIELD = /^[a-z][a-z0-9_]{0,99}$/;
 const SLOT = /^CustomEntity\d{2}$/;
-const KEY = /^sgbids\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/r\d{1,4}(\/(shot|asset):[^\s]{1,200})?$/;
+// A Bid's key: the vendor's bid, then a package (percent-encoded) or the general Bid, then a row for a Bid Line (`fpt-award.ts`).
+const KEY = /^sgbids\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/r\d{1,4}(\/(p:[A-Za-z0-9%._~!*'()-]{1,600}|general))?(\/(shot|asset):[^\s]{1,200})?$/;
 const STATUS: readonly AppStatus[] = ['draft', 'submitted', 'awarded', 'not_awarded'];
 
 /** Most rows one record may hold. Far above a real request. */
@@ -44,7 +45,17 @@ export function parseWritten(value: unknown): Written | null {
 	});
 	const attachments = value.attachments.map((a) => (isObject(a) && typeof a.key === 'string' && KEY.test(a.key) && isId(a.id) ? { key: a.key, id: a.id } : null));
 	if (groups.includes(null) || attachments.includes(null)) return null;
-	return { bids, lines, groups: groups as Written['groups'], attachments: attachments as Written['attachments'] };
+	const out: Written = { bids, lines, groups: groups as Written['groups'], attachments: attachments as Written['attachments'] };
+	if (value.items === undefined) return out;
+	if (!Array.isArray(value.items) || value.items.length > MAX_WRITTEN) return null;
+	const items = value.items.map((i) => {
+		if (!isObject(i) || !isId(i.id) || typeof i.key !== 'string') return null;
+		const kind = i.type === 'Shot' ? 'shot' : i.type === 'Asset' ? 'asset' : i.type === 'Sequence' ? 'sequence' : null;
+		if (!kind || !i.key.startsWith(`${kind}:`) || i.key.length > 220 || !/^[a-z]+:[^\n\r]{1,200}$/.test(i.key)) return null;
+		return { key: i.key, type: i.type as CreatedType, id: i.id };
+	});
+	if (items.includes(null)) return null;
+	return { ...out, items: items as Written['items'] };
 }
 
 export function parseSite(value: unknown, projectId: number): FptSite | null {
@@ -68,6 +79,24 @@ export function parseSite(value: unknown, projectId: number): FptSite | null {
 export interface AwardOptionsWire {
 	readonly allLines: boolean;
 	readonly groups: Readonly<Record<string, number | null>>;
+	readonly missing?: MissingOptions;
+}
+
+function parseMissing(value: unknown): MissingOptions | null | undefined {
+	if (value === undefined) return undefined;
+	if (!isObject(value)) return null;
+	const out: { shot?: 'create' | 'without'; asset?: 'create' | 'without'; sequences?: boolean } = {};
+	for (const kind of ['shot', 'asset'] as const) {
+		const choice = value[kind];
+		if (choice === undefined) continue;
+		if (choice !== 'create' && choice !== 'without') return null;
+		out[kind] = choice;
+	}
+	if (value.sequences !== undefined) {
+		if (typeof value.sequences !== 'boolean') return null;
+		out.sequences = value.sequences;
+	}
+	return out;
 }
 
 function parseOptions(value: unknown): AwardOptionsWire | null {
@@ -79,7 +108,9 @@ function parseOptions(value: unknown): AwardOptionsWire | null {
 		if (!parseId(vendorId) || (group !== null && !isId(group))) return null;
 		groups[vendorId] = group as number | null;
 	}
-	return { allLines: value.allLines, groups };
+	const missing = parseMissing(value.missing);
+	if (missing === null) return null;
+	return missing === undefined ? { allLines: value.allLines, groups } : { allLines: value.allLines, groups, missing };
 }
 
 export interface ExposureWire {

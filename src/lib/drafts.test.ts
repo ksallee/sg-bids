@@ -1,94 +1,66 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { keyValueCushion, serverDraftStore, type DraftApi, type KeyValue } from './drafts';
+import { serverDraftStore, type DraftApi, type EditedDraft } from './drafts';
 
 // The real API calls this app's server; these tests hand the store a fake one.
 vi.mock('$lib/api', () => ({ api: {} }));
-import { request, shot } from './pure/fixtures';
-import type { BidRequest } from './pure/model';
-
-function memory(): KeyValue & { data: Map<string, string> } {
-	const data = new Map<string, string>();
-	return {
-		data,
-		getItem: (key) => data.get(key) ?? null,
-		setItem: (key, value) => void data.set(key, value),
-		removeItem: (key) => void data.delete(key)
-	};
-}
+import { emptyHeaderForm } from './pure/header';
+import { shot } from './pure/fixtures';
+import { blankVendor } from './pure/vendor-rows';
 
 const UUID = '6f1c2a4e-0000-4000-8000-000000000000';
 
-function draft(id: string, extra: Partial<BidRequest['header']> = {}): BidRequest {
-	return request({
-		id,
-		header: { code: 'DS_R1', project: 'Demo', projectRef: { type: 'Project', id: 85 }, round: 1, baseCurrency: 'USD', assumptions: [], ...extra },
-		shots: [shot('shot-1')]
-	});
-}
-
-function fakeApi() {
-	const calls: { projectId: number; body: unknown }[] = [];
-	const remote: DraftApi = {
-		save: async (projectId, body) => {
-			calls.push({ projectId, body });
-			return { request: { ...draft(UUID) } };
-		},
-		get: async () => ({ request: draft(UUID), status: 'draft', issuedAt: null, invitations: [], award: null })
+function edited(extra: Partial<EditedDraft> = {}): EditedDraft {
+	return {
+		id: UUID,
+		project: { id: 85, name: 'Demo' },
+		form: { ...emptyHeaderForm(), code: 'ROOF-01', title: 'Rooftop', dueDate: '2026-02-30' },
+		bids: [
+			{ key: 'bid:a', name: 'Bid 1' },
+			{ key: 'bid:b', name: 'Hero' }
+		],
+		rows: { shots: [{ ...shot('shot-1', { thumbnail: 'https://x' }), package: 'bid:b' }], assets: [] },
+		vendors: [blankVendor('v0'), { ...blankVendor('v1'), name: 'Studio A', email: 'a@a.com', bids: ['bid:b'] }],
+		...extra
 	};
-	return { remote, calls };
 }
 
 describe('serverDraftStore', () => {
-	it('creates a draft the server has not seen, in the project the header names', async () => {
-		const { remote, calls } = fakeApi();
-		const stored = await serverDraftStore(remote).saveDraft(draft('local-abc'));
-		expect(stored.id).toBe(UUID);
-		expect(calls[0].projectId).toBe(85);
-		expect(calls[0].body).toMatchObject({ id: null, code: 'DS_R1' });
-	});
-
-	it('updates a stored draft by its id', async () => {
-		const { remote, calls } = fakeApi();
-		await serverDraftStore(remote).saveDraft(draft(UUID));
-		expect(calls[0].body).toMatchObject({ id: UUID });
-	});
-
-	it('refuses a draft with no project or no code, before any call', async () => {
-		const { remote, calls } = fakeApi();
-		const store = serverDraftStore(remote);
-		await expect(store.saveDraft(draft('local-1', { projectRef: undefined }))).rejects.toThrow('Pick a project to save the draft.');
-		await expect(store.saveDraft(draft('local-1', { code: ' ' }))).rejects.toThrow('Give the request a code to save it.');
-		expect(calls).toEqual([]);
-	});
-});
-
-describe('keyValueCushion', () => {
-	it('keeps a draft and reads the same one back', async () => {
-		const cushion = keyValueCushion(memory());
-		const kept = draft('local-1');
-		await cushion.keep(kept);
-		expect(await cushion.read()).toEqual(kept);
-		await cushion.clear();
-		expect(await cushion.read()).toBeNull();
-	});
-
-	it('reads garbage as no draft', async () => {
-		const storage = memory();
-		storage.data.set('sg-bids:draft', '{"nope":1}');
-		expect(await keyValueCushion(storage).read()).toBeNull();
-		storage.data.set('sg-bids:draft', 'not json');
-		expect(await keyValueCushion(storage).read()).toBeNull();
-	});
-
-	it('never throws when storage is blocked or missing', async () => {
-		const boom = () => {
-			throw new Error('blocked');
+	function fake() {
+		const calls: { projectId: number; body: unknown }[] = [];
+		const remote: DraftApi = {
+			saveDraft: async (projectId, body) => {
+				calls.push({ projectId, body });
+				return { ok: true };
+			},
+			get: async () => {
+				throw new Error('not here');
+			}
 		};
-		for (const cushion of [keyValueCushion({ getItem: boom, setItem: boom, removeItem: boom }), keyValueCushion(null)]) {
-			await expect(cushion.keep(draft('local-1'))).resolves.toBeUndefined();
-			await expect(cushion.read()).resolves.toBeNull();
-			await expect(cushion.clear()).resolves.toBeUndefined();
-		}
+		return { remote, calls };
+	}
+
+	it('saves the page in one call: the details as they read, each bid with its rows, the vendors typed in', async () => {
+		const { remote, calls } = fake();
+		await serverDraftStore(remote).save(edited());
+		expect(calls).toHaveLength(1);
+		expect(calls[0].projectId).toBe(85);
+		const body = calls[0].body as { id: string; header: Record<string, unknown>; bids: unknown[]; vendors: unknown[] };
+		expect(body.id).toBe(UUID);
+		expect(body.header.title).toBe('Rooftop');
+		expect('dueDate' in body.header).toBe(false);
+		expect(body.bids).toEqual([
+			{ key: 'bid:a', name: 'Bid 1', items: { shots: [], assets: [] } },
+			{ key: 'bid:b', name: 'Hero', items: { shots: [shot('shot-1')], assets: [] } }
+		]);
+		expect(body.vendors).toEqual([{ id: 'v1', name: 'Studio A', email: 'a@a.com', group: null, bids: ['bid:b'] }]);
+	});
+
+	it('refuses two bids of one name, before any call', async () => {
+		const { remote, calls } = fake();
+		await expect(serverDraftStore(remote).save(edited({ bids: [{ key: 'bid:a', name: 'Hero' }, { key: 'bid:b', name: 'hero' }] }))).rejects.toThrow(
+			'Two bids are named Hero. Give each its own name.'
+		);
+		expect(calls).toEqual([]);
 	});
 });

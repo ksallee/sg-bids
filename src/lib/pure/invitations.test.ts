@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { invitationState, requestCounts, stateLabel, validateVendor, vendorLink, type BidFacts, type InvitationFacts } from './invitations';
+import { VENDOR_REQUIRED, invitationState, requestCounts, stateLabel, validateVendor, vendorLink, type BidFacts, type InvitationFacts } from './invitations';
 
 const NOW = new Date('2026-11-20T12:00:00Z');
 
@@ -30,6 +30,10 @@ describe('invitationState', () => {
 		expect(invitationState(inv(), bids, NOW)).toEqual({ kind: 'withdrawn', version: 1, at: '2026-11-23T09:00:00Z' });
 	});
 
+	it('is pending while the vendor waits for the issue to get its link', () => {
+		expect(invitationState(inv({ link_pending: true }), [], NOW)).toEqual({ kind: 'pending' });
+	});
+
 	it('is revoked or expired before anything else', () => {
 		expect(invitationState(inv({ revoked_at: '2026-11-20T11:00:00Z' }), [bid()], NOW)).toEqual({ kind: 'revoked', at: '2026-11-20T11:00:00Z' });
 		expect(invitationState(inv({ expires_at: '2026-11-20T11:59:59Z' }), [bid()], NOW)).toEqual({ kind: 'expired', at: '2026-11-20T11:59:59Z' });
@@ -38,6 +42,7 @@ describe('invitationState', () => {
 
 describe('stateLabel', () => {
 	it('says each state in plain words', () => {
+		expect(stateLabel({ kind: 'pending' })).toBe('Link made at the issue');
 		expect(stateLabel({ kind: 'not_opened' })).toBe('Not opened');
 		expect(stateLabel({ kind: 'opened', at: 'x' })).toBe('Opened');
 		expect(stateLabel({ kind: 'submitted', version: 2, at: 'x' })).toBe('Submitted, version 2');
@@ -59,10 +64,15 @@ describe('requestCounts', () => {
 });
 
 describe('validateVendor', () => {
-	it('needs a name and an email the database takes', () => {
-		expect(validateVendor({ name: ' ', email: 'x' })).toEqual({ name: 'Name the vendor.', email: 'Write an email address.' });
+	it('needs a name and an email the database takes, each message naming its field', () => {
+		expect(validateVendor({ name: ' ', email: '' })).toEqual({ name: 'Name the vendor.', email: 'Write the contact email.' });
 		expect(validateVendor({ name: 'Vendor A', email: 'bids@vendor-a.test' })).toEqual({});
-		expect(validateVendor({ name: 'A', email: 'a b@c.d' }).email).toBe('Write an email address.');
+		expect(validateVendor({ name: 'A', email: 'a b@c.d' }).email).toBe('The contact email is not an address. Write it as name@studio.com.');
+		expect(validateVendor({ name: 'A', email: 'x' }).email).toBe('The contact email is not an address. Write it as name@studio.com.');
+	});
+
+	it('lists the vendor form’s required fields', () => {
+		expect(VENDOR_REQUIRED).toEqual(['name', 'email']);
 	});
 });
 
