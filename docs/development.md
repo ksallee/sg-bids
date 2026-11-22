@@ -415,7 +415,8 @@ row's Bid Line with its amount and count, the Groups),
 undoes from the request page and reads Flow PT back again, then duplicates the request without its
 rows. It checks round 1 has no Omit, starts round 2, omits a row there with a double click on its
 Omit cell, issues it, answers as Vendor A (the cut row takes no price) and reads the comparison's
-mark on the row. Then it deletes what the drive made in Flow PT and in the database, also on a failure part way.
+mark on the row. The list stage then counts round 2 without its cut row among the drive's three
+requests, duplicates and deletes all six. Then it deletes what the drive made in Flow PT and in the database, also on a failure part way.
 It starts its own app on a free port it picks, and never uses an app it did not start, so two
 worktrees never share one. Screenshots go to `shots/e2e-live/` (gitignored); `E2E_SCREENS=1` also
 shoots the main screens at 1280, 1440, 1920 (light and dark) and 2560 into `shots/one-page/`, or
