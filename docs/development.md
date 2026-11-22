@@ -413,8 +413,8 @@ overrides one row and declines Creature; B prices Creature as one figure in GBP)
 chooses a scenario, publishes, reads Flow PT back (the Bids, the Bid Lines, their sums, the counted
 row's Bid Line with its amount and count, the Groups),
 undoes from the request page and reads Flow PT back again, then duplicates the request without its
-rows. It checks round 1 has no Omit, starts round 2, omits a row there with a double click on its
-Omit cell, issues it, answers as Vendor A (the cut row takes no price) and reads the comparison's
+rows. It checks round 1 has no Omit, starts round 2, omits a row there with one click on its Omit
+box beside the code (a second click includes it, no row selected), issues it, answers as Vendor A (the cut row takes no price) and reads the comparison's
 mark on the row. The list stage then counts round 2 without its cut row among the drive's three
 requests, duplicates and deletes all six. Then it deletes what the drive made in Flow PT and in the database, also on a failure part way.
 It starts its own app on a free port it picks, and never uses an app it did not start, so two

@@ -39,7 +39,8 @@
 //      the request page and reads it again;
 //   8. duplicates the request from the list, without its rows, and checks the copy;
 //   8b. round 1 had no Omit column and no Omit on the selection; starts round 2 from the issued
-//      request, omits one Seq A row with a double click on its Omit cell, issues it, answers as
+//      request, flips one Seq A row's Omit box beside the code with one click (on, off, on, no row
+//      selected, no editor), issues it, answers as
 //      Vendor A (the cut row takes no price), and reads the comparison's cut mark on the row;
 //   9. on the list: opens the request from its row's link; reads back its Bids, Shots and Assets
 //      (both bids by name, the totals by unit, the counted row as 120), the copy's, and round 2's
@@ -241,15 +242,15 @@ async function renameBid(from, to) {
 }
 
 /** A breakdown row's stored frames, note and Omit, from the database. */
-async function storedItem(code) {
-	const [item] = await sql`select fields->>'frames' as frames, fields->>'notes' as notes, omitted from public.production_bid_items where request_id = ${state.requestId} and code = ${code}`;
+async function storedItem(code, requestId = state.requestId) {
+	const [item] = await sql`select fields->>'frames' as frames, fields->>'notes' as notes, omitted from public.production_bid_items where request_id = ${requestId} and code = ${code}`;
 	return item;
 }
 
 /**
  * One click edits a cell, at 1920: a number is a bare field, its value selected, no steppers; a text
- * cell its field. The edit offers Undo. One click on a checkbox flips it. No row gets selected. Each
- * value is read back from the database.
+ * cell its field. The edit offers Undo. No row gets selected. Each value is read back from the
+ * database. A round 1 draft has no Omit: its one-click box is driven on round 2 (`nextRound`).
  */
 async function cellEdits(table) {
 	const was = page.viewportSize();
@@ -293,23 +294,6 @@ async function cellEdits(table) {
 	const noted = await storedItem('zzsgbids_SQ910');
 	expect(notesFocused && noted?.notes === 'Roof only' && (await selected()) === 0, `one click on zzsgbids_SQ910's Note to vendors opened its field, focused; typed and Enter stored "${noted?.notes}"; no row selected`);
 
-	// Omit: one click flips it on, another off.
-	const omit = row('zzsgbids_SQ910').locator('td[data-column=c_omitted]');
-	const box = omit.getByRole('checkbox');
-	await omit.click();
-	await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
-	await saved();
-	const omitted = await storedItem('zzsgbids_SQ910');
-	const omitEditor = await omit.locator('[data-slot=entity-table-editor]').count();
-	const selectedOn = await selected();
-	await omit.click();
-	await box.and(page.locator('[data-state=unchecked]')).waitFor({ timeout: 10_000 });
-	await saved();
-	const included = await storedItem('zzsgbids_SQ910');
-	expect(
-		omitted?.omitted === true && included?.omitted === false && omitEditor === 0 && selectedOn === 0 && (await selected()) === 0,
-		`one click on zzsgbids_SQ910's Omit box stored omitted ${omitted?.omitted} with no editor and no row selected; a second click stored ${included?.omitted}`
-	);
 	await page.setViewportSize(was);
 }
 
@@ -810,24 +794,37 @@ const stages = {
 		state.round2Id = new URL(page.url()).pathname.split('/').pop();
 		await page.locator('[data-slot=items-panel]').waitFor({ timeout: 60_000 });
 		await page.waitForTimeout(1500);
-		// Round 2 keeps Omit. A double click opens the cell's editor, and a press on its control writes it.
+		// Round 2 keeps Omit, a box beside the code: one click flips it on, another off, with no editor
+		// and no row selected. A third leaves the row cut for the rest of the round.
 		const cut = state.seqShots[0].code;
-		const cell = page.locator('[data-slot=request-table] tr[data-row-key]', { hasText: cut }).locator('td[data-column=c_omitted]');
-		// The switch in the cell is disabled, and Chrome drops pointer events on a disabled control, so a
-		// double click on the switch itself opens nothing: the double click goes beside it.
-		const box = await cell.boundingBox();
-		await cell.dblclick({ position: { x: box.width - 8, y: box.height / 2 } });
-		await cell.locator('[data-slot=entity-table-editor] button').first().click();
-		await saved();
+		const selected = () => page.locator('[data-slot=bulk-bar]').count();
+		const omit = page.locator('[data-slot=request-table] tr[data-row-key]', { hasText: cut }).locator('td[data-column=c_omitted]');
+		const box = omit.getByRole('checkbox');
 		const [row2] = await sql`select round from public.bid_requests where id = ${state.round2Id}`;
-		const [item] = await sql`select omitted from public.production_bid_items where request_id = ${state.round2Id} and code = ${cut}`;
+		const placed = await page.locator('[data-slot=request-table] thead th').evaluateAll((ths) => ths.map((th) => th.textContent?.trim() ?? ''));
+		await omit.click();
+		await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const omitted = await storedItem(cut, state.round2Id);
+		const omitEditor = await omit.locator('[data-slot=entity-table-editor]').count();
+		const selectedOn = await selected();
+		await omit.click();
+		await box.and(page.locator('[data-state=unchecked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const included = await storedItem(cut, state.round2Id);
+		const selectedOff = await selected();
+		await omit.click();
+		await box.and(page.locator('[data-state=checked]')).waitFor({ timeout: 10_000 });
+		await saved();
+		const cutAgain = await storedItem(cut, state.round2Id);
 		await page.setViewportSize({ width: 1920, height: 1080 });
-		// The editor scrolled the table to the Omit column: back to the codes for the shot.
-		await page.evaluate(() => document.querySelectorAll('[data-slot=request-table] *').forEach((el) => el.scrollLeft > 0 && (el.scrollLeft = 0)));
 		await page.waitForTimeout(600);
 		await shoot(page, 'round2-omitted-1920');
 		await page.setViewportSize({ width: 1440, height: 900 });
-		expect(Number(row2?.round) === 2 && item?.omitted === true, `round ${row2?.round} started from the issued request; a double click on ${cut}'s Omit cell and a press omitted it, saved in the draft (omitted ${item?.omitted})`);
+		expect(
+			Number(row2?.round) === 2 && placed.indexOf('Omit') === placed.findIndex((t) => t.startsWith('Shot')) + 1 && omitted?.omitted === true && included?.omitted === false && cutAgain?.omitted === true && omitEditor === 0 && selectedOn === 0 && selectedOff === 0 && (await selected()) === 0,
+			`round ${row2?.round} started from the issued request, Omit beside the code; one click on ${cut}'s Omit box stored omitted ${omitted?.omitted} with no editor and no row selected, a second stored ${included?.omitted}, a third ${cutAgain?.omitted}`
+		);
 		// Issued, Vendor A answers: the cut row takes no price.
 		await page.locator('[data-slot=issue]').click();
 		await page.locator('[data-slot=issue-confirm] [data-slot=issue-now]').click();

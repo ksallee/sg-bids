@@ -52,7 +52,7 @@
 	import type { ItemKind } from '$lib/pure/field-map';
 	import { cellTarget, columnByKey, descriptionAdvice, omitActions, type ColumnKey, type RequestColumn } from '$lib/pure/live-columns';
 	import { itemValue, type CellChange, type Change, type Refusal } from '$lib/pure/row-edit';
-	import { bulkConfirm, editLine, splitTargets, undoLine } from '$lib/pure/edit-words';
+	import { bulkConfirm, editLine, movedLine, removedLine, splitTargets, undoLine } from '$lib/pure/edit-words';
 	import { bySource, hasBothSources, rowSource, type RowSource, type SourceFilter } from '$lib/pure/row-source';
 	import Segmented from '$lib/app/segmented.svelte';
 	import { countOf, framesOf, isCounted, unitsLine } from '$lib/pure/count';
@@ -291,7 +291,7 @@
 		failed = null;
 		toast = {
 			id: ++toastId,
-			line: removed.length === 1 ? `${builder.codeOf(kind, removed[0].item.id) || removed[0].item.id} is out of the request.` : `${removed.length} rows are out of the request.`,
+			line: removedLine(removed.map((r) => builder.codeOf(kind, r.item.id))),
 			undo: async () => {
 				builder.restore(kind, removed);
 				return removed.length === 1 ? 'It is back in its bid.' : 'They are back in their bids.';
@@ -311,7 +311,7 @@
 		const name = builder.bidName(bid);
 		toast = {
 			id: ++toastId,
-			line: moved.length === 1 ? `${builder.codeOf(kind, moved[0].target.id)} is in ${name} now.` : `${moved.length} rows are in ${name} now.`,
+			line: movedLine(moved.map((m) => builder.codeOf(kind, m.target.id)), name),
 			undo: async () => {
 				for (const m of moved) if (m.from) builder.moveRows([m.target], m.from);
 				return moved.length === 1 ? 'It is back in its bid.' : 'They are back in their bids.';
